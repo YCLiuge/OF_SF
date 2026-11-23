@@ -14,6 +14,7 @@ from uuid import uuid4
 from local_game_service import LocalGameService, pb, MsgId
 from local_identity import LocalIdentity
 from private_profiles import create_profile_server
+from private_gift_service import TTL
 from test_game_realm import login, join, next_msg
 from test_private_profiles import request
 from utils import db
@@ -52,7 +53,11 @@ def run(root, resources):
                     join(first);join(second)
                     with ThreadPoolExecutor(max_workers=2) as pool:
                         calls=list(pool.map(lambda _:post("claim-gift",form(account["gift_ticket"])),range(2)))
-                    assert calls[0]==calls[1] and calls[0][0]==200 and calls[0][1]["claimed"],calls
+                    for code, receipt in calls:
+                        assert code == 200 and receipt["ok"] and receipt["claimed"]
+                        assert 0 < receipt["gift_expires_in"] <= TTL
+                    # The expiry counts down between replies, even when the grant is identical.
+                    assert calls[0][1]["gift_ticket"] == calls[1][1]["gift_ticket"]
                     received=next_msg(first,MsgId.PaySendGoodsNotice,pb.PaySendGoodsNotice)
                     assert received.shop_id==offer["shop"]
                     inventory=next_msg(first,MsgId.PackNotice,pb.PackNotice)
