@@ -1,4 +1,4 @@
-"""National PC furniture and handicraft recipes, proficiency and personal collection."""
+"""National PC furniture, handicraft and sewing recipes, proficiency and personal collection."""
 from collections import Counter
 from datetime import timedelta
 import random
@@ -10,7 +10,7 @@ from utils.pb_create import make_item
 from private_dungeons import _table
 from private_shop import balance, fixed_gift, in_window, now
 
-GROUP = {pb.LIFE_TYPE_Making: "Make", pb.LIFE_TYPE_Handicraft: "Handicraft"}
+GROUP = {pb.LIFE_TYPE_Making: "Make", pb.LIFE_TYPE_Handicraft: "Handicraft", pb.LIFE_TYPE_Sewing: "Spin"}
 MAX_COUNT = 0xffffffff
 
 
@@ -132,8 +132,12 @@ def note_success(session, kind, recipe, life):
     for aid in sorted(aids):
         condition = conditions.get(aid, {})
         event = condition.get("new_achieve_condition")
-        if event in (55, 56):
+        if event in (55, 56, 57):
             matches = output in condition.get("param", ())
+        elif event == 48:
+            matches = kind == pb.LIFE_TYPE_Sewing
+        elif event == 51:
+            matches = kind == pb.LIFE_TYPE_Sewing and _table("Item","item")[output]["new_bag_item_tag"] == pb.EBagItemTag_Material
         elif event == 47:
             matches = kind == pb.LIFE_TYPE_Making
         elif event == 46:
@@ -191,18 +195,21 @@ def craft(session, kind, recipe_id, rsp):
     if changes is None:
         return status
     output = recipe["get_item_i_d"]
-    product = changes.get(output) or stack(player, output)
-    if not product or product.main_item.base_item.num >= MAX_COUNT:
+    product = changes.get(output) or balance(player, output) or make_item(output, 0, player)
+    item_type = product.main_item.WhichOneof("item") if product else None
+    if item_type not in ("base_item", "outfit") or (item_type=="base_item" and product.main_item.base_item.num >= MAX_COUNT):
         return pb.StatusCode_BAD_REQ
     result = rsp.life_common_result
     result.life_type = kind
     result.is_success = random.random() < recipe["successful_probability"]
     if result.is_success:
-        product.main_item.base_item.num += 1
+        if item_type=="base_item":
+            product.main_item.base_item.num += 1
         changes[output] = product
         delta = result.result_items.add()
         delta.CopyFrom(product)
-        delta.main_item.base_item.num = 1
+        if item_type=="base_item":
+            delta.main_item.base_item.num = 1
         note_success(session, kind, recipe, life)
     save_pack(session, changes)
     return pb.StatusCode_OK

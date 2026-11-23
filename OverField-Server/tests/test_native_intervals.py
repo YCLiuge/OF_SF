@@ -90,6 +90,12 @@ def run(root,resources):
                 assert inventory(friend,10)==before-10
                 assert [m.player_id for m in call(a,"SelfIntervalInit").interval.member]==[owner,friend]
                 assert call(b,"FriendIntervalInit").join_infos[0].create_time==int(token)
+                # Full-price acceleration must fail while one minute can still be bought.
+                from utils import db
+                with game.lock,db.conn:
+                    stars=pb.ItemDetail.FromString(db.get_item_detail(owner,102))
+                    stars.main_item.base_item.num=200
+                    db.set_item_detail(owner,stars.SerializeToString(),102)
                 premium=inventory(owner,102)
                 assert call(a,"IntervalQuick").status==pb.StatusCode_ITEM_NOT_ENOUGH
                 assert inventory(owner,102)==premium

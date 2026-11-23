@@ -21,6 +21,9 @@ class RealmRules:
     public_furniture_scope:str="channel"
     world_min:int=1
     world_max:int=9999
+    mp_team_members:int=16
+    mp_team_name_length:int=20
+    mp_team_limit:int=0
 
     def validated(self):
         numbers=[value for k,value in asdict(self).items() if k!="public_furniture_scope"]
@@ -30,6 +33,8 @@ class RealmRules:
             raise ValueError("Public channels must be positive, nonempty and below the first private home UID")
         if not 1<=self.world_min<=self.world_max:
             raise ValueError("World chat must have a positive nonempty range")
+        if not 2<=self.mp_team_members<=16 or not 1<=self.mp_team_name_length<=20:
+            raise ValueError("Choose 2..16 multiplayer members and 1..20 team-name characters")
         if self.public_furniture_scope not in ("channel","realm"):
             raise ValueError("Public furniture quota scope must be channel or realm")
         return self

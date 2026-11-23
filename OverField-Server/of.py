@@ -95,6 +95,7 @@ def serve(state):
             scheme = "https" if tls else "http"
             default_origin = f"{scheme}://{cfg['game_host']}:{cfg['http_port']}"
             http.stages = game.stages
+            http.accounts.gifts.game = game
             http.native_accounts = game.native_accounts
             http.game_dispatch = GameDispatch(os.getenv("OF_DISPATCH_URL") or default_origin,
                                                cfg["game_host"], cfg["game_port"],
@@ -178,8 +179,9 @@ def self_test():
         if key.startswith(("OF_REMOTE_","OF_QUICKSDK_")):
             env.pop(key)
     for script in ("test_realm_admin.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py",
-                   "test_game_realm.py", "test_game_archive.py", "test_game_dungeon.py",
-                   "test_native_first_quest.py", "test_story_entry.py","test_private_channels.py","test_realm_maintenance.py","test_online_identity.py","test_remote_realm.py","test_remote_password.py","test_stage_diagnostics.py","test_observed_initialization.py","test_home_chairs.py","test_native_intervals.py","test_plaza_actions.py","test_uid_rules.py","test_realm_accounts.py","test_native_friends.py","test_native_chat.py","test_native_shop.py","test_native_crafts.py","test_story_starter.py","test_hud_queries.py","test_faye_dialog.py","test_season_catalog.py","test_profile_issuance.py","test_explore_dispatch.py"):
+                   "test_game_realm.py", "test_game_archive.py", "test_game_dungeon.py","test_dungeon_updates.py","test_native_appearance.py","test_native_activity_rewards.py",
+                   "test_native_first_quest.py", "test_story_entry.py","test_private_channels.py","test_realm_maintenance.py","test_online_identity.py","test_remote_realm.py","test_remote_password.py","test_stage_diagnostics.py","test_observed_initialization.py","test_home_chairs.py","test_native_intervals.py","test_plaza_actions.py","test_uid_rules.py","test_realm_accounts.py","test_native_friends.py","test_native_chat.py","test_native_shop.py","test_native_crafts.py","test_native_gacha.py","test_native_inventory.py","test_native_mp_teams.py","test_native_equipment.py",
+                   "test_private_entitlements.py","test_private_gift_api.py","test_private_gift_shop.py","test_story_starter.py","test_hud_queries.py","test_faye_dialog.py","test_season_catalog.py","test_profile_issuance.py","test_explore_dispatch.py"):
         extras = [] if script in ("test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py") else ["--resources", str(ROOT/"resources")]
         subprocess.run([sys.executable, "-B", str(tests/script), *extras], env=env, check=True)
 

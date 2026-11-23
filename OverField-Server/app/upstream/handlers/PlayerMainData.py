@@ -9,7 +9,6 @@ from proto.net_pb2 import (
     PackNotice,
     SceneDataNotice,
     ChatMsgRecordInitNotice,
-    ActivitySignInDataNotice,
     ChangeChatChannelRsp,
     BlessTreeNotice,
     QuestStatus,
@@ -17,7 +16,6 @@ from proto.net_pb2 import (
     PlayerBuff,
     UnSaveOutfitDyeScheme,
     PlayerQuestionnaireInfo,
-    PlayerAppearance,
     ItemDetail,
     ServerSceneSyncDataNotice,
     SceneActionType,
@@ -51,8 +49,6 @@ class Handler(PacketHandler):
         if unlocks != infos[1]:
             db.set_players_info(player_id, "unlock_functions", unlocks)
         rsp.unlock_functions.extend(unlocks)
-        from private_plaza import starter_instruments
-        starter_instruments(player_id)
         (
             rsp.player_name,
             _,
@@ -109,7 +105,8 @@ class Handler(PacketHandler):
         rsp.daily_task.tasks[3] = 521006
         rsp.daily_task.tasks[4] = 521007
         rsp.daily_task.exchange_times_left = 0
-        rsp.appearance.CopyFrom(PlayerAppearance())
+        from private_appearance import phone_case
+        rsp.phone_case=phone_case(player_id)
         rsp.sp_open_status = True
         rsp.sp_check_status = True
         session.send(MsgId.PlayerMainDataRsp, rsp, packet_id)  # 1005,1006
@@ -151,13 +148,11 @@ class Handler(PacketHandler):
                     MsgId.PackNotice, rsp, 0
                 )  # 按物品类型分组发送items物品数据
 
-        rsp = ActivitySignInDataNotice()
-        rsp.status = StatusCode.StatusCode_OK
-        for activity in res["Activity"]["activity"]["datas"]:
-            if activity.get("i_d", 0):
-                tmp = rsp.info.add()
-                tmp.activity_id = activity["i_d"]
-        session.send(MsgId.ActivitySignInDataNotice, rsp, 0)  # TODO
+        from private_inventory import slots, publish
+        publish(session, slots(player_id).values(), clear=True)
+
+        from private_activity_rewards import login as activity_sign_in
+        activity_sign_in(session)
 
         rsp = BlessTreeNotice()
         rsp.status = StatusCode.StatusCode_OK
@@ -171,6 +166,8 @@ class Handler(PacketHandler):
 
         from private_chat import login as init_chat
         init_chat(session,packet_id)
+        from private_entitlements import notify as notify_collections
+        notify_collections(session)
 
         rsp = PetWarehouseLimitNotice()
         rsp.status = StatusCode.StatusCode_OK
@@ -180,6 +177,8 @@ class Handler(PacketHandler):
         # 视为完成登录，同步场景玩家并广播加入事件
         if session.logged_in == False:
             session.logged_in = True
+            from private_mp_teams import on_login as mp_login
+            mp_login(session)
 
             notice = ServerSceneSyncDataNotice()
             notice.status = StatusCode.StatusCode_OK

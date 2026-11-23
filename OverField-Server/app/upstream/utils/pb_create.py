@@ -30,6 +30,12 @@ def make_ScenePlayer(session):
     player = session.scene_player
     player.player_id = session.player_id
     player.player_name = session.player_name
+    from private_appearance import phone_case
+    player.avatar_frame=db.get_players_info(session.player_id,"avatar_frame")[0]
+    player.phone_case=phone_case(session.player_id)
+    player.ClearField("team")
+    player.ClearField("food_buff_ids")
+    player.ClearField("global_buff_ids")
 
     player.food_buff_ids.extend([5013073])  # 食物buff ID
     player.global_buff_ids.extend([481, 491])  # 全局buff ID buff未实现
@@ -72,7 +78,7 @@ def make_SceneTeam(player_id, char_ids, team=None):
         chr.ParseFromString(db.get_characters(player_id, char_ids[0])[0])
         make_SceneCharacterOutfitPreset(
             player_id,
-            chr.outfit_presets[chr.in_use_outfit_preset_index],
+            active_outfit(chr),
             char1.outfit_preset,
         )
 
@@ -97,7 +103,7 @@ def make_SceneTeam(player_id, char_ids, team=None):
         chr.ParseFromString(db.get_characters(player_id, char_ids[1])[0])
         make_SceneCharacterOutfitPreset(
             player_id,
-            chr.outfit_presets[chr.in_use_outfit_preset_index],
+            active_outfit(chr),
             char2.outfit_preset,
         )
 
@@ -121,7 +127,7 @@ def make_SceneTeam(player_id, char_ids, team=None):
         chr.ParseFromString(db.get_characters(player_id, char_ids[2])[0])
         make_SceneCharacterOutfitPreset(
             player_id,
-            chr.outfit_presets[chr.in_use_outfit_preset_index],
+            active_outfit(chr),
             char3.outfit_preset,
         )
 
@@ -140,92 +146,38 @@ def make_SceneTeam(player_id, char_ids, team=None):
     return team
 
 
+def active_outfit(character):
+    if not character.outfit_presets:
+        return None
+    idx=character.in_use_outfit_preset_index
+    return character.outfit_presets[idx if idx<len(character.outfit_presets) else 0]
+
+
 def make_SceneCharacterOutfitPreset(player_id, outfit, sc=None):
-    if sc == None:
-        sc = SceneCharacterOutfitPreset()
-    item = ItemDetail()
-    if outfit.hat > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.hat))
-        sc.hat = outfit.hat
-        sc.hat_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.hat_dye_scheme_index]
-        )
-    if outfit.hair > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.hair))
-        sc.hair = outfit.hair
-        sc.hair_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.hair_dye_scheme_index]
-        )
-    if outfit.clothes > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.clothes))
-        sc.clothes = outfit.clothes
-        sc.cloth_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.clothes_dye_scheme_index]
-        )
-    if outfit.ornament > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.ornament))
-        sc.ornament = outfit.ornament
-        sc.orn_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.ornament_dye_scheme_index]
-        )
-
+    from private_appearance import WEAR_SLOTS
+    if sc is None:
+        sc=SceneCharacterOutfitPreset()
+    sc.Clear()
+    if outfit is None:
+        return sc
     sc.hide_info.CopyFrom(outfit.outfit_hide_info)
-
-    if outfit.pend_top > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_top))
-        sc.pend_top = outfit.pend_top
-        sc.pend_top_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_top_dye_scheme_index]
-        )
-    if outfit.pend_chest > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_chest))
-        sc.pend_chest = outfit.pend_chest
-        sc.pend_chest_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_chest_dye_scheme_index]
-        )
-    if outfit.pend_pelvis > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_pelvis))
-        sc.pend_pelvis = outfit.pend_pelvis
-        sc.pend_pelvis_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_pelvis_dye_scheme_index]
-        )
-    if outfit.pend_up_face > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_up_face))
-        sc.pend_up_face = outfit.pend_up_face
-        sc.pend_up_face_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_up_face_dye_scheme_index]
-        )
-    if outfit.pend_down_face > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_down_face))
-        sc.pend_down_face = outfit.pend_down_face
-        sc.pend_down_face_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_down_face_dye_scheme_index]
-        )
-    if outfit.pend_left_hand > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_left_hand))
-        sc.pend_left_hand = outfit.pend_left_hand
-        sc.pend_left_hand_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_left_hand_dye_scheme_index]
-        )
-    if outfit.pend_right_hand > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_right_hand))
-        sc.pend_right_hand = outfit.pend_right_hand
-        sc.pend_right_hand_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_right_hand_dye_scheme_index]
-        )
-    if outfit.pend_left_foot > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_left_foot))
-        sc.pend_left_foot = outfit.pend_left_foot
-        sc.pend_left_foot_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_left_foot_dye_scheme_index]
-        )
-    if outfit.pend_right_foot > 0:
-        item.ParseFromString(db.get_item_detail(player_id, outfit.pend_right_foot))
-        sc.pend_right_foot = outfit.pend_right_foot
-        sc.pend_right_foot_dye_scheme.CopyFrom(
-            item.main_item.outfit.dye_schemes[outfit.pend_right_foot_dye_scheme_index]
-        )
-
+    for slot in WEAR_SLOTS:
+        key=getattr(outfit,slot)
+        if not key:
+            continue
+        raw=db.get_item_detail(player_id,key)
+        if not raw:
+            continue
+        fashion=ItemDetail.FromString(raw).main_item.outfit
+        if fashion.outfit_id!=key:
+            continue
+        setattr(sc,slot,key)
+        index=getattr(outfit,slot+"_dye_scheme_index")
+        if index>=len(fashion.dye_schemes) or not fashion.dye_schemes[index].is_un_lock:
+            index=next((i for i,dye in enumerate(fashion.dye_schemes) if dye.is_un_lock),None)
+        if index is not None:
+            prefix={"clothes":"cloth","ornament":"orn"}.get(slot,slot)
+            getattr(sc,prefix+"_dye_scheme").CopyFrom(fashion.dye_schemes[index])
     return sc
 
 
@@ -560,9 +512,11 @@ def make_treasure_box_item(
     wp_num = random.randint(0, num)
     armor_num = num - wp_num
     items = []
-    wp_len = len(res["Weapon"]["weapon"]["datas"])
-    while wp_num > 0:
-        weapon_i = res["Weapon"]["weapon"]["datas"][random.randint(0, wp_len - 1)]
+    eligible = set(res["ReleasedEquipment"]["equipment_ids"])
+    weapons = [r for r in res["Weapon"]["weapon"]["datas"] if r.get("item_i_d") in eligible]
+    armors = [r for r in res["Armor"]["armor"]["datas"] if r.get("item_i_d") in eligible]
+    while wp_num > 0 and weapons:
+        weapon_i = random.choice(weapons)
         item_detail = ItemDetail()
         item_detail.pack_type = ItemDetail.PackType.PackType_TempStorageArea
         tmp = item_detail.main_item
@@ -601,9 +555,8 @@ def make_treasure_box_item(
                 items.append(item_detail)
                 wp_num -= 1
                 break
-    armor_len = len(res["Armor"]["armor"]["datas"])
-    while armor_num > 0:
-        armor_i = res["Armor"]["armor"]["datas"][random.randint(0, armor_len - 1)]
+    while armor_num > 0 and armors:
+        armor_i = random.choice(armors)
         item_detail = ItemDetail()
         tmp = item_detail.main_item
         tmp.item_id = armor_i["i_d"]
@@ -766,6 +719,8 @@ def make_PlayerBriefInfo(player_id, info=None):
         player_id,
         "player_id,player_name,level,head,last_login_time,sex,phone_background,sign,guild_name,team_leader_badge,character_id,create_time,player_id,garden_like_num,account_type,birthday,hide_value,avatar_frame",
     )
+    from private_appearance import phone_case
+    info.phone_case=phone_case(player_id)
     return info
 
 

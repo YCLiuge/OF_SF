@@ -7,6 +7,8 @@ from proto.net_pb2 import ItemUseReq, ItemUseRsp, ItemDetail, PackNotice, Status
 import utils.db as db
 from utils.res_loader import res
 from utils.pb_create import make_item
+from private_gifts import open_box
+from private_dungeons import _table
 
 
 @packet_handler(MsgId.ItemUseReq)
@@ -16,6 +18,21 @@ class Handler(PacketHandler):
         req.ParseFromString(data)
 
         rsp = ItemUseRsp()
+        if not req.num:
+            rsp.status=StatusCode.StatusCode_BAD_REQ
+            session.send(MsgId.ItemUseRsp,rsp,packet_id)
+            return
+        if req.item_id in _table("GiftBag","gift_bag"):
+            key=(packet_id,req.item_id,req.num,req.choose_item_id)
+            previous=getattr(session,"last_opened_gift",None)
+            if packet_id and previous and previous[0]==key:
+                rsp.ParseFromString(previous[1])
+            else:
+                rsp.status=open_box(session,req,rsp)
+                if packet_id and rsp.status==StatusCode.StatusCode_OK:
+                    session.last_opened_gift=(key,rsp.SerializeToString())
+            session.send(MsgId.ItemUseRsp,rsp,packet_id)
+            return
         rsp.status = StatusCode.StatusCode_OK
 
         item = db.get_item_detail(session.player_id, req.item_id)

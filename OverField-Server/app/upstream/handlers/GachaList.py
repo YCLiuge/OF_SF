@@ -1,7 +1,7 @@
 from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
 from proto import net_pb2 as pb
-from private_tutorial_recruit import list_pools
+from private_gacha import list_pools
 
 
 @packet_handler(MsgId.GachaListReq)

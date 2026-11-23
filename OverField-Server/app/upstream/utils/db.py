@@ -1393,22 +1393,22 @@ def add_character(player_id, character_id, c=None):
                 if o.hat:
                     item.main_item.item_id = o.hat
                     item.main_item.outfit.outfit_id = o.hat
-                    set_item_detail(player_id, item.SerializeToString(), o.hat)
+                    db.execute("INSERT OR IGNORE INTO items VALUES(?,?,?)",(player_id,o.hat,item.SerializeToString()))
                 o.hair = i.get("hair_i_d") or 0
                 if o.hair:
                     item.main_item.item_id = o.hair
                     item.main_item.outfit.outfit_id = o.hair
-                    set_item_detail(player_id, item.SerializeToString(), o.hair)
+                    db.execute("INSERT OR IGNORE INTO items VALUES(?,?,?)",(player_id,o.hair,item.SerializeToString()))
                 o.clothes = i.get("cloth_i_d") or 0
                 if o.clothes:
                     item.main_item.item_id = o.clothes
                     item.main_item.outfit.outfit_id = o.clothes
-                    set_item_detail(player_id, item.SerializeToString(), o.clothes)
+                    db.execute("INSERT OR IGNORE INTO items VALUES(?,?,?)",(player_id,o.clothes,item.SerializeToString()))
                 o.ornament = (i.get("orn_i_d") and i.get("orn_i_d")[0]) or 0
                 if o.ornament:
                     item.main_item.item_id = o.ornament
                     item.main_item.outfit.outfit_id = o.ornament
-                    set_item_detail(player_id, item.SerializeToString(), o.ornament)
+                    db.execute("INSERT OR IGNORE INTO items VALUES(?,?,?)",(player_id,o.ornament,item.SerializeToString()))
                 o.preset_index = iter
                 o.outfit_hide_info.CopyFrom(OutfitHideInfo())
 

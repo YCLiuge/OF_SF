@@ -1,35 +1,14 @@
-from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
-
-
-from proto.net_pb2 import GetArmorReq, GetArmorRsp, StatusCode, ItemDetail, EBagItemTag
-
-import utils.db as db
+from network.packet_handler import PacketHandler, packet_handler
+from proto import net_pb2 as pb
+from private_inventory import page
 
 
 @packet_handler(MsgId.GetArmorReq)
 class Handler(PacketHandler):
-    def handle(self, session, data: bytes, packet_id: int):
-        req = GetArmorReq()
-        req.ParseFromString(data)
+    def handle(self, session, data, packet_id):
+        req = pb.GetArmorReq.FromString(data)
+        rsp = pb.GetArmorRsp()
+        rsp.status = page(session, req, rsp, "armor")
+        session.send(MsgId.GetArmorRsp, rsp, packet_id)
 
-        rsp = GetArmorRsp()
-        rsp.status = StatusCode.StatusCode_OK
-
-        max_num = req.end_index - req.start_index
-        total_num = 0
-
-        for item in db.get_item_detail(session.player_id, table="items_s"):
-            tmp = ItemDetail()
-            tmp.ParseFromString(item)
-            if tmp.main_item.item_tag == EBagItemTag.EBagItemTag_Armor:
-                # if tmp.main_item.armor.armor_id >2331000:
-                if max_num == total_num:
-                    break
-                total_num += 1
-                rsp.armors.add().CopyFrom(tmp.main_item.armor)
-
-        rsp.total_num = total_num
-        rsp.end_index = req.start_index + total_num
-
-        session.send(MsgId.GetArmorRsp, rsp, packet_id)  # 获取防具列表 1403 1404

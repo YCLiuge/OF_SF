@@ -6,7 +6,7 @@
     <AssemblyName>OverField.Launcher</AssemblyName>
     <AssemblyTitle>开放空间私服启动器</AssemblyTitle>
     <Product>开放空间私服启动器</Product>
-    <Version>1.1.12.1</Version>
+    <Version>1.1.12.2</Version>
     <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     <RootNamespace>OverField.PrivateLauncher</RootNamespace>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -19,6 +19,6 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="PrivateLauncher.cs;PrivateService.cs;LauncherJson.cs" />
+    <Compile Include="PrivateLauncher.cs;PrivateService.cs;GiftWindow.cs;LauncherJson.cs" />
   </ItemGroup>
 </Project>

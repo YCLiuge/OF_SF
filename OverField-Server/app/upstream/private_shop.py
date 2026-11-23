@@ -143,6 +143,11 @@ def award(player,amounts,rsp,notice):
                 rsp.items.add().CopyFrom(instance)
                 notice.items.add().CopyFrom(instance)
         else:
+            if tag==pb.EBagItemTag_Fashion:
+                old=balance(player,item)
+                if old and old.main_item.WhichOneof("item")=="outfit":
+                    rsp.items.add().CopyFrom(old)
+                    continue
             delta=make_item(item,qty,player)
             if not delta or delta.main_item.WhichOneof("item") not in ("base_item","outfit"):
                 raise UnsupportedGoods

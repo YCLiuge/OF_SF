@@ -1,40 +1,14 @@
-from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
-
-
-from proto.net_pb2 import (
-    GetPosterReq,
-    GetPosterRsp,
-    StatusCode,
-    ItemDetail,
-    EBagItemTag,
-)
-
-import utils.db as db
+from network.packet_handler import PacketHandler, packet_handler
+from proto import net_pb2 as pb
+from private_inventory import page
 
 
 @packet_handler(MsgId.GetPosterReq)
 class Handler(PacketHandler):
-    def handle(self, session, data: bytes, packet_id: int):
-        req = GetPosterReq()
-        req.ParseFromString(data)
+    def handle(self, session, data, packet_id):
+        req = pb.GetPosterReq.FromString(data)
+        rsp = pb.GetPosterRsp()
+        rsp.status = page(session, req, rsp, "poster")
+        session.send(MsgId.GetPosterRsp, rsp, packet_id)
 
-        rsp = GetPosterRsp()
-        rsp.status = StatusCode.StatusCode_OK
-
-        max_num = req.end_index - req.start_index
-        total_num = 0
-
-        for item in db.get_item_detail(session.player_id, table="items_s"):
-            tmp = ItemDetail()
-            tmp.ParseFromString(item)
-            if tmp.main_item.item_tag == EBagItemTag.EBagItemTag_Poster:
-                if max_num == total_num:
-                    break
-                total_num += 1
-                rsp.posters.add().CopyFrom(tmp.main_item.poster)
-
-        rsp.total_num = total_num
-        rsp.end_index = req.start_index + total_num
-
-        session.send(MsgId.GetPosterRsp, rsp, packet_id)  # 获取映像列表 1405 1406

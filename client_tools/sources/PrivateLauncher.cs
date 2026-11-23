@@ -31,7 +31,7 @@ namespace OverField.PrivateLauncher {
         private readonly TextBox log = new TextBox();
         private readonly ProgressBar progress = new ProgressBar();
         private readonly ComboBox servers=new ComboBox();
-        private readonly Button accounts=new Button(),bulletins=new Button();
+        private readonly Button accounts=new Button(),bulletins=new Button(),gifts=new Button();
         private Dictionary<string,object> privateSession;
         private string sessionServer;
         private bool accountPreferred;
@@ -96,6 +96,13 @@ namespace OverField.PrivateLauncher {
             SetupButton(save,"保存地址",false);
             SetupButton(accounts,"私服账号",false);SetupButton(bulletins,"区服公告",false);
             actions.Controls.Add(play);actions.Controls.Add(save);actions.Controls.Add(accounts);actions.Controls.Add(bulletins);
+            SetupButton(gifts,"私服礼包",false);actions.Controls.Add(gifts);
+            gifts.Click+=delegate {
+                var current=SelectedKey()==sessionServer?privateSession:null;
+                using(var window=new GiftWindow(home,SelectedService(),current,owner=>{
+                    LoginAccount(owner);return SelectedKey()==sessionServer?privateSession:null;
+                }))window.ShowDialog(this);
+            };
             accounts.Click+=delegate{OpenAccount();};
             bulletins.Click+=delegate{using(var news=new MaintenanceWindow(home,SelectedService()))news.ShowDialog(this);};
             PutRow(grid,actions,8);
@@ -335,10 +342,12 @@ namespace OverField.PrivateLauncher {
             }
             LoginAccount();
         }
-        private void LoginAccount(){
+        private void LoginAccount(IWin32Window owner=null){
             using(var form=new PrivateAccountWindow(home,SelectedService(),profile.Text)){
-                if(form.ShowDialog(this)!=DialogResult.OK || form.Session==null)return;
+                if(form.ShowDialog(owner??this)!=DialogResult.OK || form.Session==null)return;
                 ForgetAccount();privateSession=form.Session;accountPreferred=true;sessionServer=SelectedKey();
+                if(Int32.TryParse(PrivateService.Text(privateSession,"gift_expires_in"),out int giftTime))
+                    privateSession["gift_until_ticks"]=DateTime.UtcNow.AddSeconds(Math.Clamp(giftTime,0,3600)).Ticks;
                 int seconds;Int32.TryParse(PrivateService.Text(privateSession,"expires_in"),out seconds);
                 sessionUntil=DateTime.UtcNow.AddSeconds(Math.Max(0,Math.Min(86400,seconds)));
                 var display=PrivateService.Text(privateSession,"nickname");accounts.Text="私服账号 ✓";if(String.IsNullOrEmpty(display))display="首次进入时起名";
@@ -349,7 +358,7 @@ namespace OverField.PrivateLauncher {
         private void SetBusy(bool active) {
             busy=active;
             source.ReadOnly=active;address.ReadOnly=active;
-            foreach (var control in new Button[]{browse,save,play,accounts,bulletins}) control.Enabled=!active;
+            foreach (var control in new Button[]{browse,save,play,accounts,bulletins,gifts}) control.Enabled=!active;
             servers.Enabled=!active;mode.Enabled=!active;remote.Enabled=!active && mode.SelectedIndex==2;
             progress.Visible=active;
             progress.MarqueeAnimationSpeed=active?35:0;

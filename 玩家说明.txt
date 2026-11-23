@@ -38,3 +38,5 @@ Linux x86-64 使用 OverField-OnlineServer-1.1.12-Linux-x86_64.tar.gz，在解�
 已适配的原版交互包括序章的一部分、调查派遣、间隙、角色动作、部分秘境、背包与商店交易、家园家具、好友及聊天。完整主线、限时活动、全部多人玩法仍在逐项验证。部分奖励数量和宝箱掉落沿用开放源代码私服的数据。游戏内出现问题时记下操作、所在频道和大致时间。服务端 State/realm/stage-failures.jsonl 记录失败回复的消息编号与状态码，State/realm/stage-events.jsonl 记录最近的处理阶段。
 
 脚本与 agent 可在本目录运行 of-launch.cmd schema、of-launch.cmd status。服主管理接口见 OverField-Server/docs/本机管理接口.md。
+
+私服账号的常驻/UP 招募、保底与历史自选由服主设置。每个账号的角色首次迁移时会获得 47 种代币各 1,000,000，并解锁可用家具、动作、表情和服饰，后续余额按正常玩法增减。选服后点「私服礼包」可直接把选中的虚拟礼包发给自己的角色。详见 OverField-Server/docs/私服礼包与仓库.md。

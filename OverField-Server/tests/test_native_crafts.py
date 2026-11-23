@@ -56,6 +56,15 @@ def run(root, resources):
         with a, b:
             ok = pb.StatusCode_OK
             assert not gallery(a, 3) and not gallery(a, 4)
+            sewing=pb.LIFE_TYPE_Sewing
+            assert not gallery(a,sewing)
+            # Seed only the exact fabric recipe. The two real accounts must keep separate wardrobes.
+            seed(owner,{5031001:6,11:2})
+            with patch("private_crafts.random.random", return_value=0.01):
+                sewn=request(a,"Sewing",304,sewing_id=5032001)
+                assert sewn.status==ok and sewn.life_common_result.result_items[0].main_item.item_id==5032001
+                assert request(a,"Sewing",304,sewing_id=5032001)==sewn
+            assert count(owner,5031001)==3 and gallery(a,sewing)=={5032001:1} and not gallery(b,sewing)
             assert call(a, "GetLifeInfo", life_type=0).status == pb.StatusCode_BAD_REQ
             assert call(a, "LifeLeveUp", life_type=3).status == pb.StatusCode_ProficiencyNotEnough
             assert request(a, "MakeProp", 90, make_id=0xffffffff).status == pb.StatusCode_CFG_NOT_FOUND

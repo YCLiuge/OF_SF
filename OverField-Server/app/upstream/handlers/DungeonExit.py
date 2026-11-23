@@ -45,13 +45,9 @@ class Handler(PacketHandler):
         rsp.CopyFrom(make_SceneDataNotice(session))
         session.send(MsgId.SceneDataNotice, rsp, 0)
 
-        # 回花园时将临时背包物品更新到仓库
         if session.scene_id == 9999:
-            rsp = PackNotice()
-            rsp.status = StatusCode.StatusCode_OK
-            rsp.is_clear_temp_pack = True
-            session.send(MsgId.PackNotice, rsp, 0)
-            session.temp_pack.clear()
+            from private_inventory import store
+            store(session)
 
         # 广播加入消息
         notice = ServerSceneSyncDataNotice()

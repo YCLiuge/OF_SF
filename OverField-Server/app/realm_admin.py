@@ -12,6 +12,7 @@ import migrate
 from local_identity import LocalIdentity
 from realm_maintenance import Maintenance
 import realm_rules
+import realm_gacha
 from state_lock import StateBusy, exclusive_state
 
 VERSION = "overfield.admin/v1"
@@ -30,7 +31,15 @@ def operation(mode, description, properties=None, required=(), minimum=0):
     return {"availability": mode, "description": description, "inputSchema": schema}
 
 
+BANNER = {"type": "object", "additionalProperties": False,
+          "required": ["id", "enabled", "pity", "weights"],
+          "properties": {"id": ID, "enabled": {"type": "boolean"}, "pity": ID,
+                         "weights": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}}}
 OPERATIONS = {
+    "gacha.catalog": operation("any", "List native banners, their featured characters and reward groups."),
+    "gacha.get": operation("any", "Return the active configuration and basis-point probabilities."),
+    "gacha.set": operation("any", "Replace this realm's banner configuration, effective on the next request.",
+                           {"pools": {"type": "array", "maxItems": 1000, "items": BANNER}}, ("pools",)),
     "realm.status": operation("any", "Read local lifecycle and persistent record counts."),
     "realm.stop": operation("running", "Request graceful shutdown of this server instance."),
     "rules.get": operation("any", "Read configured gameplay rules."),
@@ -123,18 +132,19 @@ def read_request(path):
 
 def validate(value, schema, name="input"):
     kind = schema["type"]
-    if type(value) is not {"object": dict, "string": str, "integer": int, "array": list}[kind]:
+    if type(value) is not {"object": dict, "string": str, "integer": int, "array": list, "boolean": bool}[kind]:
         raise ValueError(f"{name} must be a JSON {kind}")
     if kind == "object":
-        known = schema["properties"]
+        known = schema.get("properties", {})
+        extra = schema.get("additionalProperties", False)
         unknown = value.keys() - known.keys()
-        missing = set(schema["required"]) - value.keys()
-        if unknown or missing:
+        missing = set(schema.get("required", ())) - value.keys()
+        if (unknown and not extra) or missing:
             raise ValueError(f"Unknown: {sorted(unknown)}. Missing: {sorted(missing)}.")
-        if len(value) < schema["minProperties"]:
+        if len(value) < schema.get("minProperties", 0):
             raise ValueError("Supply at least one field to change")
         for key, field in value.items():
-            validate(field, known[key], key)
+            validate(field, known.get(key, extra), key)
     elif kind == "array":
         if len(value) > schema["maxItems"]:
             raise ValueError(f"Too many items in {name}")
@@ -148,6 +158,14 @@ def validate(value, schema, name="input"):
 
 
 def run(state, name, data, request_stop):
+    if name == "gacha.catalog":
+        return {"banners": realm_gacha.available()}
+    if name == "gacha.get":
+        if not (state / "identity.sqlite3").is_file():
+            return realm_gacha.defaults()
+        return realm_gacha.configure(state)
+    if name == "gacha.set":
+        return realm_gacha.configure(state, data)
     if name == "realm.status":
         return status(state)
     if name == "realm.stop":

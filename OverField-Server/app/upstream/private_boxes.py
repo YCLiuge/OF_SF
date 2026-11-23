@@ -66,7 +66,8 @@ def loot(session, box, dynamic):
         return [make_item(template,count,pid)]
     items = [make_item(101,10,pid)]
     world = max(1, db.get_players_info(pid, "world_level")[0])
-    equipment = [r["i_d"] for r in res["Item"]["item"]["datas"] if r.get("new_bag_item_tag") in (2,3)
+    eligible = set(res["ReleasedEquipment"]["equipment_ids"])
+    equipment = [r["i_d"] for r in res["Item"]["item"]["datas"] if r["i_d"] in eligible
                  and 0 < r.get("quality",0) <= world]
     for template in random.sample(equipment, min(len(equipment), random.randint(1,2))):
         instance = make_item(template,1,pid)
@@ -128,29 +129,12 @@ def pickup(session, req, rsp):
         del data.rewards[req.pick_index-1]
     else:
         return pb.StatusCode_BAD_REQ
-    notice = pb.PackNotice(status=pb.StatusCode_OK)
-    pid = session.player_id
-    for item in picks:
-        item.pack_type = pb.ItemDetail.PackType_Inventory
-        rsp.items.add().CopyFrom(item)
-        total = notice.items.add()
-        total.CopyFrom(item)
-        kind = item.main_item.WhichOneof("item")
-        if kind in ("armor","weapon"):
-            db.set_item_detail(pid,total.SerializeToString(),instance_id=getattr(item.main_item,kind).instance_id)
-        elif kind == "base_item":
-            prev = db.get_item_detail(pid,item.main_item.item_id)
-            if prev:
-                total.main_item.base_item.num += pb.ItemDetail.FromString(prev).main_item.base_item.num
-            db.set_item_detail(pid,total.SerializeToString(),item_id=item.main_item.item_id)
-        elif kind == "outfit":
-            db.set_item_detail(pid,total.SerializeToString(),item_id=item.main_item.item_id)
-        else:
-            raise ValueError("Unrecognized private chest item")
+    from private_inventory import receive
+    status = receive(session,picks,rsp.items)
+    if status != pb.StatusCode_OK:
+        return status
     db.conn.execute("UPDATE private_boxes SET data=?,claimed=? WHERE player_id=? AND zone=? AND dynamic=? AND idx=?",
                     (data.SerializeToString(),not data.rewards,*key))
-    if notice.items:
-        session.send(MsgId.PackNotice,notice,0)
     return pb.StatusCode_OK
 
 

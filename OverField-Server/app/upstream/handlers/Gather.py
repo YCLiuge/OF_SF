@@ -2,8 +2,8 @@ from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
 
 
-from proto.net_pb2 import GatherReq, GatherRsp, StatusCode, ItemDetail, PackNotice
-import utils.db as db
+from proto.net_pb2 import GatherReq, GatherRsp, StatusCode
+from private_inventory import receive
 from utils.res_loader import res
 from utils.pb_create import make_item
 
@@ -19,8 +19,6 @@ class Handler(PacketHandler):
         rsp.index = req.gather_item.index
         rsp.item_level = 1
 
-        rsp1 = PackNotice()
-        rsp1.status = StatusCode.StatusCode_OK
         for data in res.get("Gather", {}).get("gather", {}).get("datas", []):
             for info in data["gather_group_info"]:
                 if info["reward"] == req.gather_item.reward:
@@ -36,33 +34,16 @@ class Handler(PacketHandler):
                         res.get("Gather", {}).get("gather_reward", {}).get("datas", [])
                     ):
                         if gather_reward["i_d"] == info["reward"]:
-                            if req.gather_item.is_lucky:
-                                item_t = gather_reward["gather_reward_group_info"][1]
-                            else:
-                                item_t = gather_reward["gather_reward_group_info"][0]
-                            item = db.get_item_detail(
-                                session.player_id, item_t["item_i_d"]
-                            )
-                            tmp1 = ItemDetail()
-                            if not item:
-                                make_item(
-                                    item_t["item_i_d"], 0, session.player_id, tmp1
-                                )
-                            else:
-                                tmp1.ParseFromString(item)
-                            num_t = tmp1.main_item.base_item.num
-                            tmp1.main_item.base_item.num = item_t["count"]
-                            rsp.items.add().CopyFrom(tmp1)
-                            tmp1.main_item.base_item.num = num_t + item_t["count"]
-                            rsp1.items.add().CopyFrom(tmp1)
-                            db.set_item_detail(
-                                session.player_id,
-                                tmp1.SerializeToString(),
-                                item_t["item_i_d"],
-                                None,
-                            )
+                            options=gather_reward.get("gather_reward_group_info",[])
+                            index=int(req.gather_item.is_lucky)
+                            if index>=len(options):
+                                break
+                            item_t=options[index]
+                            item = make_item(item_t["item_i_d"],item_t["count"],session.player_id)
+                            rsp.status = receive(session,[item],rsp.items)
                             session.send(
                                 MsgId.GatherRsp, rsp, packet_id
                             )  # TODO 任务进度通知
-                            session.send(MsgId.PackNotice, rsp1, 0)
                             return
+        rsp.status = StatusCode.StatusCode_BAD_REQ
+        session.send(MsgId.GatherRsp,rsp,packet_id)

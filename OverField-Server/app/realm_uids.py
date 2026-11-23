@@ -57,6 +57,11 @@ def _translate(msg,outward):
             if vf.message_type:
                 for part in value.values():
                     _translate(part,outward)
+                if (name,k)==("MPTeamMembers","members"):
+                    moved = {convert(key):part.SerializeToString() for key,part in value.items()}
+                    value.clear()
+                    for key,data in moved.items():
+                        value[key].ParseFromString(data)
             elif k=="furniture_player_map":
                 for key in list(value):
                     value[key]=convert(value[key])
@@ -66,7 +71,7 @@ def _translate(msg,outward):
                     _translate(part,outward)
             else:
                 _translate(value,outward)
-        elif k in _PLAYER_FIELDS or (k=="owner_id" and name=="MPBeacon") or (k=="target_id" and name in ("MPTeamInviteReq","MPTeamKickMemberReq","MPTeamKickMemberRsp")):
+        elif k in _PLAYER_FIELDS or (name,k) in (("MPBeacon","owner_id"),("MPTeamMembers","leader"),("MPTeamInviteNotice","inviter")) or (k=="target_id" and name in ("MPTeamInviteReq","MPTeamKickMemberReq","MPTeamKickMemberRsp")):
             if field.type in (F.TYPE_UINT32,F.TYPE_UINT64,F.TYPE_INT64,F.TYPE_INT32):
                 if field.is_repeated:
                     for i,v in enumerate(value):

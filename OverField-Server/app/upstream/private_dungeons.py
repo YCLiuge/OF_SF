@@ -90,17 +90,48 @@ def tasks(pid, data):
         params = target.get("param", ())
         goal = target["count_param"]
         count = counted[(cond, *params[1:])] if params and params[0] == did else 0
-        result.append((aid, min(count, goal), goal))
+        result.append((aid, min(max(count, progress(pid, aid)), goal), goal))
     return result
 
 
-def track(pid, data):
+def progress(pid, achievement):
+    blob = db.get_achieve(pid, achievement)
+    return pb.Achieve.FromString(blob).count if blob else 0
+
+
+def report(session, counts):
+    notice = pb.AchieveNotice(status=pb.StatusCode_OK)
+    for achievement, count in counts:
+        if count <= progress(session.player_id, achievement):
+            continue
+        changed = notice.achieves.add(achieve_id=achievement, count=count)
+        db.set_achieve(session.player_id, achievement, changed.SerializeToString())
+    if notice.achieves:
+        session.send(MsgId.AchieveNotice, notice, 0)
+
+
+def track(session, data):
+    pid = session.player_id
     objectives = tasks(pid, data)
-    data.all_task_finished = data.all_task_finished or bool(objectives) and all(count == goal for _, count, goal in objectives)
+    report(session, ((aid, count) for aid, count, _ in objectives))
+    data.all_task_finished = bool(objectives) and all(count >= goal for _, count, goal in objectives)
     save(pid, data)
 
 
-def enter(session, req, rsp):
+def finish_achievements(session, did):
+    mission = config(did).get("new_mission_type")
+    generic = {5: 116, 12: 117}.get(mission)
+    counts = []
+    for row in _table("Achieve", "achieve").values():
+        kind, params = row.get("new_achieve_condition"), row.get("param", [])
+        matched = (kind in (6, 7, 32) and params == [did]) or (generic and kind == generic and not params)
+        if matched and row.get("count_param"):
+            aid = row["i_d"]
+            counts.append((aid, min(row["count_param"], progress(session.player_id, aid) + 1)))
+    report(session, counts)
+
+
+def enter(session, req, rsp, restart=False):
     pid, did = session.player_id, req.dungeon_id
     cfg = config(did)
     if cfg is None:
@@ -119,7 +150,7 @@ def enter(session, req, rsp):
     if not req.char1 or len(members) != len(set(members)) or any(not db.get_characters(pid, cid) for cid in members):
         return pb.StatusCode_BAD_REQ
     data = load(pid, did)
-    if not session.dungeon[0]:
+    if not session.dungeon[0] or restart:
         data.enter_times += 1
         data.last_enter_time = int(time.time())
         data.char1, data.char2, data.char3 = team
@@ -170,7 +201,8 @@ def finish(session, rsp):
     if record(pid,did,"finish",data.enter_times):
         data.finish_times += 1
         data.last_finish_time = int(time.time())
-        track(pid,data)
+        track(session,data)
+        finish_achievements(session, did)
     rsp.scene_id=session.scene_id
     rsp.dungeon_data.CopyFrom(data)
     return pb.StatusCode_OK
@@ -203,7 +235,7 @@ def monster(session, req, rsp):
     data=load(pid,did)
     if (not configured or unit in configured) and idx not in data.monsters:
         data.monsters.append(idx)
-    track(pid,data)
+    track(session,data)
     rsp.monster_index=idx
     return pb.StatusCode_OK
 
@@ -231,7 +263,7 @@ def coin(session, req, rsp):
                 return pb.StatusCode_BAD_REQ
         grant(session,{106:1},rsp.rewards)
         data.coins.append(idx)
-        track(pid,data)
+        track(session,data)
     return pb.StatusCode_OK
 
 
@@ -248,7 +280,7 @@ def open_box(session, req, rsp):
         data=load(pid,did)
         if box.get("new_treasure_box_reward_type")==4:
             data.is_open_secret_box=True
-        track(pid,data)
+        track(session,data)
     return pb.StatusCode_OK
 
 
@@ -308,7 +340,8 @@ def claim(session, req, rsp):
     data=load(pid,did)
     if data.task_finish_reward==pb.Reward:
         return pb.StatusCode_REPEAT_GET_REWARD
-    if not data.all_task_finished or not tasks(pid,data):
+    targets = tasks(pid, data)
+    if not targets or not all(count >= goal for _, count, goal in targets):
         return pb.StatusCode_DungeonCantReward
     items=reward_items(pid,cfg.get("reward_i_d"))
     special_tags = {pb.EBagItemTag_Weapon, pb.EBagItemTag_Armor, pb.EBagItemTag_Poster,

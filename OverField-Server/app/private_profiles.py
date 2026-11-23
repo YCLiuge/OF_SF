@@ -99,6 +99,15 @@ class ProfileHandler(BaseHTTPRequestHandler):
             return
         if public_get(self):
             return
+        if self.path == "/private/gifts":
+            if any(k in self.headers for k in ("Authorization","Cookie","Proxy-Authorization")):
+                self._reply(403,{"error":"public catalog does not take credentials"})
+                return
+            try:
+                self._reply(200,self.server.accounts.gifts.catalog())
+            except AccountError as exc:
+                self._reply(exc.status,{"error":exc.code})
+            return
         if self.path == "/local/v1/region":
             self._reply(200, self.server.region)
         elif self.path == "/healthz":
@@ -148,7 +157,7 @@ class ProfileHandler(BaseHTTPRequestHandler):
             if self.path in ACCOUNT_ROUTES:
                 result = self.server.accounts.request(self.path,body,self.client_address[0],self.server.server_address[0],
                                                       self.server.tls_context is not None,self.server.account_registration)
-                self._reply(200 if self.path.endswith(("/login","/launch")) else 201,result)
+                self._reply(200 if self.path.endswith(("/login","/launch","/claim-gift")) else 201,result)
                 return
             if self.path == "/local/v1/profiles":
                 if set(body) - {"nickname"} or ("nickname" in body and not isinstance(body["nickname"], str)):

@@ -24,7 +24,26 @@ from realm_maintenance import MAX_FEED, checked_feed
 
 PRIVATE_REALM="overfield-local-v1"
 OPERATIONS={"register":"/local/v1/accounts/register","login":"/local/v1/accounts/login",
-            "bind":"/local/v1/accounts/bind","maintenance":"/private/maintenance"}
+            "bind":"/local/v1/accounts/bind","maintenance":"/private/maintenance",
+            "gifts":"/private/gifts","claim-gift":"/local/v1/accounts/claim-gift"}
+
+
+def gift_token(value):
+    return isinstance(value,str) and re.fullmatch(r"ofg_[A-Za-z0-9_-]{43}",value,re.ASCII)
+
+
+def gift_receipt(doc):
+    token,ttl=doc.get("gift_ticket"),doc.get("gift_expires_in")
+    if not gift_token(token) or type(ttl) is not int or not 0<=ttl<=3600:
+        raise ValueError("私服礼包服务返回的数据格式不匹配。")
+    return {"gift_ticket":token,"gift_expires_in":ttl}
+
+
+def refusal(code,doc):
+    error=doc.get("code") or doc.get("error")
+    if not isinstance(error,str) or not re.fullmatch(r"[a-z0-9_]{1,60}",error):
+        error="private_server_refused"
+    return {"ok":False,"code":error,"status":code}
 
 
 def valid_local(host):
@@ -139,6 +158,26 @@ def handle(inp):
         status,server=request(config,"GET","/local/v1/region")
     if status!=200 or server.get("realm")!=PRIVATE_REALM:
         raise ValueError("所选地址未提供兼容的私服账号服务。")
+    if action=="gifts":
+        code,doc=request(config,"GET",OPERATIONS[action],max_bytes=524288)
+        if code!=200:return refusal(code,doc)
+        rows=doc.get("gifts")
+        if doc.get("ok") is not True or not isinstance(rows,list) or len(rows)>2400:
+            raise ValueError("私服礼包目录格式无效。")
+        for row in rows:
+            if (not isinstance(row,dict) or
+                any(type(row.get(k)) is not int or not 0<=row[k]<=0xffffffff for k in ("shop","grid","pool")) or
+                any(not isinstance(row.get(k),str) or not 0<len(row[k])<=256 for k in ("title","section"))):
+                raise ValueError("私服礼包目录格式无效。")
+        return {"ok":True,"gifts":rows}
+    if action=="claim-gift":
+        if not gift_token(inp.get("ticket")):return {"ok":False,"code":"gift_login_required"}
+        form={k:inp[k] for k in ("ticket","shop","grid","pool","request_id") if k in inp}
+        code,doc=request(config,"POST",OPERATIONS[action],form)
+        if code not in (200,201):return refusal(code,doc)
+        if doc.get("ok") is not True or doc.get("claimed") is not True:
+            raise ValueError("私服礼包服务未确认到账。")
+        return {"ok":True,"claimed":True,**gift_receipt(doc)}
     if action=="download":
         return download(config,inp.get("sha256"),inp.get("destination",""))
     if action=="maintenance":
@@ -159,16 +198,14 @@ def handle(inp):
     if action=="bind":form.update(proof(inp.get("profile","")))
     code,doc=request(config,"POST",OPERATIONS[action],form)
     if code not in (200,201):
-        error=doc.get("code") or doc.get("error")
-        if not isinstance(error,str) or not re.fullmatch(r"[a-z0-9_]{1,60}",error):error="private_server_refused"
-        return {"ok":False,"code":error,"status":code}
+        return refusal(code,doc)
     if (doc.get("realm")!=PRIVATE_REALM or not re.fullmatch(r"ofp_[a-f0-9]{32}",str(doc.get("slot",""))) or
         not isinstance(doc.get("ticket"),str) or not doc["ticket"] or not isinstance(doc.get("nickname"),str)):
         raise ValueError("私服账号服务返回的数据格式不匹配。")
     # Only the launching WinForms process gets this receipt over anonymous pipes.
     # The private server, not the channel SDK, may attach it to the exact game PID.
     return {"ok":True,"nickname":doc["nickname"],"slot":doc["slot"],"ticket":doc["ticket"],
-            "expires_in":doc.get("expires_in",0)}
+            "expires_in":doc.get("expires_in",0),**(gift_receipt(doc) if "gift_ticket" in doc else {})}
 
 
 if __name__=="__main__":

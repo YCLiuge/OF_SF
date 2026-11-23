@@ -18,7 +18,9 @@
 
 - 私服注册、账号密码登录、独立 UID、唯一角色名、原生起名和已有档案绑定。
 - 官方频道与个人家园、家具限额与回收、附近聊天、世界分区与私聊。服主可配置范围与限额。
-- 已接入部分序章、调查与间隙、挂机奖励、背包与商店、部分秘境及家园交互。完整主线、全部活动和多人玩法仍在完善。
+- 支持常驻、多个可配置 UP、自选池、保底、十连与招募记录。每个角色的一次性福利覆盖 47 种代币，各 1,000,000，另授予可用家具、动作、聊天表情和服饰。
+- 探索背包支持整理、装备、入库和回花园自动入库。启动器的「私服礼包」可直接为所选私服角色领取虚拟商品。
+- 已接入部分序章、调查与间隙、挂机奖励、背包与商店、部分秘境及家园交互。另支持同服多人队伍、装备强化/铭文、活动签到和成就领奖。完整主线、全部活动和多人对局仍在完善。
 - 多条图文公告可分别发布、编辑与撤回。启动器可按标题查看，并可校验和保存服主发布的版本附件。
 - 启动器使用 .NET 10 Windows Forms 自包含构建。桌面入口和命令行启动的是同一原生 Unity 客户端。
 
@@ -51,6 +53,6 @@
 python .\client_tools\sources\build_installer.py . .\dist\开放空间私服安装.exe
 ```
 
-[部署与存档](OverField-Server/部署说明.md) · [远端接入](OverField-Server/docs/远程玩法.md) · [管理接口](OverField-Server/docs/本机管理接口.md) · [图文公告与版本发布](OverField-Server/docs/服主公告与版本发布.md) · [频道规则](OverField-Server/docs/频道与家园设置.md)
+[招募配置](OverField-Server/docs/招募卡池.md) · [礼包与仓库](OverField-Server/docs/私服礼包与仓库.md) · [上游玩法对照](OverField-Server/docs/上游对照.md) · [部署与存档](OverField-Server/部署说明.md) · [远端接入](OverField-Server/docs/远程玩法.md) · [管理接口](OverField-Server/docs/本机管理接口.md) · [图文公告与版本发布](OverField-Server/docs/服主公告与版本发布.md) · [频道规则](OverField-Server/docs/频道与家园设置.md)
 
 服务端基于 [byzp/of-ps](https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513)。上游及其修改部分随附 [AGPL-3.0](OverField-Server/LICENSE-of-ps.txt)，仓库原有的 [GPL-3.0](LICENSE) 保留。运行依赖及来源见 [运行时清单](OverField-Server/docs/RUNTIME.txt)。

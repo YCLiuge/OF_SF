@@ -97,19 +97,8 @@ def play_note(session, req, rsp):
     return pb.StatusCode_OK
 
 
-def starter_instruments(player_id):
-    # This realm makes the national furniture instruments available once on first visit.
-    if not db.conn.execute("INSERT OR IGNORE INTO claimed_rewards(player_id,system,key) VALUES(?, 'private_unlock','plaza_instruments')", (player_id,)).rowcount:
-        return
-    from utils.pb_create import make_item
-    for template in res["PlazaMusic"]["instruments"]:
-        if not db.get_item_detail(player_id, item_id=template):
-            item = make_item(template, 1, player_id)
-            if item and item.main_item.HasField("base_item"):
-                db.set_item_detail(player_id, item.SerializeToString(), item_id=template)
-
 def send_action(session,req,rsp):
-    if req.action_id and req.action_id not in res["PlazaMusic"]["actions"]:
+    if req.action_id and req.action_id not in session.entitlements.menu_actions and req.action_id not in session.entitlements.animations:
         return pb.StatusCode_CFG_NOT_FOUND
     from network.msg_id import MsgId
     notice=pb.SendActionNotice(status=pb.StatusCode_OK,action_id=req.action_id,from_player_id=session.player_id,from_player_name=session.player_name)

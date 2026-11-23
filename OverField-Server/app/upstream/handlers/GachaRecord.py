@@ -1,7 +1,7 @@
 from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
 from proto import net_pb2 as pb
-from private_tutorial_recruit import history
+from private_gacha import history
 
 
 @packet_handler(MsgId.GachaRecordReq)

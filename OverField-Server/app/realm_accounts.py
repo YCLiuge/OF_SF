@@ -15,7 +15,7 @@ from local_identity import SLOT, PROFILE_KEY, _digest, _name
 from profile_issuance import authorizes_game_key
 
 PREFIX = "/local/v1/accounts/"
-ROUTES = {PREFIX+k for k in ("register","login","bind","launch")}
+ROUTES = {PREFIX+k for k in ("register","login","bind","launch","claim-gift")}
 USER = re.compile(r"[A-Za-z0-9_.-]{3,40}\Z", re.ASCII)
 N, R, P = 32768, 8, 1
 SALT_SIZE = 16
@@ -156,6 +156,8 @@ def reserve_native(identity,body):
 
 class AccountService:
     def __init__(self,identity):
+        from private_gift_service import GiftService
+        self.gifts=GiftService()
         initialize(identity)
         self.identity=identity
         self.workers=threading.BoundedSemaphore(3)
@@ -183,7 +185,12 @@ class AccountService:
         try:
             if path==PREFIX+"launch":
                 return reserve_native(self.identity,body)
-            return login(self.identity,body) if path==PREFIX+"login" else register(self.identity,body,path==PREFIX+"bind")
+            if path==PREFIX+"claim-gift":
+                return self.gifts.claim(body)
+            result=login(self.identity,body) if path==PREFIX+"login" else register(self.identity,body,path==PREFIX+"bind")
+            if self.gifts.game is not None:
+                result.update(self.gifts.issue(result["slot"]))
+            return result
         finally:
             self.workers.release()
 

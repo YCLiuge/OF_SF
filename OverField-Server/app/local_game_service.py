@@ -43,7 +43,6 @@ class Session:
         self.badge_id=0
         self.scene_player=pb.ScenePlayer()
         self.home_seat=None
-        self.temp_pack=[]
         self.pos={}
         self.drop_items={}
         self.color_data=[None,None,pb.PosColor()]
@@ -342,6 +341,12 @@ class LocalGameService:
                 CREATE TABLE IF NOT EXISTS private_locations (
                     player_id INTEGER PRIMARY KEY, scene INTEGER NOT NULL);
             """)
+            from private_inventory import initialize as setup_inventory
+            setup_inventory()
+            from private_mp_teams import initialize as setup_mp_teams
+            setup_mp_teams()
+            from private_gacha import setup as setup_gacha
+            setup_gacha()
             from private_intervals import setup as setup_intervals
             setup_intervals()
             from private_friends import setup as setup_friends
@@ -352,6 +357,11 @@ class LocalGameService:
                 realm_uids.initialize(db.conn,self.realm_rules.uid_start)
             from private_channels import setup as setup_channels
             setup_channels(self.realm_rules)
+            from private_activity_rewards import setup as setup_activity_rewards
+            setup_activity_rewards()
+            from private_entitlements import catalog, migrate
+            self.entitlements = catalog()
+            migrate(db.conn,self.entitlements)
             self.scene_ids={r["ID"] for r in res_loader.res["ScenesConfigAsset"]["Scenes"] if r.get("Born")}
             for f in sorted((UPSTREAM/"handlers").glob("*.py")):
                 if f.stem.startswith('_'):continue
@@ -392,6 +402,8 @@ class LocalGameService:
                 account=db.conn.execute("SELECT player_name FROM players WHERE player_id=?",(pid,)).fetchone()
                 if account is None:
                     db.init_player(pid)
+                from private_entitlements import grant
+                grant(db.conn,pid,self.entitlements)
                 named = db.conn.execute("SELECT p.nickname FROM authority.profiles p WHERE slot=? AND (EXISTS(SELECT 1 FROM authority.realm_accounts a WHERE a.slot=p.slot) OR EXISTS(SELECT 1 FROM authority.realm_named_profiles n WHERE n.slot=p.slot))",(slot,)).fetchone()
                 if named:
                     proposed = named[0]
@@ -409,6 +421,7 @@ class LocalGameService:
                 from private_explore import grant_private_permits
                 grant_private_permits(pid)
                 s=Session(sock,slot,pid,proposed)
+                s.entitlements = self.entitlements
                 s.realm_rules = self.realm_rules
                 s.stages = self.stages
                 s.needs_name = bool(db.conn.execute("SELECT 1 FROM authority.realm_pending_names WHERE slot=?",(slot,)).fetchone())

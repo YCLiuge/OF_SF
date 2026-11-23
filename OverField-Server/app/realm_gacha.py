@@ -1,0 +1,74 @@
+"""Owner settings for native 1.1.12 recruit banners."""
+from functools import lru_cache
+import json
+from pathlib import Path
+
+from local_identity import LocalIdentity
+from state_lock import exclusive_state
+
+
+@lru_cache(maxsize=1)
+def _catalog():
+    path = Path(__file__).resolve().parents[1] / "resources/data/Gacha.json"
+    with path.open(encoding="utf-8") as file:
+        gacha = json.load(file)
+    groups = {r["i_d"]: [i["free_gacha_pool_i_d"] for i in r["items"]] for r in gacha["pool"]["datas"]}
+    return {r["i_d"]: {"id": r["i_d"], "groups": groups[r["method1_i_d"]],
+                       "pity_group": r["big_guarantee_pool_i_d"], "featured": r.get("character_i_d1", 0),
+                       "opening": r.get("opening_time"), "closing": r.get("closing_time"),
+                       "ticket": r["consume_item1_i_d"]}
+            for r in gacha["info"]["datas"] if r["i_d"] in (2000, 2002) or r.get("new_u_i_gacha_type") == 3
+            if r.get("method1_i_d") in groups and r.get("big_guarantee_pool_i_d") in groups[r["method1_i_d"]]}
+
+
+def available():
+    return list(_catalog().values())
+
+
+def defaults():
+    rows = []
+    for pool_id in (2000, 3000, 3001, 3023, 203014, 203015):
+        weights = {"100": 7900, "200": 1200, "300": 700, "400": 200}
+        if pool_id != 2000:
+            weights.update({"400": 100, str(_catalog()[pool_id]["pity_group"]): 100})
+        rows.append({"id": pool_id, "enabled": True, "pity": 70, "weights": weights})
+    return {"pools": rows}
+
+
+def validate(settings):
+    if not isinstance(settings, dict) or settings.keys() != {"pools"} or not isinstance(settings["pools"], list):
+        raise ValueError("Expected an object containing the pools array")
+    known = _catalog()
+    seen = set()
+    for row in settings["pools"]:
+        if not isinstance(row, dict) or row.keys() != {"id", "enabled", "pity", "weights"}:
+            raise ValueError("Each pool requires id, enabled, pity and weights")
+        pid, weights = row["id"], row["weights"]
+        if type(pid) is not int or pid not in known or pid in seen or type(row["enabled"]) is not bool:
+            raise ValueError("Invalid or duplicate native pool")
+        seen.add(pid)
+        if type(row["pity"]) is not int or not 1 <= row["pity"] <= 1000:
+            raise ValueError("Pity must be 1–1000")
+        valid = {str(k) for k in known[pid]["groups"]}
+        if not isinstance(weights, dict) or not weights or not weights.keys() <= valid:
+            raise ValueError("Unknown reward group for this native pool")
+        if any(type(v) is not int or not 0 <= v <= 10000 for v in weights.values()) or sum(weights.values()) != 10000:
+            raise ValueError("Reward weights must be integer basis points totaling 10000")
+    return settings
+
+
+SCHEMA = "(id INTEGER PRIMARY KEY CHECK(id=1), settings TEXT NOT NULL)"
+
+
+def configure(state, settings=None):
+    if settings is not None:
+        validate(settings)
+    with exclusive_state(state, purpose="profiles") as root:
+        root.mkdir(parents=True, exist_ok=True)
+        with LocalIdentity(root / "identity.sqlite3")._write() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS private_gacha_config " + SCHEMA)
+            if settings is not None:
+                conn.execute("INSERT OR REPLACE INTO private_gacha_config VALUES(1,?)",
+                             (json.dumps(settings, separators=(",", ":")),))
+            stored = conn.execute("SELECT settings FROM private_gacha_config WHERE id=1").fetchone()
+            return json.loads(stored[0]) if stored else defaults()

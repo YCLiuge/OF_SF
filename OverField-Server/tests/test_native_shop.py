@@ -48,6 +48,10 @@ def run(root,resources):
             a,owner=connect(0)
             b,other=connect(1)
             with a,b:
+                for player in (owner,other):
+                    fixture_coins(player,101,500)
+                fixture_coins(owner,102,200)
+                fixture_coins(owner,108,0)
                 board=call(a,"ShopInfo",shop_id=11000)
                 assert board.grids[0].pool_id==11001 and board.grids[0].buy_times==0
                 coins,material=inventory(owner,101),inventory(owner,5011001)
@@ -85,6 +89,9 @@ def run(root,resources):
                 # In-window 70% national costume listing costs 180 * .7 = 126 private stones.
                 stamp[0]=datetime(2025,6,12,12,tzinfo=stamp[0].tzinfo)
                 fixture_coins(owner,108,200)
+                from utils import db
+                with game.lock,db.conn:
+                    db.conn.execute("DELETE FROM items WHERE player_id=? AND item_id=?",(owner,4640181))
                 discounted=purchase(a,84,900,14,1)
                 assert discounted.status==pb.StatusCode_OK and inventory(owner,108)==74,discounted
                 assert discounted.items[0].main_item.WhichOneof("item")=="outfit"
