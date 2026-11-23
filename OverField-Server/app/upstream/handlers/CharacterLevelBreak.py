@@ -99,6 +99,9 @@ class Handler(PacketHandler):
 
         character.max_level = next_max_level
         db.set_character(session.player_id, req.char_id, character.SerializeToString())
+        from private_newcomer import record
+        if next_max_level > current_max_level:
+            record(session, 134)
 
         rsp.status = StatusCode.StatusCode_OK
         rsp.char_id = req.char_id

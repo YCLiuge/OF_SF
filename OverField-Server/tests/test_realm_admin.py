@@ -33,6 +33,8 @@ def run(root):
     assert len(schema["operations"]) >= 10 and schema["operations"]["notice.edit"]["inputSchema"]["required"] == ["id"]
     assert invoke(state, "status")["lifecycle"] == "uninitialized"
     assert call("maintenance.list")["notices"] == [] and call("rules.get")["uid_start"] == 1000001
+    assert call("events.get") == {"events": []}
+    assert any(r["id"] == 4008 for r in call("events.catalog")["events"])
     assert not state.exists()
     assert invoke(state, "call", "invalid", expected=False)["code"] == "unknown_operation"
     for bad in (b'{"world_max":10,"world_max":11}', b'{"noSuchOption":1}', b'[]', b'{}', b'{"world_max":true}', b" " * 66000):
@@ -44,6 +46,12 @@ def run(root):
     assert invoke(state, "status")["lifecycle"] == "stopped"
     assert invoke(state, "call", "rules.set", data={"world_min":199}, expected=False)["code"] == "invalid_request"
     assert call("rules.get")["world_min"] == 1
+    event = dict(id=4008, enabled=False, opens_at=None, closes_at=None)
+    assert call("events.set", events=[event]) == {"events": [event]}
+    assert call("events.get") == {"events": [event]}
+    invalid = dict(event, opens_at=1)
+    assert invoke(state, "call", "events.set", data={"events": [invalid]}, expected=False)["code"] == "invalid_request"
+    assert call("events.set", events=[]) == {"events": []}
     poster = root / "海报.png"
     poster.write_bytes(bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de"
                                     "0000000c49444154789c63606060000000040001f61738550000000049454e44ae426082"))

@@ -10,7 +10,6 @@ from proto.net_pb2 import (
     SceneDataNotice,
     ChatMsgRecordInitNotice,
     ChangeChatChannelRsp,
-    BlessTreeNotice,
     QuestStatus,
     RandomQuestBonus,
     PlayerBuff,
@@ -126,6 +125,8 @@ class Handler(PacketHandler):
             item.main_item.base_item.num = 800
         db.set_item_detail(session.player_id, item.SerializeToString(), 11)
 
+        from private_bless_tree import login_notice as bless_tree_notice
+        tree_progress = bless_tree_notice(player_id)
         items_data = db.get_item_detail(session.player_id)
         if items_data:
             items_by_tag = {}
@@ -154,11 +155,7 @@ class Handler(PacketHandler):
         from private_activity_rewards import login as activity_sign_in
         activity_sign_in(session)
 
-        rsp = BlessTreeNotice()
-        rsp.status = StatusCode.StatusCode_OK
-        for k, v in db.get_bless_tree(session.player_id).items():
-            rsp.trees[k].tree_ids.extend(v)
-        session.send(MsgId.BlessTreeNotice, rsp, 0)
+        session.send(MsgId.BlessTreeNotice, tree_progress, 0)
 
         rsp = SceneDataNotice()
         rsp.CopyFrom(make_SceneDataNotice(session))

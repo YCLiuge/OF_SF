@@ -111,6 +111,20 @@ def rebuild(repo, base, output):
                 if link is None and (data is None or hashlib.sha256(data).hexdigest() != record["sha256"]):
                     raise ValueError(f"File is missing or has changed: {name}")
                 add(name, data, record["mode"], link)
+            # An older platform base can lack a newly supported game table. Include
+            # only local resource files identified by the checked-in digest manifest.
+            for name in sorted(expected.keys() - seen):
+                if not name.startswith("resources/"):
+                    continue
+                path = local_path(repo / SERVER, name)
+                record = expected[name]
+                if path.is_symlink() or not path.is_file():
+                    continue
+                data = path.read_bytes()
+                if hashlib.sha256(data).hexdigest() != record["sha256"]:
+                    raise ValueError(f"Local game resource does not match the manifest: {name}")
+                add(name, data, record["mode"])
+                seen.add(name)
             missing = expected.keys() - seen
             if missing:
                 raise ValueError(f"Portable base is missing {len(missing)} files, including {min(missing)}")

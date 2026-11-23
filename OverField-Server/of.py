@@ -181,7 +181,11 @@ def self_test():
     for script in ("test_realm_admin.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py",
                    "test_game_realm.py", "test_game_archive.py", "test_game_dungeon.py","test_dungeon_updates.py","test_native_appearance.py","test_native_activity_rewards.py",
                    "test_native_first_quest.py", "test_story_entry.py","test_private_channels.py","test_realm_maintenance.py","test_online_identity.py","test_remote_realm.py","test_remote_password.py","test_stage_diagnostics.py","test_observed_initialization.py","test_home_chairs.py","test_native_intervals.py","test_plaza_actions.py","test_uid_rules.py","test_realm_accounts.py","test_native_friends.py","test_native_chat.py","test_native_shop.py","test_native_crafts.py","test_native_gacha.py","test_native_inventory.py","test_native_mp_teams.py","test_native_equipment.py",
-                   "test_private_entitlements.py","test_private_gift_api.py","test_private_gift_shop.py","test_story_starter.py","test_hud_queries.py","test_faye_dialog.py","test_season_catalog.py","test_profile_issuance.py","test_explore_dispatch.py"):
+                   "test_private_entitlements.py","test_private_gift_api.py","test_private_gift_shop.py","test_story_starter.py","test_hud_queries.py","test_faye_dialog.py","test_season_catalog.py",
+                   "test_native_boss_rush.py", "test_native_restaurant.py", "test_native_world_levels.py",
+                   "test_native_home_visibility.py", "test_native_bless_tree.py", "test_native_bless_ladder.py", "test_native_events.py",
+                   "test_native_recruit_entry.py", "test_native_badge_tree.py", "test_native_battle_pass.py", "test_native_newcomer.py",
+                   "test_profile_issuance.py","test_explore_dispatch.py"):
         extras = [] if script in ("test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py") else ["--resources", str(ROOT/"resources")]
         subprocess.run([sys.executable, "-B", str(tests/script), *extras], env=env, check=True)
 

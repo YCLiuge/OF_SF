@@ -58,8 +58,7 @@ def run(root, resources):
             assert 100011 not in progress
             assert accept(c).quest_id == 100011
             assert call(c,"UpdateTeam",char1=102001)[0].status==pb.StatusCode_CharNotExist
-            assert not call(c,"GachaList")[0].gachas
-            assert call(c,"Gacha",gacha_id=2000,is_single=True)[0].status==pb.StatusCode_BAD_REQ
+            assert 2000 in {g.gacha_id for g in call(c,"GachaList")[0].gachas}
             assert call(c,"ClaimQuestReward",quest_id=1000001,quest_type=pb.EQuestType_MainQuest)[0].status==pb.StatusCode_BAD_REQ
             assert call(c,"NpcTalk",id=11000111)[0].status == pb.StatusCode_BAD_REQ
             assert call(c,"NpcTalk",id=11000121)[0].status == pb.StatusCode_BAD_REQ
@@ -101,7 +100,8 @@ def run(root, resources):
             assert card.main_item.item_tag==pb.EBagItemTag_Card and card.extra_quality==3
             assert [(x.item_id,x.base_item.num) for x in card.extras]==[(107,500)]
             assert owned(104,pid)==starting_ticket-1 and owned(107,pid)==starting_bonus+500
-            assert call(c,"Gacha",gacha_id=2000,is_single=True)[0].status==pb.StatusCode_REPEAT_GET_REWARD
+            assert call(c,"Gacha",gacha_id=2000,is_single=True)[0] == drawn
+            assert len(call(c,"GachaList")[0].gachas) > 1
             assert owned(104,pid)==starting_ticket-1 and owned(107,pid)==starting_bonus+500
             assert call(c,"UpdateTeam",char1=102001,char2=102001)[0].status==pb.StatusCode_BAD_REQ
             assert call(c,"UpdateTeam",char2=101001)[0].status==pb.StatusCode_BAD_REQ

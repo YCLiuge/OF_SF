@@ -68,16 +68,22 @@ def _sign_days(player,activity,max_days,instant):
 
 
 def setup():
+    import private_events
+    private_events.setup()
     db.conn.execute("CREATE TABLE IF NOT EXISTS private_login_days (player INTEGER NOT NULL REFERENCES players(player_id),"
                     "activity INTEGER NOT NULL,last_day INTEGER NOT NULL,days INTEGER NOT NULL,first_ms INTEGER NOT NULL,"
                     "PRIMARY KEY(player,activity)) WITHOUT ROWID")
 
 
 def login(session):
-    instant=shop.now()
+    import private_events
+    private_events.refresh(session, force=True)
+
+
+def send_signs(session, instant, activities):
     notice=pb.ActivitySignInDataNotice(status=pb.StatusCode_OK)
-    for activity in _table("Activity","activity").values():
-        if activity.get("new_activity_type")!=1 or not shop.in_window(activity,instant):continue
+    for activity in activities:
+        if activity.get("new_activity_type")!=1:continue
         days=_sign_cfg(activity.get("activity_i_d",activity["i_d"]))
         if not days:continue
         count,first,mask=_sign_days(session.player_id,activity,max(r["days"] for r in days),instant)
@@ -90,10 +96,11 @@ def login(session):
 
 
 def sign_in(session,req,rsp):
+    import private_events
     instant=shop.now()
     activity=_table("Activity","activity").get(req.activity_id)
     if not activity or activity.get("new_activity_type")!=1:return pb.StatusCode_CFG_NOT_FOUND
-    if not shop.in_window(activity,instant):return pb.StatusCode_Activity_Close
+    if not private_events.current(activity, instant, private_events.settings()):return pb.StatusCode_Activity_Close
     days=_sign_cfg(activity.get("activity_i_d",req.activity_id))
     entry=next((r for r in days if r["days"]==req.day),None)
     if not entry or not 1<=req.day<32:return pb.StatusCode_CFG_NOT_FOUND

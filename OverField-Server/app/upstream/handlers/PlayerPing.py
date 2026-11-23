@@ -16,3 +16,6 @@ class Handler(PacketHandler):
         rsp.server_time_ms = int(time.time() * 1000)
 
         session.send(MsgId.PlayerPingRsp, rsp, packet_id)
+        if hasattr(session, "event_calendar"):
+            from private_events import refresh
+            refresh(session)

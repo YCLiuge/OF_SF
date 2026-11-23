@@ -28,10 +28,13 @@ def available():
 def defaults():
     rows = []
     for pool_id in (2000, 3000, 3001, 3023, 203014, 203015):
-        weights = {"100": 7900, "200": 1200, "300": 700, "400": 200}
-        if pool_id != 2000:
-            weights.update({"400": 100, str(_catalog()[pool_id]["pity_group"]): 100})
-        rows.append({"id": pool_id, "enabled": True, "pity": 70, "weights": weights})
+        if pool_id == 2000:
+            # Published base odds, before the actual SR and SSR guarantees.
+            weights = {"100": 9220, "200": 80, "300": 600, "400": 100}
+            rows.append({"id": pool_id, "enabled": True, "pity": 70, "sr_pity": 10, "weights": weights})
+        else:
+            weights = {"100": 7900, "200": 1200, "300": 700, "400": 100, str(_catalog()[pool_id]["pity_group"]): 100}
+            rows.append({"id": pool_id, "enabled": True, "pity": 70, "weights": weights})
     return {"pools": rows}
 
 
@@ -41,7 +44,8 @@ def validate(settings):
     known = _catalog()
     seen = set()
     for row in settings["pools"]:
-        if not isinstance(row, dict) or row.keys() != {"id", "enabled", "pity", "weights"}:
+        required = {"id", "enabled", "pity", "weights"}
+        if not isinstance(row, dict) or not required <= row.keys() <= (required | {"sr_pity"}):
             raise ValueError("Each pool requires id, enabled, pity and weights")
         pid, weights = row["id"], row["weights"]
         if type(pid) is not int or pid not in known or pid in seen or type(row["enabled"]) is not bool:
@@ -49,6 +53,8 @@ def validate(settings):
         seen.add(pid)
         if type(row["pity"]) is not int or not 1 <= row["pity"] <= 1000:
             raise ValueError("Pity must be 1–1000")
+        if "sr_pity" in row and (pid != 2000 or type(row["sr_pity"]) is not int or not 0 <= row["sr_pity"] <= 1000):
+            raise ValueError("sr_pity is an integer from 0 to 1000 for permanent banner 2000 only")
         valid = {str(k) for k in known[pid]["groups"]}
         if not isinstance(weights, dict) or not weights or not weights.keys() <= valid:
             raise ValueError("Unknown reward group for this native pool")

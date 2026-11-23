@@ -82,7 +82,10 @@ def place(session, req, rsp):
     details.furniture_id,details.furniture_item_id,details.layer_num=fid,req.furniture_item_id,req.layer_num
     details.pos.CopyFrom(req.pos);details.rotation.CopyFrom(req.rot)
     db.set_furniture(session.scene_id,session.channel_id,pid,fid,details.SerializeToString())
-    if not existing:tally(pid)
+    if not existing:
+        tally(pid)
+        from private_newcomer import record
+        record(session, 129)
     update=pb.SceneGardenFurnitureUpdateNotice(status=pb.StatusCode_OK)
     update.furniture_info.CopyFrom(details)
     publish(session,update)

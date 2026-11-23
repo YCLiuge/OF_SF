@@ -9,6 +9,7 @@ import tempfile
 from uuid import uuid4
 
 from native_endpoint import KNOWN_SOURCE, export_config, validate_endpoint
+from private_channel_privacy import protect_private_channel_log
 
 LAUNCHER = "a3702251bd92b7ba773b00eeffef7a63a311098e96e2e83f541e7ea78070001b"
 ASSEMBLY = "2db98364241c95864781f77877523b9d2f728b22a91935fa30cdfb33a8b7f4ea"
@@ -301,11 +302,14 @@ def prepare(source,home,endpoint,progress=print):
     if (home/"Client").exists():
         # A migrated kit can run entirely from the already imported private copy.
         use_src=src if (src/"launcher.exe").is_file() and src!=home/"Client" else home/"Client"
-        return _from_installed(use_src,home,endpoint,progress)
-    if (src/"launcher.exe").is_file():
-        return _from_installed(src,home,endpoint,progress)
-    media=locate(src,home)
-    if media is None:
-        raise ValueError("请选择已安装的 TapTap 客户端，或选择配套原版 ISO / ZIP 安装媒体。")
-    return _install_media(media,home,endpoint,progress)
+        result=_from_installed(use_src,home,endpoint,progress)
+    elif (src/"launcher.exe").is_file():
+        result=_from_installed(src,home,endpoint,progress)
+    else:
+        media=locate(src,home)
+        if media is None:
+            raise ValueError("请选择已安装的 TapTap 客户端，或选择配套原版 ISO / ZIP 安装媒体。")
+        result=_install_media(media,home,endpoint,progress)
+    protect_private_channel_log(home)
+    return result
 

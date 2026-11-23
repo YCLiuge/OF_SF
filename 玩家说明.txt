@@ -27,3 +27,6 @@ OF_SF 玩家指南
 
 遇到问题
 记下所在区服、角色、频道、发生时间、点击顺序和界面提示。本机日志在 State/realm/stage-failures.jsonl 和 stage-events.jsonl。功能覆盖见 OverField-Server/docs/上游对照.md，服主部署与存档命令见 OverField-Server/部署说明.md。
+
+手机号与渠道窗口
+渠道账号组件可能在副屏弹出。启动器会清理魔改副本内曾记录账号名的 QuickSDK 诊断日志，并设为只读。官服使用的共享渠道资料继续保留，因此渠道弹窗仍可能显示原有账号。区服自己的账号和角色名可在「私服账号」中管理。

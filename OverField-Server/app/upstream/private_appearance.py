@@ -143,6 +143,13 @@ def modify_outfit(session,req,rsp):
     rows=db.get_characters(player,req.char_id)
     if not rows:return pb.StatusCode_BAD_REQ
     character=pb.Character.FromString(rows[0])
+    def worn():
+        i = character.in_use_outfit_preset_index
+        if i >= len(character.outfit_presets):
+            return ()
+        preset = character.outfit_presets[i]
+        return (preset.hat, preset.hair, preset.clothes, preset.ornament)
+    before = worn()
     if isinstance(req,pb.OutfitPresetUpdateReq):
         value=req.preset
         if not req.HasField("preset") or value.preset_index>=len(character.outfit_presets) or not valid_preset(player,req.char_id,value):
@@ -161,6 +168,9 @@ def modify_outfit(session,req,rsp):
         rsp.hide_info.CopyFrom(req.hide_info)
     rsp.char_id=req.char_id
     db.set_character(player,req.char_id,character.SerializeToString())
+    if worn() != before:
+        from private_newcomer import record
+        record(session, 127)
     if req.char_id in db.get_players_info(player,"team")[0]:
         publish(session,pb.SceneActionType_UPDATE_FASHION)
     return pb.StatusCode_OK

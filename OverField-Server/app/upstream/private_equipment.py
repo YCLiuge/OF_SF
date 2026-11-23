@@ -86,6 +86,8 @@ def strengthen(session, req, rsp, kind):
     obj.strength_level, obj.strength_exp = level, 0
     rsp.strength_level = level
     save(session, [item], costs)
+    from private_newcomer import record
+    record(session, 123)
     return pb.StatusCode_OK
 
 
@@ -181,6 +183,11 @@ def disassemble(session, req, rsp):
         grant(session, rewards, rsp.items)
     rsp.weapon_ids.extend(req.weapon_ids)
     rsp.armor_ids.extend(req.armor_ids)
+    from private_newcomer import record
+    if req.weapon_ids:
+        record(session, 150)
+    if req.armor_ids:
+        record(session, 148)
     return pb.StatusCode_OK
 
 

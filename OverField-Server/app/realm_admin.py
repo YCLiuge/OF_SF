@@ -13,6 +13,7 @@ from local_identity import LocalIdentity
 from realm_maintenance import Maintenance
 import realm_rules
 import realm_gacha
+import realm_events
 from state_lock import StateBusy, exclusive_state
 
 VERSION = "overfield.admin/v1"
@@ -34,8 +35,17 @@ def operation(mode, description, properties=None, required=(), minimum=0):
 BANNER = {"type": "object", "additionalProperties": False,
           "required": ["id", "enabled", "pity", "weights"],
           "properties": {"id": ID, "enabled": {"type": "boolean"}, "pity": ID,
+                         "sr_pity": {"type": "integer", "minimum": 0, "maximum": 1000},
                          "weights": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}}}
+EVENT_TIME = {"type": ["string", "null"]}
+EVENT = {"type": "object", "additionalProperties": False,
+         "required": ["id", "enabled", "opens_at", "closes_at"],
+         "properties": {"id": ID, "enabled": {"type": "boolean"}, "opens_at": EVENT_TIME, "closes_at": EVENT_TIME}}
 OPERATIONS = {
+    "events.catalog": operation("any", "List supported native activity pages, game schedules and rewards."),
+    "events.get": operation("any", "Read this realm's activity overrides."),
+    "events.set": operation("any", "Replace the overrides for native activity pages.",
+                            {"events": {"type": "array", "maxItems": 1000, "items": EVENT}}, ("events",)),
     "gacha.catalog": operation("any", "List native banners, their featured characters and reward groups."),
     "gacha.get": operation("any", "Return the active configuration and basis-point probabilities."),
     "gacha.set": operation("any", "Replace this realm's banner configuration, effective on the next request.",
@@ -132,6 +142,10 @@ def read_request(path):
 
 def validate(value, schema, name="input"):
     kind = schema["type"]
+    if kind == ["string", "null"]:
+        if value is None:
+            return
+        kind = "string"
     if type(value) is not {"object": dict, "string": str, "integer": int, "array": list, "boolean": bool}[kind]:
         raise ValueError(f"{name} must be a JSON {kind}")
     if kind == "object":
@@ -153,11 +167,20 @@ def validate(value, schema, name="input"):
     elif kind == "string":
         if not value or ("enum" in schema and value not in schema["enum"]) or "\x00" in value:
             raise ValueError("Invalid " + name)
-    elif "minimum" in schema and value < schema["minimum"]:
+    elif (("minimum" in schema and value < schema["minimum"])
+          or ("maximum" in schema and value > schema["maximum"])):
         raise ValueError("Invalid " + name)
 
 
 def run(state, name, data, request_stop):
+    if name == "events.catalog":
+        return {"events": realm_events.available()}
+    if name == "events.get":
+        if not (state / "identity.sqlite3").is_file():
+            return {"events": []}
+        return realm_events.configure(state)
+    if name == "events.set":
+        return realm_events.configure(state, data)
     if name == "gacha.catalog":
         return {"banners": realm_gacha.available()}
     if name == "gacha.get":

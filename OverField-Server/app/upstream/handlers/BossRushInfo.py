@@ -1,6 +1,5 @@
 """National client 2701. Season schedules use China Standard Time on every server."""
 from datetime import datetime, timedelta, timezone
-import time
 
 from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
@@ -33,14 +32,9 @@ def read_season(player_id, requested, now):
         info.ParseFromString(saved)
         if not info.challenge_end_time or now < info.challenge_end_time:
             return result
-        info.challenge_end_time = 0
-        info.current_stage_index = -1
-        for stage in info.stage_infos:
-            stage.best_score = max(stage.best_score, stage.total_score)
-            stage.total_score = 0
-            stage.total_damage_hp = 0
-            stage.ClearField("teams")
-        info.best_total_score = sum(stage.best_score for stage in info.stage_infos)
+        from private_boss_rush import finish
+        finish(player_id,info)
+        return result
     else:
         info.season_id = season_id
         info.current_stage_index = -1
@@ -58,6 +52,7 @@ def read_season(player_id, requested, now):
 class Handler(PacketHandler):
     def handle(self, session, data, packet_id):
         req = pb.BossRushInfoReq.FromString(data)
-        rsp = read_season(session.player_id, req.season_id, int(time.time()))
+        from private_boss_rush import now_ms
+        rsp = read_season(session.player_id, req.season_id, now_ms()//1000)
         session.send(MsgId.BossRushInfoRsp, rsp, packet_id)
 

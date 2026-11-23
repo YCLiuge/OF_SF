@@ -25,6 +25,7 @@ class Handler(PacketHandler):
         # Build a fresh team so empty slots disappear. Keep the party at its current scene position.
         team = make_SceneTeam(pid, slots)
         previous_leader = session.scene_player.team.char1
+        old_leader = previous_leader.char_id
         for member in (team.char1, team.char2, team.char3):
             if member.char_id:
                 member.pos.CopyFrom(previous_leader.pos)
@@ -33,6 +34,9 @@ class Handler(PacketHandler):
         db.set_players_info(pid, "character_id", req.char1)
         db.set_players_info(pid, "team_leader_badge", team.char1.character_appearance.badge)
         session.scene_player.team.CopyFrom(team)
+        if old_leader and old_leader != req.char1:
+            from private_newcomer import record
+            record(session, 128)
 
         rsp.status = pb.StatusCode_OK
         session.send(MsgId.UpdateTeamRsp, rsp, packet_id)

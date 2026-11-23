@@ -45,7 +45,10 @@ def initialize(port, ticket):
         rsp = getattr(pb,name+"Rsp").FromString(body)
         assert rsp.status == pb.StatusCode_OK
         if name=="WishListByFriendId": assert rsp.player_id==pid and not rsp.wish_list and not rsp.week_send_count
-        if name=="WorldLevelAchieveList": assert rsp.achieves and all(x.count==0 for x in rsp.achieves)
+        if name=="WorldLevelAchieveList":
+            assert list(rsp.unlock_world_levels)==[1]
+            progress={a.achieve_id:a.count for a in rsp.achieves}
+            assert progress[16000201]==replies["PlayerMainData"].level and progress[16000202]==0
         replies[name] = rsp
         if len(replies)==len(calls):
             return sock, pid, replies["PosterIllustrationList"]

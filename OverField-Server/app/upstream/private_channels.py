@@ -6,6 +6,7 @@ from server.scene_data import get_session
 from utils import db
 from utils.pb_create import make_item
 from realm_uids import local_uid, public_uid
+from private_dungeons import _table
 
 HOME = 9999
 
@@ -126,11 +127,16 @@ def reclaim(pid,channel,player=None):
 
 
 def change(s,new_scene,new_channel):
+    if (s.scene_id, s.channel_id) != (new_scene, new_channel):
+        s.scene_player.ClearField("status")
     if s.channel_id!=new_channel and is_public(s.realm_rules,s.channel_id):reclaim(s.player_id,s.channel_id,s)
     if new_scene==HOME and s.channel_id!=new_channel:
         owner=owner_for(new_channel)
         if owner and owner!=s.player_id:db.conn.execute("UPDATE garden_info SET access_num=access_num+1 WHERE player_id=?",(owner,))
     s.home_seat=None
+    if new_scene == HOME and s.scene_id == HOME and s.channel_id != new_channel:
+        from private_newcomer import record
+        record(s, 156)
     s.scene_id,s.channel_id=new_scene,new_channel
 
 
@@ -156,5 +162,8 @@ def fill_garden(s,world):
             shown.player_id=peer.player_id
             shown.furniture_info.furniture_id=fid
             shown.furniture_info.furniture_item_id=item
-    world.furniture_current_point_num=len(world.garden_furniture_info_map)
+    catalog = _table("HomeItem", "home_item", "item_i_d")
+    points = sum(catalog.get(entry.furniture_item_id, {}).get("home_item_point_num", 0)
+                 for entry in world.garden_furniture_info_map.values())
+    world.furniture_current_point_num = min(points, 0xffffffff)
 

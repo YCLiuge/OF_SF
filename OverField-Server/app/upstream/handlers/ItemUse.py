@@ -9,6 +9,8 @@ from utils.res_loader import res
 from utils.pb_create import make_item
 from private_gifts import open_box
 from private_dungeons import _table
+from private_events import use_potion
+from proto import net_pb2 as pb
 
 
 @packet_handler(MsgId.ItemUseReq)
@@ -22,13 +24,15 @@ class Handler(PacketHandler):
             rsp.status=StatusCode.StatusCode_BAD_REQ
             session.send(MsgId.ItemUseRsp,rsp,packet_id)
             return
-        if req.item_id in _table("GiftBag","gift_bag"):
+        tag = _table("Item", "item").get(req.item_id, {}).get("new_bag_item_tag")
+        potion = tag in (pb.EBagItemTag_Vitality, pb.EBagItemTag_Energy)
+        if potion or req.item_id in _table("GiftBag","gift_bag"):
             key=(packet_id,req.item_id,req.num,req.choose_item_id)
             previous=getattr(session,"last_opened_gift",None)
             if packet_id and previous and previous[0]==key:
                 rsp.ParseFromString(previous[1])
             else:
-                rsp.status=open_box(session,req,rsp)
+                rsp.status=use_potion(session,req,rsp) if potion else open_box(session,req,rsp)
                 if packet_id and rsp.status==StatusCode.StatusCode_OK:
                     session.last_opened_gift=(key,rsp.SerializeToString())
             session.send(MsgId.ItemUseRsp,rsp,packet_id)

@@ -1,10 +1,9 @@
 from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
 
-from proto.net_pb2 import NpcTalkReq, NpcTalkRsp, StatusCode, PackNotice
+from proto.net_pb2 import NpcTalkReq, NpcTalkRsp, StatusCode
 from utils.res_loader import res
-from utils.pb_create import make_QuestNotice, make_item
-import utils.db as db
+from utils.pb_create import make_QuestNotice
 
 
 @packet_handler(MsgId.NpcTalkReq)
@@ -12,6 +11,9 @@ class Handler(PacketHandler):
     def handle(self, session, data: bytes, packet_id: int):
         req = NpcTalkReq()
         req.ParseFromString(data)
+        if req.id == 11000311:
+            from private_badge_tree import starter_talk
+            return starter_talk(session, req, packet_id)
 
         from private_story_entry import CONDITIONS as ENTRY_CONDITIONS, MECHANISMS, mechanism
         if req.id in MECHANISMS or req.id in ENTRY_CONDITIONS:
@@ -39,11 +41,3 @@ class Handler(PacketHandler):
         if rsp1:
             session.send(MsgId.QuestNotice, rsp1, 0)
         session.send(MsgId.NpcTalkRsp, rsp, packet_id)
-        if req.id == 11000311:  # 解锁星云树
-            rsp = PackNotice()
-            rsp.status = StatusCode.StatusCode_OK
-            for i in [100000008, 301]:  # TODO 星符的正常获取
-                tmp = rsp.items.add()
-                make_item(i, 1, session.player_id, tmp)
-                db.set_item_detail(session.player_id, tmp.SerializeToString(), i)
-            session.send(MsgId.PackNotice, rsp, 0)

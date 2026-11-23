@@ -38,6 +38,18 @@
       "source": "TapTap PC 1.1.12",
       "detail": "ActivityGift.json"
     },
+    "resources/data/ActivityQuest.json": {
+      "sha256": "d557deed18d6c628a1c6ee537897277cdf03baaf03385497928465471763fa21",
+      "bytes": 25765,
+      "source": "TapTap PC 1.1.12",
+      "detail": "ActivityQuest.json"
+    },
+    "resources/data/ActivityRegular.json": {
+      "sha256": "3b60bec3a5c3c6080168f104e1488cc2efb6fb6d917f7ca1a8ea88654534fe33",
+      "bytes": 65917,
+      "source": "TapTap PC 1.1.12",
+      "detail": "ActivityRegular.json"
+    },
     "resources/data/ActivitySign.json": {
       "sha256": "2a303800019e325763ae6b9f7491b3fb842e838bd9a438daf17c9607ba2ece0b",
       "bytes": 49415,
@@ -283,6 +295,12 @@
       "bytes": 6941,
       "source": "TapTap PC 1.1.12",
       "detail": "Eligible random equipment IDs derived from Item, Weapon, Armor, UI.icon and String_Simplified.string_item_text; docs/native-config/export_released_equipment.py"
+    },
+    "resources/data/RestaurantGame.json": {
+      "sha256": "278cf1174fddedd47d1bc56150dfdaa7d296306e6a34c24094da15d7186bddc2",
+      "bytes": 170644,
+      "source": "TapTap PC 1.1.12",
+      "detail": "RestaurantGame.json"
     },
     "resources/data/Reward.json": {
       "sha256": "c8558bb8fc5185efb09dd1e12e63be6eecd655cf34ed8f525a7c77fe61d2e33d",
