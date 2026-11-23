@@ -1,4 +1,4 @@
-《开放空间》私服便携包的依赖
+OF_SF 便携包依赖
 
 游戏协议与玩法源码来自 byzp/of-ps 提交 fa2142b8521e802beb23fc6ed538205b9f4f1513。
 https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513
