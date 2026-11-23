@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +36,32 @@ def run(root):
     assert call("maintenance.list")["notices"] == [] and call("rules.get")["uid_start"] == 1000001
     assert call("events.get") == {"events": []}
     assert any(r["id"] == 4008 for r in call("events.catalog")["events"])
+    # Actual EOF streams, explicit input files and an interactive console take distinct paths.
+    for name in ("events.catalog", "events.get", "gacha.catalog", "gacha.get", "realm.status", "rules.get", "maintenance.list"):
+        assert schema["operations"][name]["readOnly"]
+        assert invoke(state, "call", name, raw=b"") == call(name)
+    empty_file = root / "empty.json"
+    empty_file.write_bytes(b"")
+    assert invoke(state, "call", "events.catalog", "--input", str(empty_file), expected=False)["code"] == "invalid_request"
+    assert invoke(state, "call", "events.get", raw=b"  ", expected=False)["code"] == "invalid_request"
+    for name in ("events.set", "rules.set", "release.withdraw", "realm.stop", "state.restore"):
+        assert invoke(state, "call", name, raw=b"", expected=False)["code"] == "invalid_request"
+    # A console read must not wait for a human to type a JSON object on these read-only calls.
+    sys.path.insert(0, str(ROOT / "app"))
+    try:
+        import realm_admin
+    finally:
+        sys.path.pop(0)
+    class Console:
+        closed = False
+        def isatty(self):
+            return True
+        @property
+        def buffer(self):
+            raise AssertionError("Unexpected read from the interactive terminal")
+    for stream in (None, Console()):
+        with patch.object(realm_admin.sys, "stdin", stream):
+            assert realm_admin.read_request(None, implicit_empty=True) == {}
     assert not state.exists()
     assert invoke(state, "call", "invalid", expected=False)["code"] == "unknown_operation"
     for bad in (b'{"world_max":10,"world_max":11}', b'{"noSuchOption":1}', b'[]', b'{}', b'{"world_max":true}', b" " * 66000):
@@ -67,6 +94,8 @@ def run(root):
     package.write_bytes(b"release-package-test")
     digest = hashlib.sha256(package.read_bytes()).hexdigest()
     assert call("release.publish", file=str(package), sha256=digest, version="1.2.3", notes="测试")["sha256"] == digest
+    assert invoke(state, "call", "release.withdraw", raw=b"", expected=False)["code"] == "invalid_request"
+    assert call("maintenance.list")["release"] is not None
     call("release.withdraw")
     assert call("maintenance.list")["release"] is None
 

@@ -26,10 +26,10 @@ RULES = {f.name: ({"type": "string", "enum": ["channel", "realm"]}
          for f in fields(realm_rules.RealmRules)}
 
 
-def operation(mode, description, properties=None, required=(), minimum=0):
+def operation(mode, description, properties=None, required=(), minimum=0, *, read_only=False):
     schema = {"type": "object", "properties": properties or {}, "additionalProperties": False,
               "required": list(required), "minProperties": minimum}
-    return {"availability": mode, "description": description, "inputSchema": schema}
+    return {"availability": mode, "description": description, "readOnly": read_only, "inputSchema": schema}
 
 
 BANNER = {"type": "object", "additionalProperties": False,
@@ -42,19 +42,19 @@ EVENT = {"type": "object", "additionalProperties": False,
          "required": ["id", "enabled", "opens_at", "closes_at"],
          "properties": {"id": ID, "enabled": {"type": "boolean"}, "opens_at": EVENT_TIME, "closes_at": EVENT_TIME}}
 OPERATIONS = {
-    "events.catalog": operation("any", "List supported native activity pages, game schedules and rewards."),
-    "events.get": operation("any", "Read this realm's activity overrides."),
+    "events.catalog": operation("any", "List supported native activity pages, game schedules and rewards.", read_only=True),
+    "events.get": operation("any", "Read this realm's activity overrides.", read_only=True),
     "events.set": operation("any", "Replace the overrides for native activity pages.",
                             {"events": {"type": "array", "maxItems": 1000, "items": EVENT}}, ("events",)),
-    "gacha.catalog": operation("any", "List native banners, their featured characters and reward groups."),
-    "gacha.get": operation("any", "Return the active configuration and basis-point probabilities."),
+    "gacha.catalog": operation("any", "List native banners, their featured characters and reward groups.", read_only=True),
+    "gacha.get": operation("any", "Return the active configuration and basis-point probabilities.", read_only=True),
     "gacha.set": operation("any", "Replace this realm's banner configuration, effective on the next request.",
                            {"pools": {"type": "array", "maxItems": 1000, "items": BANNER}}, ("pools",)),
-    "realm.status": operation("any", "Read local lifecycle and persistent record counts."),
+    "realm.status": operation("any", "Read local lifecycle and persistent record counts.", read_only=True),
     "realm.stop": operation("running", "Request graceful shutdown of this server instance."),
-    "rules.get": operation("any", "Read configured gameplay rules."),
+    "rules.get": operation("any", "Read configured gameplay rules.", read_only=True),
     "rules.set": operation("stopped", "Update supplied rules atomically.", RULES, minimum=1),
-    "maintenance.list": operation("any", "Read active announcements and the visible client release."),
+    "maintenance.list": operation("any", "Read active announcements and the visible client release.", read_only=True),
     "notice.publish": operation("any", "Publish a new announcement with optional local image files.",
                                 {"title": STRING, "body": STRING, "images": IMAGES}, ("title", "body")),
     "notice.edit": operation("any", "Update an active announcement. An empty image list clears its images.",
@@ -128,16 +128,23 @@ def unique_keys(pairs):
     return value
 
 
-def read_request(path):
-    def read(stream):
-        raw = stream.read(MAX_REQUEST + 1)
-        if len(raw) > MAX_REQUEST:
-            raise ValueError("Input exceeds 64 KiB")
-        return json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique_keys)
-    if path:
+def read_request(path, implicit_empty=False):
+    if path is not None:
         with path.open("rb") as source:
-            return read(source)
-    return read(sys.stdin.buffer)
+            raw = source.read(MAX_REQUEST + 1)
+    else:
+        stdin = sys.stdin
+        if stdin is None or stdin.closed or (implicit_empty and stdin.isatty()):
+            raw = b""
+        else:
+            raw = stdin.buffer.read(MAX_REQUEST + 1)
+        if not raw:
+            if implicit_empty:
+                return {}
+            raise ValueError("Supply a JSON object on standard input or with --input")
+    if len(raw) > MAX_REQUEST:
+        raise ValueError("Input exceeds 64 KiB")
+    return json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique_keys)
 
 
 def validate(value, schema, name="input"):
@@ -240,7 +247,8 @@ def command(state, args, request_stop):
             spec = OPERATIONS.get(args.operation)
             if spec is None:
                 raise KeyError(args.operation)
-            data = read_request(args.input)
+            implicit_empty = spec["readOnly"] and not spec["inputSchema"]["properties"]
+            data = read_request(args.input, implicit_empty)
             validate(data, spec["inputSchema"])
             result = run(state, args.operation, data, request_stop)
         response.update(ok=True, result=result)
