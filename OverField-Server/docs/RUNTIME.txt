@@ -1,0 +1,18 @@
+《开放空间》私服便携包的依赖
+
+游戏协议与玩法源码来自 byzp/of-ps 提交 fa2142b8521e802beb23fc6ed538205b9f4f1513。
+https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513
+app/upstream/LICENSE 及根目录 LICENSE-of-ps.txt 收录上游许可证。当前使用的修改与本地服务端源代码在包内。
+
+Windows x64 运行时来自 CPython 3.13.9 官方嵌入版。
+https://www.python.org/ftp/python/3.13.9/python-3.13.9-embed-amd64.zip
+下载文件 SHA-256 为 91d828c2da3a029b41699e918674a0cb379c02cf20dab9c501306885f837402a。
+runtime-win64/LICENSE.txt 收录 CPython 许可证及随附组件声明。
+
+两个平台使用 protobuf 6.33.5。
+https://pypi.org/project/protobuf/6.33.5/
+protobuf-6.33.5-cp310-abi3-win_amd64.whl 的 SHA-256 为 3093804752167bcab3998bec9f1048baae6e29505adaf1afd14a37bddede533c。
+protobuf-6.33.5-cp39-abi3-manylinux2014_x86_64.whl 的 SHA-256 为 cbf16ba3350fb7b889fca858fb215967792dc125b35c7976ca4818bee3521cf0。
+vendor/common 收录共用模块与 LICENSE，两份本机扩展分别在 vendor/win64 和 vendor/linux-x86_64。
+
+服务端资源摘要与来源保存在 resource-sources.json。

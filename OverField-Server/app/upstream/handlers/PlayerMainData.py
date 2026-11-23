@@ -1,0 +1,199 @@
+from network.packet_handler import PacketHandler, packet_handler
+from network.msg_id import MsgId
+import time
+import logging
+
+from proto.net_pb2 import (
+    PlayerMainDataRsp,
+    StatusCode,
+    PackNotice,
+    SceneDataNotice,
+    ChatMsgRecordInitNotice,
+    ActivitySignInDataNotice,
+    ChangeChatChannelRsp,
+    BlessTreeNotice,
+    QuestStatus,
+    RandomQuestBonus,
+    PlayerBuff,
+    UnSaveOutfitDyeScheme,
+    PlayerQuestionnaireInfo,
+    PlayerAppearance,
+    ItemDetail,
+    ServerSceneSyncDataNotice,
+    SceneActionType,
+    PetWarehouseLimitNotice,
+)
+import utils.db as db
+from utils.res_loader import res
+from utils.pb_create import make_SceneDataNotice, make_ScenePlayer
+# Local-host branch: no cross-server forwarding.
+import server.notice_sync as notice_sync
+from server.scene_data import up_scene_action
+
+logger = logging.getLogger(__name__)
+
+
+@packet_handler(MsgId.PlayerMainDataReq)
+class Handler(PacketHandler):
+    def handle(self, session, data: bytes, packet_id: int):
+        player_id = session.player_id
+
+        rsp = PlayerMainDataRsp()
+        rsp.status = StatusCode.StatusCode_OK
+        rsp.player_id = session.player_id
+
+        infos = db.get_players_info(
+            player_id,
+            "player_name,unlock_functions,level,exp,head,sign,sex,avatar_frame,pendant,world_level,phone_background,create_time,team,birthday,is_hide_birthday,account_type,pet_instance_id,last_login_time",
+        )
+        configured = [row["i_d"] for row in res["PlayerUnlock"]["player_unlock"]["datas"]]
+        unlocks = list(dict.fromkeys([*(infos[1] or ()), *configured]))
+        if unlocks != infos[1]:
+            db.set_players_info(player_id, "unlock_functions", unlocks)
+        rsp.unlock_functions.extend(unlocks)
+        from private_plaza import starter_instruments
+        starter_instruments(player_id)
+        (
+            rsp.player_name,
+            _,
+            rsp.level,
+            rsp.exp,
+            session.avatar_id,
+            rsp.sign,
+            rsp.sex,
+            rsp.appearance.avatar_frame,
+            rsp.appearance.pendant,
+            rsp.world_level,
+            rsp.phone_background,
+            rsp.create_time,
+            [rsp.team.char1, rsp.team.char2, rsp.team.char3],
+            rsp.birthday,
+            rsp.is_hide_birthday,
+            rsp.account_type,
+            rsp.pet_instance_id,
+            llt,
+        ) = infos
+        rsp.head = session.avatar_id
+        session.player_name = rsp.player_name
+        logger.info(f"Player login: {session.player_name}({session.player_id})")
+        make_ScenePlayer(session)
+        # Cross-server publication is disabled.
+
+        for chr in db.get_characters(player_id):
+            rsp.characters.add().ParseFromString(chr)
+
+        rsp.scene_id = session.scene_id
+        rsp.channel_id = session.channel_id
+
+        for chapter in db.get_chapter(session.player_id):
+            rsp.quest_detail.chapters.add().ParseFromString(chapter)
+        rsp.quest_detail.random_quest_bonus_left.CopyFrom(RandomQuestBonus())
+        for quest in db.get_quest(session.player_id):
+            tmp = rsp.quest_detail.quests.add()
+            tmp.ParseFromString(quest)
+            if tmp.status == QuestStatus.QuestStatus_InProgress:
+                session.quests[tmp.quest_id] = tmp
+
+        rsp.player_buffs.add().system_type = PlayerBuff.BuffSystemType_GLOBAL
+        rsp.un_save_outfit_dye_scheme.CopyFrom(UnSaveOutfitDyeScheme())
+        rsp.player_drop_rate_info.kill_drop_rate = 1000
+        rsp.player_drop_rate_info.treasure_drop_rate = 1000
+        rsp.questionnaire_info.CopyFrom(PlayerQuestionnaireInfo())
+        rsp.player_label = player_id
+        rsp.channel_label = session.channel_id
+        rsp.month_card_over_due_time = db.get_month_card_over_due_time(player_id)
+        rsp.garden_likes_num, _, _, _, _ = db.get_garden_info(player_id)
+        rsp.month_card_reward_days = db.get_month_card_reward_days(player_id)
+        rsp.daily_task.tasks[1] = 521004  # TODO 随机生成每日月亮任务
+        rsp.daily_task.tasks[2] = 521005
+        rsp.daily_task.tasks[3] = 521006
+        rsp.daily_task.tasks[4] = 521007
+        rsp.daily_task.exchange_times_left = 0
+        rsp.appearance.CopyFrom(PlayerAppearance())
+        rsp.sp_open_status = True
+        rsp.sp_check_status = True
+        session.send(MsgId.PlayerMainDataRsp, rsp, packet_id)  # 1005,1006
+
+        # 计算体力和精力的回复
+        item = ItemDetail()
+        item_b = db.get_item_detail(session.player_id, 10)  # 体力
+        item.ParseFromString(item_b)
+        item.main_item.base_item.num += int((time.time() - llt) / 300)
+        if item.main_item.base_item.num > 150:
+            item.main_item.base_item.num = 150
+        db.set_item_detail(session.player_id, item.SerializeToString(), 10)
+        item_b = db.get_item_detail(session.player_id, 11)  # 精力
+        item.ParseFromString(item_b)
+        item.main_item.base_item.num += int((time.time() - llt) / 60)
+        if item.main_item.base_item.num > 800:
+            item.main_item.base_item.num = 800
+        db.set_item_detail(session.player_id, item.SerializeToString(), 11)
+
+        items_data = db.get_item_detail(session.player_id)
+        if items_data:
+            items_by_tag = {}
+
+            for item_blob in items_data:
+                item = ItemDetail()
+                item.ParseFromString(item_blob)
+                item_tag = item.main_item.item_tag
+                if item_tag not in items_by_tag:
+                    items_by_tag[item_tag] = []
+                items_by_tag[item_tag].append(item)
+
+            for item_tag, items_in_tag in items_by_tag.items():
+                rsp = PackNotice()
+                rsp.status = StatusCode.StatusCode_OK
+                for item in items_in_tag:
+                    # TODO 临时物品发到邮件
+                    rsp.items.add().CopyFrom(item)
+                session.send(
+                    MsgId.PackNotice, rsp, 0
+                )  # 按物品类型分组发送items物品数据
+
+        rsp = ActivitySignInDataNotice()
+        rsp.status = StatusCode.StatusCode_OK
+        for activity in res["Activity"]["activity"]["datas"]:
+            if activity.get("i_d", 0):
+                tmp = rsp.info.add()
+                tmp.activity_id = activity["i_d"]
+        session.send(MsgId.ActivitySignInDataNotice, rsp, 0)  # TODO
+
+        rsp = BlessTreeNotice()
+        rsp.status = StatusCode.StatusCode_OK
+        for k, v in db.get_bless_tree(session.player_id).items():
+            rsp.trees[k].tree_ids.extend(v)
+        session.send(MsgId.BlessTreeNotice, rsp, 0)
+
+        rsp = SceneDataNotice()
+        rsp.CopyFrom(make_SceneDataNotice(session))
+        session.send(MsgId.SceneDataNotice, rsp, 0)
+
+        from private_chat import login as init_chat
+        init_chat(session,packet_id)
+
+        rsp = PetWarehouseLimitNotice()
+        rsp.status = StatusCode.StatusCode_OK
+        rsp.warehouse_limit = 65536
+        session.send(MsgId.PetWarehouseLimitNotice, rsp, packet_id)
+
+        # 视为完成登录，同步场景玩家并广播加入事件
+        if session.logged_in == False:
+            session.logged_in = True
+
+            notice = ServerSceneSyncDataNotice()
+            notice.status = StatusCode.StatusCode_OK
+            d = notice.data.add()
+            d.player_id = session.player_id
+            sd = d.server_data.add()
+            sd.action_type = SceneActionType.SceneActionType_ENTER
+            sd.player.CopyFrom(session.scene_player)
+            up_scene_action(session.scene_id, session.channel_id, notice)
+
+            # 同步时间
+            rsp = ServerSceneSyncDataNotice()
+            rsp.status = StatusCode.StatusCode_OK
+            tmp = rsp.data.add().server_data.add()
+            tmp.action_type = SceneActionType.SceneActionType_TOD_UPDATE
+            tmp.tod_time = int(notice_sync.tod_time)
+            session.send(MsgId.ServerSceneSyncDataNotice, rsp, 0)

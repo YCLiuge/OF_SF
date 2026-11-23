@@ -1,0 +1,278 @@
+"""1.1.12 public game discovery and a read-only, allowlisted local YooAsset mirror."""
+import hashlib
+import ipaddress
+import os
+from pathlib import Path
+import re
+import socket
+import struct
+import time
+from urllib.parse import urlsplit
+from local_picker import LABEL as PICKER_LABEL, LocalPicker
+
+
+BUILD = "2026-10-21-14-05-50"
+PATCH = "2026-11-07-22-39-35"
+VERSION = BUILD + "_" + PATCH
+PREFIX = "PackageManifest_DefaultPackage"
+PACKAGE = "DefaultPackage"
+MANIFEST_SHA = {
+    BUILD: "cb7dd3bb6e9ed0702ceb3c1ca96f43998d4af904327ba4c349224947d976f8be",
+    PATCH: "8c467ba267e06ffa4cd6e3dcb2326a6afc403c7f5e1c2dc18bcc1e83410204d9",
+}
+ROUTES = {"/dispatch/get_login_url_list", "/dispatch/client_hot_update", "/dispatch/region_info",
+          "/dispatch/get_notice_list", "/dispatch/get_notice_url_list"}
+HASH = re.compile(rb"\.bundle.{4}\x20\x00([a-f0-9]{32})\x08\x00[a-f0-9]{8}(.{8})", re.S)
+CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _local_address(value):
+    ip = ipaddress.ip_address(value)
+    return (ip.is_loopback or ip.is_private or ip in CGNAT) and not (
+        ip.is_unspecified or ip.is_multicast or ip.is_reserved and not ip.is_loopback
+    )
+
+
+def _origin(value):
+    url = urlsplit(value)
+    if (url.scheme not in {"http", "https"} or not url.hostname or url.username is not None
+            or url.password is not None or url.path not in {"", "/"} or url.query or url.fragment
+            or any(ord(c) < 33 or c in "\\;," for c in value)):
+        raise ValueError("The game dispatch URL must be a dedicated private HTTP(S) origin")
+    port = url.port
+    addresses = {r[4][0] for r in socket.getaddrinfo(url.hostname, port or (443 if url.scheme == "https" else 80),
+                                                       type=socket.SOCK_STREAM)}
+    if not addresses or not all(_local_address(a) for a in addresses):
+        raise ValueError("Advertise a loopback or private-network dispatch address")
+    return f"{url.scheme}://{url.netloc}"
+
+
+def _hash(path, algorithm):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, algorithm).hexdigest()
+
+
+class Assets:
+    """Expose the original installed client files required by this specific active manifest."""
+
+    def __init__(self, client_root):
+        self.root = Path(client_root).resolve(strict=True)
+        data = self.root / "launcher_Data"
+        streaming = data / "StreamingAssets" / "yoo" / PACKAGE
+        cache = data / "yoo" / PACKAGE
+        if (self.root / "version").read_bytes().strip() != BUILD.encode():
+            raise ValueError("Unexpected client build")
+        self._meta = {}
+        version_file = cache / "ManifestFiles" / (PREFIX + ".version")
+        if version_file.read_bytes().strip() != PATCH.encode():
+            raise ValueError("The expected active resource patch is unavailable")
+        self._meta[version_file.name] = (version_file, _hash(version_file, "sha256"))
+        active = None
+        for version, base in [(BUILD, streaming), (PATCH, cache / "ManifestFiles")]:
+            manifest = base / f"{PREFIX}_{version}.bytes"
+            checksum = manifest.with_suffix(".hash")
+            blob = manifest.read_bytes()
+            if hashlib.sha256(blob).hexdigest() != MANIFEST_SHA[version]:
+                raise ValueError("Unexpected original manifest digest")
+            if checksum.read_bytes().strip() != hashlib.md5(blob).hexdigest().encode():
+                raise ValueError("Original manifest hash file mismatch")
+            self._meta[manifest.name] = (manifest, MANIFEST_SHA[version])
+            self._meta[checksum.name] = (checksum, _hash(checksum, "sha256"))
+            if version == PATCH:
+                active = blob
+        self._bundles = {}
+        missing = 0
+        cached_count = 0
+        entries = list(HASH.finditer(active))
+        if len(entries) != 8936 or len({e[1] for e in entries}) != len(entries):
+            raise ValueError("Unexpected 1.1.12 manifest file table")
+        for match in entries:
+            name = match[1].decode("ascii")
+            length, = struct.unpack("<Q", match[2])
+            patch = cache / "CacheFiles" / name[:2] / name / "__data"
+            packaged = streaming / (name + ".bundle")
+            for path in (patch, packaged):
+                try:
+                    found = path.stat().st_size == length and path.is_file()
+                except (FileNotFoundError, NotADirectoryError):
+                    found = False
+                if found:
+                    self._bundles[name + ".bundle"] = (path, length, name)
+                    cached_count += int(path == patch)
+                    break
+            else:
+                missing += 1
+        if missing:
+            raise ValueError(f"Missing or wrong-sized active resource bundles: {missing} of {len(entries)}")
+        self.count = len(self._bundles)
+        self.from_cache = cached_count
+
+    def open(self, leaf):
+        """Open only original manifest/version metadata or an active digest-named resource."""
+        if leaf in self._meta:
+            path, expected = self._meta[leaf]
+            size = None
+            algorithm = "sha256"
+        elif leaf in self._bundles:
+            path, size, expected = self._bundles[leaf]
+            algorithm = "md5"
+        else:
+            raise FileNotFoundError(leaf)
+        if not path.resolve(strict=True).is_relative_to(self.root):
+            raise ValueError("Resource escapes client root")
+        stream = path.open("rb")
+        try:
+            if size is not None and os.fstat(stream.fileno()).st_size != size:
+                raise ValueError("Unexpected resource length")
+            if hashlib.file_digest(stream, algorithm).hexdigest() != expected:
+                raise ValueError("Resource content no longer matches the manifest")
+            stream.seek(0)
+            return stream
+        except BaseException:
+            stream.close()
+            raise
+
+
+class GameDispatch:
+    def __init__(self, dispatch_url, game_host, game_port, *, client_root=None, region_name="本地区服"):
+        self.origin = _origin(dispatch_url)
+        if not isinstance(game_host,str) or not game_host or any(c.isspace() or c in "/\\?#@" for c in game_host):
+            raise ValueError("Supply a private server gameplay hostname or IP")
+        if game_host in ("0.0.0.0","::") or not 1 <= game_port <= 65535:
+            raise ValueError("Supply the actual advertised gameplay endpoint")
+        if not region_name or len(region_name) > 64 or any(ord(c)<32 for c in region_name):
+            raise ValueError("Invalid region name")
+        self.game_host, self.game_port = game_host, game_port
+        self.region_name = region_name
+        if os.environ.get("OF_NATIVE_PICKER")=="1" and os.environ.get("OF_REMOTE_SSH_TARGET"):
+            self.region_name = "SSH · "+os.environ["OF_REMOTE_SSH_TARGET"][:48]
+        self.assets = None if client_root is None else Assets(client_root)
+        self.picker = LocalPicker.configured(client_root,self.origin)
+        self.maintenance = None
+
+    def response(self, route):
+        if route == "/dispatch/get_notice_url_list":
+            return 200, {"data": []}
+        if route == "/dispatch/get_notice_list":
+            from realm_maintenance import native_notices
+            import http.client, sqlite3
+            try:
+                rows=native_notices(self.maintenance.feed(),self.origin) if self.maintenance else []
+            except (KeyError,TypeError,ValueError,OSError,sqlite3.Error,http.client.HTTPException):
+                rows=[]
+            return 200, {"data": rows, "serverTime": time.time_ns() // 1_000_000}
+        if route == "/dispatch/get_login_url_list":
+            return 200, {"LoginUrlList": [{"loginUrl": self.origin, "name": self.region_name}]}
+        if route == "/dispatch/region_info":
+            return 200, {"status": True, "message": "success", "gate_tcp_ip": self.game_host,
+                         "gate_tcp_port": self.game_port, "is_server_open": True, "text": "",
+                         "client_log_tcp_ip": "", "client_log_tcp_port": 0, "currentVersion": VERSION,
+                         "photo_share_cdn_url": ""}
+        if route == "/dispatch/client_hot_update":
+            if self.assets is None:
+                return 503, {"status": False, "message": "1.1.12 client assets are not mounted on this server"}
+            return 200, {"status": True, "message": "success", "hotOssUrl": self.origin + "/Resources",
+                         "currentVersion": VERSION, "server": "private", "server_id": "10001",
+                         "ssAppId": "", "ssServerUrl": "", "open_gm": False, "open_error_log": False,
+                         "open_netConnecting_log": False, "ipAddress": "", "payUrl": "",
+                         "isTestServer": False, "error_log_level": 2, "open_cs": False}
+        raise KeyError(route)
+
+
+def _resource(handler, dispatch, route):
+    prefix = "/Resources/" + BUILD + "/"
+    name = route[len(prefix):] if route.startswith(prefix) else ""
+    if not name or "/" in name or "\\" in name or dispatch.assets is None:
+        handler._reply(404, {"error": "resource not found"})
+        return
+    try:
+        stream = dispatch.assets.open(name)
+    except FileNotFoundError:
+        handler._reply(404, {"error": "resource not found"})
+        return
+    except (OSError, ValueError):
+        handler._reply(503, {"error": "original resource unavailable or changed"})
+        return
+    with stream:
+        size = os.fstat(stream.fileno()).st_size
+        first, last, status = 0, size - 1, 200
+        ranges = handler.headers.get_all("Range") or []
+        if ranges:
+            m = re.fullmatch(r"bytes=([0-9]{1,19})-([0-9]{0,19})", ranges[0])
+            if len(ranges) != 1 or m is None:
+                handler._reply(416, {"error":"unsupported range"})
+                return
+            first = int(m[1])
+            last = min(int(m[2]),size-1) if m[2] else size-1
+            if not 0 <= first <= last < size:
+                handler._reply(416, {"error":"range outside resource"})
+                return
+            status = 206
+        handler.send_response(status)
+        handler.send_header("Content-Type","application/octet-stream")
+        handler.send_header("Content-Length",str(last-first+1))
+        handler.send_header("Accept-Ranges","bytes")
+        if status == 206:
+            handler.send_header("Content-Range",f"bytes {first}-{last}/{size}")
+        handler.send_header("Connection","close")
+        handler.end_headers()
+        handler.close_connection = True
+        if handler.command == "HEAD":
+            return
+        stream.seek(first)
+        remaining = last-first+1
+        while remaining:
+            block = stream.read(min(remaining,256*1024))
+            if not block:
+                raise IOError("resource changed during delivery")
+            handler.wfile.write(block)
+            remaining -= len(block)
+
+
+def handle_game_dispatch(handler):
+    """Call after ProfileHandler._accept() before reading any body. False means no matching route."""
+    dispatch = getattr(handler.server,"game_dispatch",None)
+    if dispatch is None:
+        return False
+    route = handler.path.partition("?")[0]
+    # The retail 1.1.12 configuration uses this optional loopback mount.
+    # Only public bootstrap routes are matched below, never player sessions.
+    if route.startswith("/private-game/"):
+        route = route[len("/private-game"):]
+    picker = dispatch.picker
+    if picker and route.startswith(picker.prefix + "/"):
+        handler.close_connection = True
+        suffix = route[len(picker.prefix):]
+        if not picker.local_client(handler):
+            handler._reply(403, {"error":"local player required"})
+        elif handler.command != "POST" or suffix not in ROUTES:
+            handler._reply(405, {"error":"unsupported address-editor operation"})
+        else:
+            # Retail confirms a selection by fetching its update plan. Keep that plan
+            # valid so closing the editor leaves the current private realm playable.
+            if suffix=="/dispatch/client_hot_update":
+                try:
+                    picker.enter(handler.connection)
+                except OSError:
+                    pass
+            status, response = dispatch.response(suffix)
+            handler._reply(status,response)
+        return True
+    if route not in ROUTES and not route.startswith("/Resources/"):
+        return False
+    handler.close_connection = True
+    if any(key in handler.headers for key in ("Authorization","Proxy-Authorization","Cookie")):
+        handler._reply(403, {"error":"credentials are not accepted by public game discovery"})
+        return True
+    if handler.command == "POST" and route in ROUTES:
+        # The response is server-wide. Don't parse, log, echo, or persist request bodies.
+        status, response = dispatch.response(route)
+        if route == "/dispatch/get_login_url_list" and picker and picker.local_client(handler):
+            response["LoginUrlList"].append({"loginUrl":dispatch.origin + picker.prefix,"name":PICKER_LABEL})
+        handler._reply(status,response)
+    elif handler.command in ("GET","HEAD") and route.startswith("/Resources/"):
+        _resource(handler,dispatch,route)
+    else:
+        handler._reply(405, {"error":"method not allowed"})
+    return True
+

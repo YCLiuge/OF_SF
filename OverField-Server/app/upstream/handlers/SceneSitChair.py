@@ -1,0 +1,24 @@
+from network.packet_handler import PacketHandler, packet_handler
+from network.msg_id import MsgId
+from private_chairs import sit
+
+
+from proto.net_pb2 import SceneSitChairReq, SceneSitChairRsp, StatusCode
+
+
+@packet_handler(MsgId.SceneSitChairReq)
+class Handler(PacketHandler):
+    def handle(self, session, data: bytes, packet_id: int):
+        req = SceneSitChairReq()
+        req.ParseFromString(data)
+
+        rsp = SceneSitChairRsp()
+
+        rsp.status = StatusCode.StatusCode_OK
+        rsp.player_id = session.player_id
+        rsp.chair_id = req.chair_id
+        rsp.seat_id = req.seat_id
+        rsp.is_sit = req.is_sit
+
+        rsp.status = sit(session, req, rsp)
+        session.send(MsgId.SceneSitChairRsp, rsp, packet_id)

@@ -1,0 +1,31 @@
+services:
+  realm:
+    build: .
+    image: overfield-native-server:1.1.12-dev
+    platform: linux/amd64
+    init: true
+    read_only: true
+    tmpfs:
+      - "/tmp:size=64m,mode=1777"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      OF_GAME_HOST: ${OF_GAME_HOST:-127.0.0.1}
+      OF_REGISTRATION: ${OF_REGISTRATION:-closed}
+      OF_DISPATCH_URL: ${OF_DISPATCH_URL:-}
+      OF_HTTP_HOSTS: ${OF_HTTP_HOSTS:-}
+    ports:
+      - "${OF_PUBLISH_IP:-127.0.0.1}:18881:18881/tcp"
+      - "${OF_PUBLISH_IP:-127.0.0.1}:11033:11033/tcp"
+    volumes:
+      - realm-state:/state
+    healthcheck:
+      test: ["CMD", "python", "-B", "of.py", "health"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 15s
+volumes:
+  realm-state:

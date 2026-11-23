@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>OverField.Launcher</AssemblyName>
+    <AssemblyTitle>开放空间私服启动器</AssemblyTitle>
+    <Product>开放空间私服启动器</Product>
+    <Version>1.1.12.1</Version>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+    <RootNamespace>OverField.PrivateLauncher</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="PrivateLauncher.cs;PrivateService.cs;LauncherJson.cs" />
+  </ItemGroup>
+</Project>
