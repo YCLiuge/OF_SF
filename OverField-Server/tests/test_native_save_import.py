@@ -26,7 +26,12 @@ def synthetic():
         "main":packet("PlayerMainDataRsp",{"player_name":"DO-NOT-COPY","account_type":9999,"player_id":4444444,
             "level":20,"exp":322,"world_level":2,"team":{"char1":101001},
             "characters":[{"character_id":101001,"level":17,"max_level":20,"star":1,"exp":21,
-                           "equipment_presets":[{"weapon":986654321}]}],
+                           "equipment_presets":[{"weapon":986654321}],"in_use_outfit_preset_index":2,
+                           "outfit_presets":[{"preset_index":2,"pend_top":4200744,"pend_up_face":4011044,
+                                    "pend_down_face":4200045,"clothes":4011013,"clothes_dye_scheme_index":1,
+                                    "outfit_hide_info":{"hide_braid":True,"hide_orn":True}},
+                                   {"preset_index":0,"hair":4011012,"hair_dye_scheme_index":23,
+                                    "pend_top":4011013}]}],
             "quest_detail":{"quests":[{"quest_id":100011,"status":{"v":3},"complete_count":1,
                            "conditions":[{"condition_id":11000111,"progress":1,"status":{"v":3}}]}],
                            "chapters":[{"chapter_id":10000,"rewarded_story_ids":[1000001]}]}}),
@@ -36,7 +41,8 @@ def synthetic():
         "ach":packet("WorldLevelAchieveListRsp",{"achieves":[{"achieve_id":16000201,"count":22}]}),
         "chat":packet("PlayerChatNotice",{"name":"DO-NOT-COPY"})},
         "customisation":{"dye":{"outfitsData":[{"outfit_id":4011013,"schemes":[{"scheme_index":0,"is_un_lock":True,
-                     "colors":[{"pos":1,"r":50,"g":60,"b":70}]}]}]}}}
+                     "colors":[{"pos":1,"r":50,"g":60,"b":70}]},{"scheme_index":1,"is_un_lock":True,
+                     "colors":[{"pos":1,"r":20,"g":40,"b":80}]}]}]}}}
 
 
 @contextmanager
@@ -78,6 +84,12 @@ def run(root,resources):
         assert a["import_expires_in"]==600
         assert call("import-preview",{"import_ticket":a["ticket"],"data":data})[0]==401
         assert call("import-preview",{**auth,"data":{**data,"gm":999}})[0]==400
+        older=deepcopy(data)
+        older["heroes"][0][6]=[[0,4011012,4011013,0,0,0,0,0]]
+        assert call("import-preview",{**auth,"data":older})[0]==200
+        duplicate=deepcopy(data)
+        duplicate["heroes"][0][6][1][0]=2
+        assert call("import-preview",{**auth,"data":duplicate})[0]==400
         assert call("import-preview",{**auth,"data":{**data,"stacks":[[1,True]]}})[0]==400
         assert call("import-preview",{**auth,"data":data,"slot":b["slot"]})[0]==400
         status,info=call("import-preview",{**auth,"data":data})
@@ -97,6 +109,12 @@ def run(root,resources):
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,5012011)).main_item.base_item.num==53
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,101)).main_item.base_item.num==1000000
         hero=pb.Character.FromString(db.get_characters(pid,101001)[0])
+        selected=hero.outfit_presets[hero.in_use_outfit_preset_index]
+        assert (selected.preset_index,selected.pend_top,selected.pend_up_face)==(2,4200744,4011044),selected
+        assert selected.pend_down_face==4200045 and selected.clothes_dye_scheme_index==1
+        assert selected.outfit_hide_info.hide_orn and selected.outfit_hide_info.hide_braid
+        assert hero.outfit_presets[0].hair==4011012 and hero.outfit_presets[0].hair_dye_scheme_index==0
+        assert hero.outfit_presets[0].pend_top==0
         assert hero.level==17 and db.get_players_info(pid,"team")[0]==(101001,0,0)
         equipped=hero.equipment_presets[0].weapon
         item=pb.ItemDetail.FromString(db.get_item_detail(pid,instance_id=equipped)).main_item.weapon
@@ -118,6 +136,9 @@ def run(root,resources):
         client,info,_=login(game.port,new["ticket"])
         with closing(client):
             main,_=join(client)
+            native_hero=next(h for h in main.characters if h.character_id==101001)
+            native_look=native_hero.outfit_presets[native_hero.in_use_outfit_preset_index]
+            assert native_look.clothes_dye_scheme_index==1 and native_look.pend_top==4200744 and native_look.outfit_hide_info.hide_braid
             assert main.level==20 and main.scene_id==9999 and main.player_name=="本服角色甲"
             assert not call("import-preview",{**auth,"data":data})[1]["eligible"]
             assert call("import-undo",auth)[0]==409

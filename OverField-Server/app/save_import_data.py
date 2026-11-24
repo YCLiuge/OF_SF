@@ -9,7 +9,9 @@ ZIP_LIMIT=32*1024*1024
 DATA_FORMAT="of-sf-progress/1"
 ARRAY_LIMITS={"heroes":100,"quests":1800,"chapters":100,"achievements":14000,"stacks":12000,
               "outfits":3500,"gear":2200}
-WEAR=("hat","hair","clothes","ornament","pend_chest","pend_pelvis","pend_left_foot","pend_right_foot")
+LEGACY_WEAR=("hat","hair","clothes","ornament","pend_chest","pend_pelvis","pend_left_foot","pend_right_foot")
+WEAR=("hat","hair","clothes","ornament","pend_top","pend_chest","pend_pelvis","pend_up_face","pend_down_face",
+      "pend_left_hand","pend_right_hand","pend_left_foot","pend_right_foot")
 
 
 class BackupFormatError(ValueError):
@@ -49,7 +51,12 @@ def project(snapshot):
     for h in main.get("characters",[]):
         core=numbers(h,("character_id","level","max_level","exp","star"))
         skills=[numbers(s,("skill_id","skill_level")) for s in h.get("character_skill_list",[])]
-        presets=[numbers(p,WEAR) for p in h.get("outfit_presets",[])[:3]]
+        presets=[]
+        for look in h.get("outfit_presets",[])[:3]:
+            hide=look.get("outfit_hide_info",{})
+            presets.append([integer(look.get("preset_index")),numbers(look,WEAR),
+                            numbers(look,(slot+"_dye_scheme_index" for slot in WEAR)),
+                            int(hide.get("hide_orn") is True),int(hide.get("hide_braid") is True)])
         data["heroes"].append([*core,skills,presets,integer(h.get("in_use_outfit_preset_index"),2)])
     quest=main.get("quest_detail",{})
     for ch in quest.get("chapters",[]):

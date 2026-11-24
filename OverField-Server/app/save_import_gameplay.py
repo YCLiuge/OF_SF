@@ -5,7 +5,7 @@ from private_story_catalog import catalog as story_catalog
 from proto import net_pb2 as pb
 from utils import db
 from utils.pb_create import make_item, make_Quest
-from save_import_data import ARRAY_LIMITS, DATA_FORMAT, WEAR
+from save_import_data import ARRAY_LIMITS, DATA_FORMAT, LEGACY_WEAR, WEAR
 
 LABELS={"heroes":"探索员","quests":"剧情任务","chapters":"章节领奖记录","achievements":"个人成就",
         "stacks":"背包物品","outfits":"服饰","gear":"装备"}
@@ -34,6 +34,23 @@ def number(value,maximum=2147483647):
 
 def numbers(value,size):
     return [number(v) for v in row(value,size)]
+
+
+def looks_for_actor(looks):
+    normalized=[]
+    slots=set()
+    for position,look in enumerate(rows(looks,3)):
+        if type(look) is list and len(look)==len(LEGACY_WEAR):
+            old=dict(zip(LEGACY_WEAR,numbers(look,len(LEGACY_WEAR))))
+            index,parts,schemes,hide_orn,hide_braid=position,[old.get(name,0) for name in WEAR],[0]*len(WEAR),0,0
+        else:
+            index,parts,schemes,hide_orn,hide_braid=row(look,5)
+            number(index,2);number(hide_orn,1);number(hide_braid,1)
+            parts=numbers(parts,len(WEAR));schemes=numbers(schemes,len(WEAR))
+        if index in slots:raise ValueError("duplicate outfit preset")
+        slots.add(index)
+        normalized.append([index,parts,schemes,hide_orn,hide_braid])
+    return normalized
 
 
 def validate(data):
@@ -75,7 +92,7 @@ def validate(data):
         key,lv,cap,exp,star,skills,presets,active=row(entry,8)
         for num in (key,lv,cap,exp,star,active):number(num)
         skills=[numbers(s,2) for s in rows(skills,16)]
-        presets=[numbers(s,len(WEAR)) for s in rows(presets,3)]
+        presets=looks_for_actor(presets)
         cfg=definitions.get(key)
         if not cfg or not cfg.get("default_weapon_i_d"):continue
         rules=_table("Character","level_rule").get(cfg.get("rule_i_d"),{}).get("level_rule_info",())
@@ -167,6 +184,7 @@ def validate(data):
         out["loadouts"].append([actor,active,sorted(chosen.items())])
     totals={"队长等级":out["player"][0],**{LABELS[k]:len(out[k]) for k in LABELS}}
     skipped=sum(len(data[k])-len(out[k]) for k in LABELS)
+    totals["穿搭预设"]=sum(len(h[6]) for h in out["heroes"])
     totals["已编队人数"]=sum(bool(i) for i in out["team"])
     totals["装备预设"]=sum(len(presets) for _,_,presets in out["loadouts"])
     totals["跳过记录"]=skipped
@@ -207,11 +225,27 @@ def restore(pid,plan):
         skill_map=dict(skills)
         for s in c.character_skill_list:
             if s.skill_id in skill_map:s.skill_level=max(1,min(10,skill_map[s.skill_id]))
-        for i,look in enumerate(looks):
-            if i>=len(c.outfit_presets):break
-            preset=pb.OutfitPreset();preset.CopyFrom(c.outfit_presets[i])
-            for name,value in zip(WEAR,look):setattr(preset,name,value)
-            if valid_preset(pid,key,preset):c.outfit_presets[i].CopyFrom(preset)
+        for index,parts,dyes,hide_orn,hide_braid in looks_for_actor(looks):
+            preset=next((p for p in c.outfit_presets if p.preset_index==index),None)
+            if preset is None:continue
+            for slot,wearable,scheme in zip(WEAR,parts,dyes):
+                index_field=slot+"_dye_scheme_index"
+                if not wearable:
+                    setattr(preset,slot,0)
+                    setattr(preset,index_field,0)
+                    continue
+                sample=pb.OutfitPreset()
+                setattr(sample,slot,wearable)
+                setattr(sample,index_field,scheme)
+                if not valid_preset(pid,c.character_id,sample):
+                    if not scheme:continue
+                    setattr(sample,index_field,0)
+                    if not valid_preset(pid,c.character_id,sample):continue
+                    scheme=0
+                setattr(preset,slot,wearable)
+                setattr(preset,index_field,scheme)
+            preset.outfit_hide_info.hide_orn=bool(hide_orn)
+            preset.outfit_hide_info.hide_braid=bool(hide_braid)
         if active<len(c.outfit_presets):c.in_use_outfit_preset_index=active
         db.set_character(pid,key,c.SerializeToString())
     instances=[]
@@ -224,11 +258,11 @@ def restore(pid,plan):
         if not item.instance_id:raise ValueError("catalog equipment instance unavailable")
         db.set_item_detail(pid,value.SerializeToString(),None,item.instance_id)
         instances.append(item.instance_id)
-    if plan["team"]:
+    if plan.get("team"):
         db.set_players_info(pid,"team",tuple(plan["team"]))
         db.set_players_info(pid,"character_id",plan["team"][0])
     from private_equipment_presets import normalize_character,slots as equipment_slots,preset_at
-    for actor,active,presets in plan["loadouts"]:
+    for actor,active,presets in plan.get("loadouts",()):
         c=pb.Character.FromString(db.get_characters(pid,actor)[0]);normalize_character(c)
         previous=preset_at(c,c.in_use_equipment_preset_index)
         for kind,_,iid in equipment_slots(previous):
