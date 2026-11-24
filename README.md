@@ -42,3 +42,7 @@ OF_SF 提供 Windows 启动器和可迁移的区服，适用于国服 TapTap PC 
 从源码构建时，先从自己已有的对应版本发行包导入游戏配置和平台依赖。Windows 启动器使用 .NET 10，项目提供构建安装器、校验数据和重打双平台服务端包的工具。[源码构建](tools/BUILD.md)
 
 服务端基于 [byzp/of-ps](https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513)。上游及修改部分附 [AGPL-3.0](OverField-Server/LICENSE-of-ps.txt)，仓库原有 [GPL-3.0](LICENSE) 保留。[运行时与来源](OverField-Server/docs/RUNTIME.txt)
+
+## 免责声明
+
+OF_SF 仅供技术学习与交流。使用者应自行承担因使用本项目产生的后果，与作者无关。相关游戏素材及商标的权利归各自权利人所有。若您认为项目内容侵犯了您的权益，请通过本仓库的 [Issues](https://github.com/YCLiuge/OF_SF/issues) 联系作者并指出相关内容，我们会及时核实并删除侵权内容。
