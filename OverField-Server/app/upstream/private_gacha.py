@@ -1,6 +1,7 @@
 """Native recruiting. The game host commits currency, roster, results and history together."""
 import json
 import secrets
+from functools import lru_cache
 
 from proto import net_pb2 as pb
 from utils import db
@@ -27,7 +28,13 @@ def setup():
 
 def active():
     row = db.conn.execute("SELECT settings FROM authority.private_gacha_config WHERE id=1").fetchone()
-    config = json.loads(row[0]) if row else defaults()
+    return _enabled_pools(row[0] if row else None)
+
+
+@lru_cache(maxsize=1)
+def _enabled_pools(settings):
+    # Cache only decoded configuration. Each request still reads the owner's current revision.
+    config = json.loads(settings) if settings is not None else defaults()
     return {p["id"]: p for p in config["pools"] if p["enabled"]}
 
 
@@ -40,12 +47,27 @@ def onboarding(session):
                 and step.conditions[0].condition_id == tutorial.CONDITIONS[-1])
 
 
-def info(pid, pool):
+def pool_stats(pid, keys):
+    # Probe only visible pools through each table's existing index, including on large old saves.
+    values = ",".join("(?)" for _ in keys)
+    rows = db.conn.execute(f"""WITH listed(pool) AS (VALUES {values})
+        SELECT pool,
+               (SELECT COUNT(*) FROM gacha_record WHERE player_id=? AND gacha_id=listed.pool),
+               EXISTS(SELECT 1 FROM private_gacha_picks p WHERE p.player=? AND p.pool=listed.pool),
+               (SELECT guarantee FROM gacha_guarantee WHERE player_id=? AND gacha_id=listed.pool)
+          FROM listed""", (*keys, pid, pid, pid))
+    return {key: (total, picked, misses) for key, total, picked, misses in rows}
+
+
+def info(pid, pool, stats=None):
     key = pool["id"]
-    count = db.get_total_gacha_num(pid, key)
-    picked = db.conn.execute("SELECT 1 FROM private_gacha_picks WHERE player=? AND pool=?", (pid, key)).fetchone()
+    if stats is None:
+        stats = pool_stats(pid, (key,))
+    count, picked, misses = stats[key]
+    if misses is None:
+        misses = recent_misses(pid, pool["pity"] - 1, 4) if key == 2000 else 0
     return pb.GachaInfo(gacha_id=key, gacha_times=count, has_full_pick=bool(picked),
-                        guarantee=max(1, pool["pity"] - pity_misses(pid, pool)))
+                        guarantee=max(1, pool["pity"] - misses))
 
 
 CHOICE = 9000
@@ -61,11 +83,13 @@ def selected(pid, pools):
     return stored[0] if stored and stored[0] in choices(pools) else 0
 
 
-def choice_info(pid, pools):
+def choice_info(pid, pools, stats=None):
     pick = selected(pid, pools)
-    result = pb.GachaInfo(gacha_id=CHOICE, choose_pool_id=pick, gacha_times=db.get_total_gacha_num(pid, CHOICE))
+    count = stats[CHOICE][0] if stats is not None else db.get_total_gacha_num(pid, CHOICE)
+    result = pb.GachaInfo(gacha_id=CHOICE, choose_pool_id=pick, gacha_times=count)
     if pick:
-        result.guarantee = max(1, pools[pick]["pity"] - db.get_gacha_guarantee(pid, pick))
+        misses = (stats[pick][2] or 0) if stats is not None else db.get_gacha_guarantee(pid, pick)
+        result.guarantee = max(1, pools[pick]["pity"] - misses)
     return result
 
 
@@ -83,10 +107,14 @@ def list_pools(session, req, rsp):
     if onboarding(session):
         return tutorial.list_pools(session, req, rsp)
     pools = active()
-    for pool in pools.values():
-        rsp.gachas.add().CopyFrom(info(session.player_id, pool))
-    if choices(pools):
-        rsp.gachas.add().CopyFrom(choice_info(session.player_id, pools))
+    show_choice = bool(choices(pools))
+    if pools:
+        keys = (*pools, CHOICE) if show_choice else tuple(pools)
+        stats = pool_stats(session.player_id, keys)
+        for pool in pools.values():
+            rsp.gachas.add().CopyFrom(info(session.player_id, pool, stats))
+        if show_choice:
+            rsp.gachas.add().CopyFrom(choice_info(session.player_id, pools, stats))
     return pb.StatusCode_OK
 
 

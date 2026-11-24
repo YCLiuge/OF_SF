@@ -678,6 +678,7 @@ def make_SceneDataNotice(session):
         data.challenges.add().ParseFromString(i)
     from private_flag_battle import fill as fill_flag_battles
     fill_flag_battles(session, data)
+    session.campfires.snapshot(session, data)
     from private_channels import fill_garden
     fill_garden(session,data.scene_garden_data)
     for m in res["Flag"]["flag"]["datas"]:
@@ -746,21 +747,48 @@ def make_PlayerBriefInfo(player_id, info=None):
 
 
 def make_Quest(player_id, quest_id, q=None):
-    if q == None:
+    from private_dungeons import _table
+    row = _table("Quest", "quest").get(quest_id)
+    if row is None:
+        return None
+    if q is None:
         q = Quest()
-    for i in res["Quest"]["quest"]["datas"]:
-        if i["i_d"] == quest_id:
-            q.quest_id = i["i_d"]
-            q.status = QuestStatus.QuestStatus_InProgress
-            q.bonus_times = 1
-            for i2 in res["Quest"]["condition_set_group"]["datas"]:
-                if i2["i_d"] == i["condition_set_group_i_d"]:
-                    for i3 in i2["quest_condition_set"]:
-                        for i4 in i3["achieve_condition_i_d"]:
-                            c = q.conditions.add()
-                            c.condition_id = i4
-                            c.status = QuestStatus.QuestStatus_InProgress
-                    return q
+    q.quest_id = quest_id
+    q.status = QuestStatus.QuestStatus_InProgress
+    q.bonus_times = 1
+    group = _table("Quest", "condition_set_group").get(row["condition_set_group_i_d"])
+    if group is None:
+        return None
+    for phase in group["quest_condition_set"]:
+        for key in phase["achieve_condition_i_d"]:
+            q.conditions.add(condition_id=key, status=QuestStatus.QuestStatus_InProgress)
+    return q
+
+
+_quest_event_index = None
+
+
+def quest_event_index(quests, groups):
+    """Index the authored event routes once per loaded pair of resource tables."""
+    global _quest_event_index
+    if _quest_event_index is not None:
+        old_quests, old_groups, by_condition, successor = _quest_event_index
+        if old_quests is quests and old_groups is groups:
+            return by_condition, successor
+
+    by_condition, successor, previous = {}, {}, {}
+    for position, (qid, row) in enumerate(quests.items()):
+        group = row.get("quest_group")
+        if group in previous:
+            successor[previous[group]] = qid
+        previous[group] = qid
+        phases = groups.get(row.get("condition_set_group_i_d"), {}).get("quest_condition_set", ())
+        entry = (position, qid)
+        for phase in phases:
+            for key in phase["achieve_condition_i_d"]:
+                by_condition.setdefault(key, []).append(entry)
+    _quest_event_index = quests, groups, by_condition, successor
+    return by_condition, successor
 
 
 def make_QuestNotice(session, conds, qn=None):
@@ -774,14 +802,17 @@ def make_QuestNotice(session, conds, qn=None):
     quests = _table("Quest", "quest")
     groups = _table("Quest", "condition_set_group")
     achieves = _table("Achieve", "achieve")
-    # Snapshot the candidates. A quest unlocked by this event needs its own later interaction.
+    by_condition, successor = quest_event_index(quests, groups)
+    # A single event can hit several phases or quests. Snapshot in authored order
+    # before advancing anything, so newly unlocked steps need a later interaction.
+    matches = {entry for key in hits for entry in by_condition.get(key, ())}
     candidates = []
-    for row in quests.values():
-        phases = groups.get(row.get("condition_set_group_i_d"), {}).get("quest_condition_set", ())
-        if any(hits.intersection(phase["achieve_condition_i_d"]) for phase in phases):
-            current = saved(session.player_id, row["i_d"])
-            if current and current.status == QuestStatus.QuestStatus_InProgress:
-                candidates.append((row, phases, current))
+    for _, qid in sorted(matches):
+        current = saved(session.player_id, qid)
+        if current and current.status == QuestStatus.QuestStatus_InProgress:
+            row = quests[qid]
+            phases = groups[row["condition_set_group_i_d"]]["quest_condition_set"]
+            candidates.append((row, phases, current))
     for row, phases, current in candidates:
         conditions = {c.condition_id: c for c in current.conditions}
         pending = next((phase["achieve_condition_i_d"] for phase in phases
@@ -810,10 +841,9 @@ def make_QuestNotice(session, conds, qn=None):
         save(session, current)
         notice.quests.add().CopyFrom(current)
         if finished:
-            steps = [key for key, q in quests.items() if q.get("quest_group") == row["quest_group"]]
-            index = steps.index(current.quest_id) + 1
-            if index < len(steps) and saved(session.player_id, steps[index]) is None:
-                following = make_Quest(session.player_id, steps[index])
+            next_id = successor.get(current.quest_id)
+            if next_id is not None and saved(session.player_id, next_id) is None:
+                following = make_Quest(session.player_id, next_id)
                 save(session, following)
                 from private_flag_battle import prior_completion
                 completed = prior_completion(session,following)

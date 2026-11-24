@@ -12,6 +12,53 @@ from utils import db
 from utils.pb_create import make_Quest, make_item
 
 
+def verify_event_routing(session):
+    from private_dungeons import _table
+    from private_first_quest import saved
+    from utils.pb_create import make_QuestNotice, quest_event_index
+    from utils.res_loader import res
+
+    # Compare all routes and successors to the loaded CN catalog, including resource order.
+    quests = _table("Quest", "quest")
+    groups = _table("Quest", "condition_set_group")
+    routes, successor = quest_event_index(quests, groups)
+    expected, chains = {}, {}
+    for order, (qid, q) in enumerate(quests.items()):
+        chains.setdefault(q.get("quest_group"), []).append(qid)
+        phases = groups[q["condition_set_group_i_d"]]["quest_condition_set"]
+        created = make_Quest(session.player_id, qid)
+        assert created.quest_id == qid and created.bonus_times == 1 and created.status == pb.QuestStatus_InProgress
+        assert [(c.condition_id, c.status) for c in created.conditions] == [
+            (key, pb.QuestStatus_InProgress) for phase in phases for key in phase["achieve_condition_i_d"]]
+        for phase in phases:
+            for condition in phase["achieve_condition_i_d"]:
+                expected.setdefault(condition, []).append((order, qid))
+    assert routes == expected
+    assert successor == {a: b for chain in chains.values() for a, b in zip(chain, chain[1:])}
+
+    # A reloaded resource group can share a condition across two steps. The second step
+    # must be saved but cannot also finish from the event that unlocked it.
+    qids = (200001, 200002)
+    pid = session.player_id
+    first = make_Quest(pid, qids[0])
+    hit = first.conditions[0].condition_id
+    db.set_quest(pid, qids[0], first.SerializeToString())
+    original = res["Quest"]["condition_set_group"]
+    replaced = dict(original, datas=[
+        dict(row, quest_condition_set=[dict(achieve_condition_i_d=[hit])])
+        if row.get("i_d") == quests[qids[1]]["condition_set_group_i_d"] else row
+        for row in original["datas"]])
+    with patch.dict(res["Quest"], condition_set_group=replaced):
+        changes = make_QuestNotice(session, (hit, hit))
+        assert [(q.quest_id, q.status) for q in changes.quests] == [
+            (qids[0], pb.QuestStatus_Finish), (qids[1], pb.QuestStatus_InProgress)]
+        assert saved(pid, qids[1]).conditions[0].progress == 0
+        changes = make_QuestNotice(session, (hit,))
+        assert changes.quests[0].quest_id == qids[1] and changes.quests[0].status == pb.QuestStatus_Finish
+    restored, _ = quest_event_index(quests, _table("Quest", "condition_set_group"))
+    assert restored == expected
+
+
 def run(root, resources):
     identity=LocalIdentity(root/"identity.sqlite3")
     realm=LocalGameService(identity,root,resources,port=0)
@@ -83,6 +130,8 @@ def run(root, resources):
         with sock:
             assert all(qs[q].status==pb.QuestStatus_Finish for q in (100032,100086,100093))
             assert all(qs[q].status==pb.QuestStatus_InProgress for q in (100033,100087,100094))
+            with realm.lock, db.conn:
+                verify_event_routing(next(s for s in realm.active.values() if s.player_id == aid))
     finally:
         realm.stop()
     print("PASS real cook costs and outcomes, double-jump ownership, map threshold and per-role reconnect.")

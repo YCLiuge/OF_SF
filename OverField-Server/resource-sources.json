@@ -326,6 +326,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Quest.json"
     },
+    "resources/data/QuickObtaining.json": {
+      "sha256": "a4919f6187faa7c905a63d4f70c7be316d0dfa3f0090d6d92fc0011830219b91",
+      "bytes": 17154,
+      "source": "TapTap PC 1.1.12",
+      "detail": "QuickObtaining.json"
+    },
     "resources/data/ReleasedEquipment.json": {
       "sha256": "e4699896e9463445ae90295bb4490dc3674ab351fb81abd776ab81086ea63cf1",
       "bytes": 6941,

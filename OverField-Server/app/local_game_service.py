@@ -127,6 +127,13 @@ class _TCP(socketserver.ThreadingTCPServer):
         super().service_actions()
         # The accept loop also ticks while every player is idle.
         now = time.monotonic()
+        if self.owner.campfires.next_expiry is not None:
+            with self.owner.lock:
+                try:
+                    if self.owner.campfires.expire():
+                        self.owner._publish_pending()
+                except sqlite3.Error:
+                    _log.exception("Could not expire campfires, will retry")
         if now >= self.owner.next_pose_flush:
             with self.owner.lock:
                 try:
@@ -378,6 +385,8 @@ class LocalGameService:
                 CREATE TABLE IF NOT EXISTS private_locations (
                     player_id INTEGER PRIMARY KEY, scene INTEGER NOT NULL);
             """)
+            from private_campfires import Campfires
+            self.campfires = Campfires(self._broadcast_scene)
             from private_inventory import initialize as setup_inventory
             setup_inventory()
             from private_mp_teams import initialize as setup_mp_teams
@@ -472,6 +481,7 @@ class LocalGameService:
                 grant_private_permits(pid)
                 s=Session(sock,slot,pid,proposed)
                 s.pending_publish = self.pending_publish
+                s.campfires = self.campfires
                 s.entitlements = self.entitlements
                 s.realm_rules = self.realm_rules
                 s.stages = self.stages
