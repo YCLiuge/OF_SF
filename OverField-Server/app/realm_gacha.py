@@ -25,17 +25,22 @@ def available():
     return list(_catalog().values())
 
 
+def featured_pool(pool_id):
+    banner = _catalog().get(pool_id)
+    if not banner or banner["pity_group"] in (100, 200, 300, 400):
+        raise ValueError("Expected a native featured banner ID")
+    weights = {"100": 7900, "200": 1200, "300": 700, "400": 100,
+               str(banner["pity_group"]): 100}
+    pool = {"id": pool_id, "enabled": True, "pity": 70, "weights": weights}
+    validate({"pools": [pool]})
+    return pool
+
+
 def defaults():
-    rows = []
-    for pool_id in (2000, 3000, 3001, 3023, 203014, 203015):
-        if pool_id == 2000:
-            # Published base odds, before the actual SR and SSR guarantees.
-            weights = {"100": 9220, "200": 80, "300": 600, "400": 100}
-            rows.append({"id": pool_id, "enabled": True, "pity": 70, "sr_pity": 10, "weights": weights})
-        else:
-            weights = {"100": 7900, "200": 1200, "300": 700, "400": 100, str(_catalog()[pool_id]["pity_group"]): 100}
-            rows.append({"id": pool_id, "enabled": True, "pity": 70, "weights": weights})
-    return {"pools": rows}
+    permanent = {"id": 2000, "enabled": True, "pity": 70, "sr_pity": 10,
+                 "weights": {"100": 9220, "200": 80, "300": 600, "400": 100}}
+    featured_ids = (3000, 3001, 3023, 203014, 203015, 3002)
+    return {"pools": [permanent] + [featured_pool(key) for key in featured_ids]}
 
 
 def validate(settings):
@@ -66,15 +71,25 @@ def validate(settings):
 SCHEMA = "(id INTEGER PRIMARY KEY CHECK(id=1), settings TEXT NOT NULL)"
 
 
-def configure(state, settings=None):
+def configure(state, settings=None, *, enable_featured=None):
     if settings is not None:
         validate(settings)
     with exclusive_state(state, purpose="profiles") as root:
         root.mkdir(parents=True, exist_ok=True)
         with LocalIdentity(root / "identity.sqlite3")._write() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS private_gacha_config " + SCHEMA)
-            if settings is not None:
-                conn.execute("INSERT OR REPLACE INTO private_gacha_config VALUES(1,?)",
-                             (json.dumps(settings, separators=(",", ":")),))
             stored = conn.execute("SELECT settings FROM private_gacha_config WHERE id=1").fetchone()
-            return json.loads(stored[0]) if stored else defaults()
+            current = json.loads(stored[0]) if stored else defaults()
+            if enable_featured is not None:
+                template = featured_pool(enable_featured)
+                match = next((p for p in current["pools"] if p["id"] == enable_featured), None)
+                if match is None:
+                    current["pools"].append(template)
+                else:
+                    match["enabled"] = True
+                settings = current
+            if settings is None:
+                return current
+            conn.execute("INSERT OR REPLACE INTO private_gacha_config VALUES(1,?)",
+                         (json.dumps(settings, separators=(",", ":")),))
+            return settings

@@ -10,10 +10,12 @@ from utils.pb_create import make_item
 from private_dungeons import _table
 from private_first_quest import STEPS, saved
 import private_tutorial_recruit as tutorial
+import private_gacha_rewards as rewards
 from realm_gacha import SCHEMA, defaults
 
 
 def setup():
+    rewards.setup(db.conn)
     db.conn.execute("CREATE TABLE IF NOT EXISTS authority.private_gacha_config " + SCHEMA)
     db.conn.execute("""CREATE TABLE IF NOT EXISTS private_gacha_picks (
         player INTEGER NOT NULL, pool INTEGER NOT NULL, item INTEGER NOT NULL,
@@ -185,11 +187,11 @@ def award(pid, item_id, delta, notice, posters=None):
     if owned:
         delta.main_item.character.ParseFromString(owned[0])
         max_star = delta.main_item.character.star >= 5
-        if not recruit or not max_star:
-            extra(pid, config["repeat_item_i_d"], 3 if recruit and quality in (3, 4) else 1, delta, notice)
-        if recruit:
+        if not max_star:
+            extra(pid, config["repeat_item_i_d"], 3 if quality in (3, 4) else 1, delta, notice)
+        if quality in (3, 4):
             duplicate_bonus(pid, "Character_FullStar" if max_star else "Character_", quality, delta, notice)
-            if quality in (3, 4):
+            if recruit:
                 extra(pid, 107, {3: 500, 4: 1500}[quality], delta, notice)
         return
     outfit_ids = {config.get("hat_i_d"), config.get("hair_i_d"), config.get("cloth_i_d"),
@@ -261,8 +263,9 @@ def regular_draw(session, req, rsp):
                 # Preserve an SSR explorer rolled by the base pool or hard pity on this exact pull.
                 item = secrets.choice(_table("Gacha", "reward_pool")[300]["items"])["item_i_d"]
             since_sr = 0 if explorer_at_least(item, 3) else since_sr + 1
-        award(pid, item, rsp.items.add(), notice, posters)
-        db.add_gacha_record(pid, req.gacha_id, item)
+        delta = rsp.items.add()
+        award(pid, item, delta, notice, posters)
+        rewards.record(db, pid, req.gacha_id, delta)
     db.set_gacha_guarantee(pid, pool_id, misses)
     rsp.info.CopyFrom(choice_info(pid, pools) if req.gacha_id == CHOICE else info(pid, pool))
     session.send(MsgId.PackNotice, notice, 0)

@@ -99,6 +99,10 @@ def run(root, resources):
             assert card.main_item.is_new and card.main_item.character.character_id==102001
             assert card.main_item.item_tag==pb.EBagItemTag_Card and card.extra_quality==3
             assert [(x.item_id,x.base_item.num) for x in card.extras]==[(107,500)]
+            with closing(sqlite3.connect(root/"game.sqlite")) as ledger:
+                receipt = ledger.execute("SELECT r.origin,r.is_new,r.extras FROM private_gacha_rewards r "+
+                    "JOIN gacha_record g ON g.id=r.record_id WHERE g.player_id=?", (pid,)).fetchall()
+                assert receipt == [("tutorial",1,"[[107,500]]")]
             assert owned(104,pid)==starting_ticket-1 and owned(107,pid)==starting_bonus+500
             assert call(c,"Gacha",gacha_id=2000,is_single=True)[0] == drawn
             assert len(call(c,"GachaList")[0].gachas) > 1

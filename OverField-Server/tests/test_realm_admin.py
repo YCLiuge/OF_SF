@@ -73,6 +73,17 @@ def run(root):
     assert invoke(state, "status")["lifecycle"] == "stopped"
     assert invoke(state, "call", "rules.set", data={"world_min":199}, expected=False)["code"] == "invalid_request"
     assert call("rules.get")["world_min"] == 1
+    # Enable a single archived UP without resetting the operator's odds or other banners.
+    usual = {"id":2000, "enabled":True, "pity":42, "weights":{"400":10000}}
+    assert call("gacha.set", pools=[usual]) == {"pools":[usual]}
+    enabled = call("gacha.enable", id=3002)["pools"]
+    assert [p["id"] for p in enabled] == [2000, 3002] and enabled[0] == usual
+    assert enabled[1]["weights"]["3002"] == 100 and enabled[1]["enabled"]
+    custom = dict(enabled[1], enabled=False, pity=35)
+    call("gacha.set", pools=[usual,custom])
+    assert call("gacha.enable", id=3002) == {"pools":[usual,dict(custom,enabled=True)]}
+    assert invoke(state, "call", "gacha.enable", data={"id":999999}, expected=False)["code"] == "invalid_request"
+    assert call("gacha.get")["pools"] == [usual,dict(custom,enabled=True)]
     event = dict(id=4008, enabled=False, opens_at=None, closes_at=None)
     assert call("events.set", events=[event]) == {"events": [event]}
     assert call("events.get") == {"events": [event]}

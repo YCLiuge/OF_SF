@@ -2,10 +2,10 @@
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from utils import db
-from utils.pb_create import make_item
 from utils.res_loader import res
 from private_dungeons import grant, reward_items
 from private_first_quest import CONDITIONS, STEPS, STORY, save, saved
+import private_gacha_rewards as rewards
 
 POOL = 2000
 SHI = 102001
@@ -50,30 +50,13 @@ def draw(session, req, rsp):
     ticket.main_item.base_item.num -= cost
     db.set_item_detail(pid, ticket.SerializeToString(), ticket_id)
 
+    # The tutorial fixes the explorer, but it is still a paid draw with regular bonuses.
+    from private_gacha import award
     item = rsp.items.add()
-    item.main_item.item_id = SHI
-    item.main_item.item_tag = pb.EBagItemTag_Card
-    owned = db.get_characters(pid, SHI)
-    item.main_item.is_new = not bool(owned)
-    item.extra_quality = row("Item", "item", SHI)["quality"]
-    if owned:
-        item.main_item.character.ParseFromString(owned[0])
-        character = item.main_item.character
-    else:
-        character = db.add_character(pid, SHI, item.main_item.character)
-    bonus = make_item(107, 500, pid)
-    item.extras.add().CopyFrom(bonus.main_item)
-    grant(session, {107: 500}, pb.GachaRsp().items)
     notice = pb.PackNotice(status=pb.StatusCode_OK)
-    notice.items.extend([ticket, item])
-    if not owned:
-        weapon_blob = db.get_item_detail(pid, instance_id=character.equipment_presets[0].weapon)
-        notice.items.add().ParseFromString(weapon_blob)
-        outfit = character.outfit_presets[0]
-        for item_id in (outfit.hat, outfit.hair, outfit.clothes, outfit.ornament):
-            if item_id:
-                notice.items.add().ParseFromString(db.get_item_detail(pid, item_id))
-    db.add_gacha_record(pid, POOL, SHI)
+    notice.items.add().CopyFrom(ticket)
+    award(pid, SHI, item, notice, set())
+    rewards.record(db, pid, POOL, item, "tutorial")
     db.set_gacha_guarantee(pid, POOL, db.get_gacha_guarantee(pid, POOL) + 1)
     rsp.info.CopyFrom(pool_info(pid))
     quest.conditions[0].progress = quest.complete_count = 1

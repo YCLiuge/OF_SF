@@ -1162,13 +1162,13 @@ def get_collection(player_id, item_id=None):
 
 
 def add_gacha_record(player_id, gacha_id, item_id):
-    db.execute(
+    return db.execute(
         """
         INSERT INTO gacha_record (player_id, gacha_id, item_id, gacha_time)
         VALUES (?, ?, ?, ?)
         """,
         (player_id, gacha_id, item_id, int(time.time())),
-    )
+    ).lastrowid
 
 
 def get_gacha_records(player_id, gacha_id, page=1, page_size=5):

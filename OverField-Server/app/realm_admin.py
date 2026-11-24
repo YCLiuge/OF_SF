@@ -47,6 +47,8 @@ OPERATIONS = {
     "events.set": operation("any", "Replace the overrides for native activity pages.",
                             {"events": {"type": "array", "maxItems": 1000, "items": EVENT}}, ("events",)),
     "gacha.catalog": operation("any", "List native banners, their featured characters and reward groups.", read_only=True),
+    "gacha.enable": operation("any", "Enable one featured banner and preserve every other setting.",
+                              {"id": ID}, ("id",)),
     "gacha.get": operation("any", "Return the active configuration and basis-point probabilities.", read_only=True),
     "gacha.set": operation("any", "Replace this realm's banner configuration, effective on the next request.",
                            {"pools": {"type": "array", "maxItems": 1000, "items": BANNER}}, ("pools",)),
@@ -194,6 +196,8 @@ def run(state, name, data, request_stop):
         if not (state / "identity.sqlite3").is_file():
             return realm_gacha.defaults()
         return realm_gacha.configure(state)
+    if name == "gacha.enable":
+        return realm_gacha.configure(state, enable_featured=data["id"])
     if name == "gacha.set":
         return realm_gacha.configure(state, data)
     if name == "realm.status":

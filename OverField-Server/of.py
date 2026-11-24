@@ -184,7 +184,7 @@ def self_test():
                    "test_private_entitlements.py","test_private_gift_api.py","test_private_gift_shop.py","test_story_starter.py","test_hud_queries.py","test_faye_dialog.py","test_season_catalog.py",
                    "test_native_boss_rush.py", "test_native_restaurant.py", "test_native_world_levels.py",
                    "test_native_home_visibility.py", "test_native_bless_tree.py", "test_native_bless_ladder.py", "test_native_events.py",
-                   "test_native_recruit_entry.py", "test_native_badge_tree.py", "test_native_battle_pass.py", "test_native_newcomer.py",
+                   "test_native_recruit_entry.py", "test_native_gacha_rewards.py", "test_native_badge_tree.py", "test_native_battle_pass.py", "test_native_newcomer.py",
                    "test_profile_issuance.py","test_explore_dispatch.py"):
         extras = [] if script in ("test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py") else ["--resources", str(ROOT/"resources")]
         subprocess.run([sys.executable, "-B", str(tests/script), *extras], env=env, check=True)
