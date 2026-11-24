@@ -178,9 +178,10 @@ def changed(owner,created,kind,end):
     notice=pb.IntervalChangeNotice(status=pb.StatusCode_OK, player_id=owner,interval_id=kind,finish_time=end)
     watchers={m[0] for m in db.conn.execute("SELECT player FROM private_interval_members WHERE owner=? AND created=?",(owner,created))}
     watchers.add(owner)
-    for s in scene_data.get_session():
-        if s.player_id in watchers:
-            s.send(MsgId.IntervalChangeNotice,notice,0)
+    for player in watchers:
+        member = scene_data.online_session(player)
+        if member is not None:
+            member.send(MsgId.IntervalChangeNotice,notice,0)
 
 
 def join(session,req,rsp):

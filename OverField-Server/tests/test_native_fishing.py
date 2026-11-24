@@ -19,6 +19,52 @@ from utils import db
 from utils.pb_create import make_item
 
 
+def catch_catalog():
+    catalog = _table("Fishing", "fishing_info")
+    assert [int(r["fish_pond_pool"]) for r in _table("FishPond", "fish_pond").values()] == [1001]
+    # All 60 bait hints from the national simplified item descriptions, grouped by recommended grade.
+    preferred = {
+        1: {5022005, *range(5023001,5023009), *range(5023041,5023045)},
+        2: {5022006, *range(5023009,5023017), *range(5023045,5023050)},
+        3: {5022007, *range(5023017,5023025), 5023050, 5023051},
+        4: {5022008, *range(5023025,5023033), 5023052, 5023053},
+        5: {5022009, *range(5023033,5023041), 5023054, 5023055},
+    }
+    assert sum(map(len,preferred.values())) == 60
+
+    def shares(level, grade, day, skills=None, active=None):
+        def record(rows, weights, k):
+            total = sum(weights)
+            result.update((row["i_d"], weight / total) for row,weight in zip(rows,weights))
+            return rows[:1] * k
+        def choose(parts):
+            if isinstance(parts[0], int):
+                return active if active in parts else parts[-1]
+            return parts[0]
+        result = {}
+        with (patch("private_fishing.random.random", return_value=0),
+              patch("private_fishing.random.choice", side_effect=choose),
+              patch("private_fishing.random.choices", side_effect=record)):
+            preview = fishing.plan(level, 5021000 + grade, day, skills or {})
+        return result, [(e.i_d,e.index) for e in preview.fishing_event_list]
+
+    for day in (True, False):
+        by_grade = [shares(10, g, day)[0] for g in range(1,6)]
+        for grade, fish in preferred.items():
+            for fid in fish & by_grade[0].keys():
+                assert by_grade[grade-1][fid] > max(d[fid] for i,d in enumerate(by_grade,1) if i != grade)
+        assert 5023020 not in shares(4,3,day)[0]
+        assert 5023020 in shares(5,3,day)[0]
+        assert all(catalog[f].get("new_day_type",0) in (2,int(not day)) for f in by_grade[0])
+    for skill, event, size in ((30400,210,1),(30500,220,2),(30600,230,3)):
+        normal, no_event = shares(10,3,True,active=event)
+        boosted, with_event = shares(10,3,True,skills={skill:0.05},active=event)
+        assert (event,1) not in no_event and (event,1) in with_event
+        # Compare total normalized probability for this size, including its ordinary fish.
+        selected = [f for f in normal if catalog[f].get("new_size_type",0) == size]
+        assert sum(boosted[f] for f in selected) > sum(normal[f] for f in selected)
+
+
 def run(root,resources):
     roles=LocalIdentity(root/"identity.sqlite3")
     a_role,b_role=[roles.create_profile(n) for n in ("钓手甲","钓手乙")]
@@ -56,6 +102,7 @@ def run(root,resources):
             with a,b:
                 prepare(pid)
                 prepare(other)
+                catch_catalog()
                 def chosen_pool(bait):
                     captured=[]
                     def choose(entries,weights,k):
@@ -152,6 +199,46 @@ def run(root,resources):
                 assert ask(a,"LifeLeveUp",life_type=fishing.KIND)[0].life_base_info.level==2
                 with host.lock:
                     assert balance(pid,101)==1500 and balance(pid,11)==77
+                with host.lock,db.conn:
+                    info = base(other,fishing.KIND)
+                    info.level = 9
+                    db.set_life(other,fishing.KIND,info.SerializeToString())
+                    set_balance(other,5021003,12)
+                    tool = make_item(1006002,1,other)
+                    tool.main_item.weapon.durability = 40
+                    rod_id = tool.main_item.weapon.instance_id
+                    db.set_item_detail(other,tool.SerializeToString(),instance_id=rod_id)
+                def settle_cast(other_fish):
+                    def fixed_event(parts):
+                        if isinstance(parts[0],int):
+                            return parts[-1]
+                        # Use the five-point cast wear and the two-catch ending together.
+                        return parts[-1] if parts[-1].get("desciption_i_d")==302 else parts[0]
+                    def select_fish(rows,weights,k):
+                        selected = next(r for r in rows if r["i_d"] == other_fish)
+                        return [selected]*k
+                    with (patch("private_fishing.random.choice",side_effect=fixed_event),
+                          patch("private_fishing.random.random",return_value=0 if other_fish else .999),
+                          patch("private_fishing.random.choices",side_effect=select_fish)):
+                        resp = cast(b,fishing_box_id=5021003,fishing_rod_id=rod_id)
+                    assert resp.status == pb.StatusCode_OK
+                    preview = resp.fishing_event_result
+                    assert preview.cost_endurance == 5 and (100,1) in [(e.i_d,e.index) for e in preview.fishing_event_list]
+                    assert [f.i_d for f in preview.fish_infos] == ([other_fish]*2 if other_fish else [])
+                    if other_fish == 5023020:
+                        assert all(170 <= f.length <= 240 for f in preview.fish_infos)
+                    results = finish(b,preview.cost_time)
+                    assert len(results)==1 and results[0].status==pb.StatusCode_OK and not pulse(b)
+                    return results[0]
+                for i,(landed,large_count) in enumerate(((5023020,0),(5022001,0),(5023006,2),(5023006,4),(0,4)),1):
+                    result = settle_cast(landed)
+                    with host.lock:
+                        assert progress(other,100210901) == large_count
+                        assert balance(other,11) == 80-i and balance(other,5021003) == 12-i
+                        wear = pb.ItemDetail.FromString(db.get_item_detail(other,instance_id=rod_id)).main_item.weapon.durability
+                        assert wear == 40-5*i
+                    assert any(item.main_item.weapon.instance_id==rod_id for item in result.items if item.main_item.HasField("weapon"))
+                assert counts(b) == {5023020:2,5022001:2,5023006:4}
                 previous=counts(a)
                 assert cast(a).status==pb.StatusCode_OK
         finally:
@@ -164,9 +251,17 @@ def run(root,resources):
                 assert not pulse(a) and counts(a)==previous
                 assert goal in ask(a,"GetLifeAchieve",life_type=fishing.KIND)[0].life_achieve.rewarded_life_achieve_id_lst
                 with host.lock: assert balance(pid,11)==77
+            b,other=opened(b_role)
+            with b:
+                assert counts(b)=={5023020:2,5022001:2,5023006:4}
+                with host.lock:
+                    assert progress(other,100210901)==4 and balance(other,5021003)==7
+                    assert pb.ItemDetail.FromString(db.get_item_detail(other,instance_id=rod_id)).main_item.weapon.durability==15
         finally:
             host.stop()
-    print("PASS fishing casts with original equipment, bait and ponds, native previews, delayed single settlement, cancellation, scene/connection changes, proficiency, gear wear and book claims.")
+    print("PASS native fishing: 60 recommended bait grades, day/night and seasonal eligibility, mastery, "
+          "five-point wear, arapaima, empty hooks, large-fish goal, repeat casts, cancellation, "
+          "connection changes, persisted gear and atlas claims.")
 
 
 if __name__=="__main__":

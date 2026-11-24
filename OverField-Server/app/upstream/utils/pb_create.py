@@ -653,6 +653,8 @@ def make_SceneDataNotice(session):
     rsp.status = StatusCode.StatusCode_OK
     data = rsp.data
     data.scene_id = session.scene_id
+    from private_field_gathering import fill as fill_gather
+    fill_gather(session, data)
     for i in db.get_area(session.player_id, session.scene_id):
         data.areas.add().ParseFromString(i)
     pos = session.pos.get(session.scene_id)

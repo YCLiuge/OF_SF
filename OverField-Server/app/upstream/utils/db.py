@@ -1078,6 +1078,9 @@ def del_mail(
     )
 
 
+_STARTER_GATHER_INSTANCES = frozenset((1001001,1002001,1003001,1004001,1005001))
+
+
 def get_instance_id(player_id, no_change=False, *, minimum=1):
     cur = db.execute(
         "SELECT instance_id FROM instance WHERE player_id=?",
@@ -1085,12 +1088,14 @@ def get_instance_id(player_id, no_change=False, *, minimum=1):
     )
     row = cur.fetchone()
     if row:
-        if no_change:
-            return row[0] + 1
         instance_id = row[0] + 1
     else:
         instance_id = 1
     instance_id = max(minimum, instance_id)
+    if instance_id in _STARTER_GATHER_INSTANCES:
+        instance_id += 1
+    if no_change:
+        return instance_id
     db.execute(
         f"INSERT OR REPLACE INTO instance (player_id, instance_id) VALUES (?, ?)",
         (player_id, instance_id),

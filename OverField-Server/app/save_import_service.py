@@ -60,6 +60,8 @@ def snapshot(conn,pid):
                       ("intro","SELECT v FROM player_kv WHERE player_id=? AND ns='profile' AND k='bottle_intro'")):
         value=conn.execute(sql,(pid,)).fetchone()
         if value is not None:result[table,0]=json.dumps(value)
+    for scene,kind,total in conn.execute("SELECT place,kind,total FROM field_gather_counts WHERE player=? AND scope=0",(pid,)):
+        result["gather_total",scene*8+kind]=json.dumps(total)
     for scene,pos,rot in conn.execute("SELECT scene,pos,rot FROM private_poses WHERE player_id=?",(pid,)):
         result["pose",scene]=len(pos).to_bytes(4,"big")+pos+rot
     area=conn.execute("SELECT area_blob FROM areas WHERE player_id=? AND scene_id=100 AND area_id=101",(pid,)).fetchone()
@@ -69,6 +71,14 @@ def snapshot(conn,pid):
 
 
 def restore_prior(conn,pid,table,key,value):
+    if table=="gather_total":
+        scene,kind=divmod(key,8)
+        if value is None:
+            conn.execute("DELETE FROM field_gather_counts WHERE player=? AND scope=0 AND place=? AND kind=?",(pid,scene,kind))
+        else:
+            conn.execute("UPDATE field_gather_counts SET total=? WHERE player=? AND scope=0 AND place=? AND kind=?",
+                         (json.loads(value),pid,scene,kind))
+        return
     if table=="pose":
         if value is None:
             conn.execute("DELETE FROM private_poses WHERE player_id=? AND scene=?",(pid,key))

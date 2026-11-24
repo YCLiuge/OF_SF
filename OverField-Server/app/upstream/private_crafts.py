@@ -43,6 +43,9 @@ def book(session, req, rsp):
 
 
 def rewards(kind):
+    if kind == pb.LIFE_TYPE_Gathering:
+        return {a["achieve_condition_i_d"]:a["reward_i_d"] for r in _table("LifeGather","life_gather_item").values()
+                for a in r.get("life_gather_achieve_rewards",())}
     if kind == pb.LIFE_TYPE_Fishing:
         return {goal["achieve_condition_i_d"]:goal["reward_i_d"] for fish in rows(kind,"info").values()
                 for goal in fish.get("fish_achieve_rewards",())}
@@ -53,12 +56,13 @@ def rewards(kind):
 
 def fill_achievements(player, kind, output):
     output.life_type = kind
-    if kind not in GROUP:
+    if kind not in GROUP and kind != pb.LIFE_TYPE_Gathering:
         return
     allowed = set(rewards(kind))
-    tasks = "fishing_level_quest" if kind == pb.LIFE_TYPE_Fishing else GROUP[kind].lower() + "_level_achieve"
-    for row in rows(kind, "level").values():
-        allowed.update(a["achieve_condition_i_d"] for a in row.get(tasks, ()))
+    if kind in GROUP:
+        tasks = "fishing_level_quest" if kind == pb.LIFE_TYPE_Fishing else GROUP[kind].lower() + "_level_achieve"
+        for row in rows(kind, "level").values():
+            allowed.update(a["achieve_condition_i_d"] for a in row.get(tasks, ()))
     for aid, raw in db.conn.execute("SELECT achieve_id,achieve_blob FROM achieve WHERE player_id=?", (player,)):
         if aid in allowed:
             entry = pb.Achieve.FromString(raw)
@@ -83,7 +87,7 @@ def info(session, req, rsp):
 
 
 def achievements(session, req, rsp):
-    if req.life_type not in GROUP:
+    if req.life_type not in GROUP and req.life_type != pb.LIFE_TYPE_Gathering:
         return pb.StatusCode_MODULE_CLOSE
     fill_achievements(session.player_id, req.life_type, rsp.life_achieve)
     return pb.StatusCode_OK
@@ -229,7 +233,7 @@ def craft(session, kind, recipe_id, rsp):
 
 def claim(session, req, rsp):
     kind, aid, player = req.life_type, req.achieve_id, session.player_id
-    table = rewards(kind) if kind in GROUP else {}
+    table = rewards(kind) if kind in GROUP or kind == pb.LIFE_TYPE_Gathering else {}
     if aid not in table:
         return pb.StatusCode_CFG_NOT_FOUND
     threshold = _table("Achieve", "achieve")[aid].get("count_param", 1)

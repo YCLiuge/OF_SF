@@ -2,7 +2,7 @@
 from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
 from proto import net_pb2 as pb
-from server.scene_data import get_session
+from server.scene_data import channel_members
 
 
 @packet_handler(MsgId.SceneInterActionPlayStatusReq)
@@ -28,7 +28,7 @@ class Handler(PacketHandler):
                                                     push_type=req.push_type, action_status=req.action_status)
         # Realm furniture is persisted by its ownership-checked placement/return handlers.
         # This message only describes the actor's animation, including its normal end/reset.
-        for peer in get_session():
+        for peer in channel_members(session.channel_id):
             same_room = (not session.dungeon[0] and not peer.dungeon[0] and peer.logged_in
                          and peer.scene_id == session.scene_id and peer.channel_id == session.channel_id)
             if peer is session or same_room:

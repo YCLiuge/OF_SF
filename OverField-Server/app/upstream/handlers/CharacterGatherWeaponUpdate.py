@@ -1,61 +1,44 @@
-from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
-
-from proto.net_pb2 import (
-    CharacterGatherWeaponUpdateReq,
-    CharacterGatherWeaponUpdateRsp,
-    StatusCode,
-    Character,
-    ServerSceneSyncDataNotice,
-    SceneActionType,
-)
-
-import utils.db as db
-from server.scene_data import up_scene_action
+from private_dungeons import _table
+from private_equipment import load
+from private_request import handler
+from proto import net_pb2 as pb
+from server.scene_data import room_members
+from utils import db
 
 
-@packet_handler(MsgId.CharacterGatherWeaponUpdateReq)
-class Handler(PacketHandler):
-    def handle(self, session, data: bytes, packet_id: int):
-        req = CharacterGatherWeaponUpdateReq()
-        req.ParseFromString(data)
+def update(session, req, rsp):
+    raw = db.get_characters(session.player_id,req.character_id) if req.character_id else None
+    if not raw:
+        return pb.StatusCode_CharNotExist
+    actor = pb.Character.FromString(raw[0])
+    if req.weapon_id:
+        item = load(session.player_id,req.weapon_id,"weapon")
+        if not item or _table("Weapon","weapon").get(item.main_item.weapon.weapon_id,{}).get("new_weapon_system_type") != 6:
+            return pb.StatusCode_GATHER_WEAPON_NOT_WEAR
+    if actor.gather_weapon == req.weapon_id:
+        return pb.StatusCode_OK
+    actor.gather_weapon = req.weapon_id
+    db.set_character(session.player_id,req.character_id,actor.SerializeToString())
+    team = session.scene_player.team
+    members = (team.char1,team.char2,team.char3)
+    for member in members:
+        if member.char_id == req.character_id:
+            session.commit_callbacks.append((setattr,(member,"gather_weapon",req.weapon_id)))
+    if session.dungeon[0]:
+        lead = getattr(session,"dungeon_lead",None)
+        if lead is not None and lead.char_id == req.character_id:
+            session.commit_callbacks.append((setattr,(lead,"gather_weapon",req.weapon_id)))
+    elif any(member.char_id == req.character_id for member in members):
+        notice = pb.ServerSceneSyncDataNotice(status=pb.StatusCode_OK)
+        event = notice.data.add(player_id=session.player_id).server_data.add(action_type=pb.SceneActionType_UPDATE_EQUIP)
+        event.player.CopyFrom(session.scene_player)
+        team = event.player.team
+        next(m for m in (team.char1,team.char2,team.char3) if m.char_id == req.character_id).gather_weapon=req.weapon_id
+        for peer in room_members(session):
+            if peer is not session and getattr(peer,"mp_room_team",0) == getattr(session,"mp_room_team",0):
+                peer.send(MsgId.ServerSceneSyncDataNotice,notice,0)
+    return pb.StatusCode_OK
 
-        character_id = req.character_id
-        weapon_id = req.weapon_id
 
-        character_data = db.get_characters(session.player_id, character_id)
-        if not character_data:
-            rsp = CharacterGatherWeaponUpdateRsp()
-            rsp.status = StatusCode.StatusCode_INTERNAL_ERROR
-            session.send(MsgId.CharacterGatherWeaponUpdateRsp, rsp, packet_id)
-            return
-
-        character = Character()
-        character.ParseFromString(character_data[0])
-        character.gather_weapon = weapon_id
-
-        db.set_character(session.player_id, character_id, character.SerializeToString())
-
-        # 场景同步
-        if character_id in db.get_players_info(session.player_id, "team")[0]:
-            session.scene_player.team.char1.gather_weapon = weapon_id
-
-            sy = ServerSceneSyncDataNotice()
-            sy.status = StatusCode.StatusCode_OK
-
-            data = sy.data.add()
-            data.player_id = session.player_id
-            tmp = data.server_data.add()
-            tmp.action_type = (
-                SceneActionType.SceneActionType_UPDATE_EQUIP
-            )  # 使用装备更新枚举
-            tmp.player.CopyFrom(session.scene_player)
-
-            up_scene_action(session.scene_id, session.channel_id, sy)
-
-        rsp = CharacterGatherWeaponUpdateRsp()
-        rsp.status = StatusCode.StatusCode_OK
-
-        session.send(
-            MsgId.CharacterGatherWeaponUpdateRsp, rsp, packet_id
-        )  # 1955 1956 采集武器更新
+Handler = handler("CharacterGatherWeaponUpdate", update, replay=True)

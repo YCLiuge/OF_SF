@@ -19,6 +19,8 @@ class Handler(PacketHandler):
         if getattr(session, "logged_in", False):
             from private_bless_tasks import tick as prayer_tick
             prayer_tick(session)
+            from private_field_gathering import tick as gather_tick
+            gather_tick(session)
             if getattr(session,"fishing_cast",None):
                 from private_fishing import tick as settle_cast
                 settle_cast(session)

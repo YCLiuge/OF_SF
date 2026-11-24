@@ -90,12 +90,30 @@ namespace OfSfPlayer {
                     }
                     servers.Text=Get(prev,"publicTls");cert.Text=Get(prev,"caFile");
                 }
+                else{
+                    var presetPath=Path.Combine(root,"realm-preset.json");
+                    if(File.Exists(presetPath)){
+                        var preset=new JavaScriptSerializer().Deserialize<Data>(File.ReadAllText(presetPath,Encoding.UTF8));
+                        var address=Get(preset,"publicTls");
+                        Uri endpoint;
+                        if(Get(preset,"version")!="1" || !Uri.TryCreate(address,UriKind.Absolute,out endpoint)
+                            || endpoint.Scheme!=Uri.UriSchemeHttps || endpoint.UserInfo!="" || endpoint.AbsolutePath!="/"
+                            || endpoint.Query!="" || endpoint.Fragment!="" || Get(preset,"caFile")!="realm-ca.pem")
+                            throw new IOException("区服预设无效。");
+                        var bundledCA=Path.Combine(root,"realm-ca.pem");
+                        if(!File.Exists(bundledCA))throw new IOException("缺少随包区服证书。");
+                        entries.Add(new Data{{"publicTls",address},{"caFile",bundledCA}});
+                        servers.Items.Add(address);servers.Text=address;
+                    }
+                }
                 if(source.Text=="")foreach(var drive in DriveInfo.GetDrives()){
                     if(drive.DriveType!=DriveType.Fixed)continue;
                     var game=Path.Combine(drive.Name,@"TapTap\PC Games\176228");
                     if(File.Exists(Path.Combine(game,"launcher.exe"))){source.Text=game;break;}
                 }
-            }catch(IOException){Line("无法读取已保存的设置。");}
+            }catch(IOException failure){Line("无法读取区服设置。"+failure.Message);}
+            catch(ArgumentException){Line("区服设置的文件格式无效。");}
+            catch(InvalidOperationException){Line("区服设置的文件格式无效。");}
         }
         void Line(string value){if(!IsDisposed && !String.IsNullOrWhiteSpace(value))output.AppendText(value+Environment.NewLine);}
         Task<string> Execute(string module,string action,Data data,bool json){

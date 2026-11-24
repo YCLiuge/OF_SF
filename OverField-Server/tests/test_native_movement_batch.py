@@ -9,11 +9,12 @@ import struct
 import sys
 from tempfile import TemporaryDirectory
 import time
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from local_game_service import LocalGameService, MsgId, pb
-from local_game_wire import encode, receive
+from local_game_service import LocalGameService, MsgId, Session, pb
+from local_game_wire import MAX_BODY, broadcast_frames, encode, receive
 from local_identity import LocalIdentity
 from test_game_realm import join_after_intro, login, next_msg
 from test_observed_initialization import call
@@ -48,7 +49,55 @@ def fence(sock, removals=None):
                 actions.extend((player.player_id, act.action_type) for act in player.server_data)
 
 
+def check_fanout():
+    channel = (9999, 1)
+    host = SimpleNamespace(scene_members={}, pending_publish=set())
+    notice = pb.PlayerSceneSyncDataNotice(status=pb.StatusCode_OK)
+    message_id = MsgId.PlayerSceneSyncDataNotice
+    body = notice.SerializeToString()
+    starts = (1, 127, 16384, 0xffffffff)
+    with ExitStack() as stack:
+        peers = []
+        for i, start in enumerate(starts):
+            sock = stack.enter_context(socket.socket())
+            peer = Session(sock, str(i), i + 1, str(i))
+            peer.sequence = start
+            peer.pending_publish = host.pending_publish
+            peers.append(peer)
+        host.scene_members[channel] = set(peers)
+        def stage():
+            LocalGameService._broadcast_scene(host, channel, message_id, notice)
+        stage()
+        for peer, start in zip(peers, starts):
+            assert peer.responses == [encode(message_id, body, 0, start)]
+            assert peer.outbox.empty() and peer.outstanding == 0
+        LocalGameService._discard_pending(host)
+        assert [p.sequence for p in peers] == list(starts) and not host.pending_publish
+        assert all(not p.responses and p.outbox.empty() for p in peers)
+        stage()
+        stage()
+        LocalGameService._publish_pending(host)
+        for peer, start in zip(peers, starts):
+            next_seq = 1 if start == 0xffffffff else start + 1
+            sent = [peer.outbox.get_nowait(), peer.outbox.get_nowait()]
+            assert sent == [encode(message_id, body, 0, n) for n in (start, next_seq)]
+            assert peer.outstanding == sum(map(len, sent))
+        slow = peers[-1]
+        for _ in range(slow.outbox.maxsize):
+            slow.outbox.put_nowait(b"queued")
+        stage()
+        LocalGameService._publish_pending(host)
+        assert not slow.running and all(p.running and p.outbox.qsize() == 1 for p in peers[:-1])
+        oversized = bytes(MAX_BODY + 1)
+        with TestCase().assertRaisesRegex(ValueError, "response too large"):
+            peers[0].send(message_id, oversized, 0, is_bin=True, broadcast=broadcast_frames(message_id, oversized))
+        peers[0].responses = [b"group"] * 512
+        with TestCase().assertRaisesRegex(ValueError, "too many responses"):
+            peers[0].send(message_id, oversized, 0, is_bin=True, broadcast=broadcast_frames(message_id, oversized))
+
+
 def run(root, resources):
+    check_fanout()
     identity = LocalIdentity(root / "identity.sqlite3")
     host = LocalGameService(identity, root, resources, port=0)
     # One explicit idle tick below exercises the normal accept-loop checkpoint.

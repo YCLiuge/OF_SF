@@ -191,6 +191,8 @@ def enter(session, req, rsp, restart=False):
     session.dungeon_visit = data.enter_times
     session.dungeon_lead = type(lead)()
     session.dungeon_lead.CopyFrom(lead)
+    from private_field_gathering import fill as fill_gather
+    fill_gather(session,rsp)
     opened = {idx for kind, idx, _ in facts(pid,did) if kind=="box"}
     for point in scene(did).get("CollectionTreasureInfos", ()):
         idx = point.get("Index", 0)

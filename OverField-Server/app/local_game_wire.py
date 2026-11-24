@@ -87,6 +87,20 @@ def receive(sock):
     return h, decode_snappy(body) if h.flag else body
 
 
+def broadcast_frames(msg_id, body):
+    """Reuse the protobuf header for one broadcast. A sequence still belongs to one receiver."""
+    if len(body) > MAX_BODY:
+        return None  # Session.send retains its normal validation order for oversized frames.
+    header = PacketHead(msg_id=msg_id, body_len=len(body), packet_id=0)
+
+    def encode_for(sequence):
+        header.seq_id = sequence
+        serialized = header.SerializeToString()
+        return struct.pack(">H", len(serialized)) + serialized + body
+
+    return encode_for
+
+
 def encode(msg_id, body, packet_id=0, sequence=0):
     if len(body)>MAX_BODY:
         raise ValueError("response too large")

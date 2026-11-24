@@ -3,7 +3,7 @@ import random
 import time
 
 from proto import net_pb2 as pb
-from server.scene_data import up_scene_action, get_session
+from server.scene_data import up_scene_action, channel_members
 from utils import db
 from utils.res_loader import res
 
@@ -80,7 +80,7 @@ def play_note(session, req, rsp):
     if req.music_note_id and not player.musical_item_id:
         return pb.StatusCode_BAD_REQ
     if req.join_player_id and req.join_player_id != session.player_id:
-        peer = next((s for s in get_session() if s.logged_in and s.scene_id == session.scene_id and
+        peer = next((s for s in channel_members(session.channel_id) if s.logged_in and s.scene_id == session.scene_id and
                      s.channel_id == session.channel_id and s.player_id == req.join_player_id), None)
         if not peer or not peer.scene_player.HasField("playing_music_note") or peer.scene_player.playing_music_note.music_note_id != req.music_note_id:
             return pb.StatusCode_BAD_REQ
@@ -104,7 +104,7 @@ def send_action(session,req,rsp):
     notice=pb.SendActionNotice(status=pb.StatusCode_OK,action_id=req.action_id,from_player_id=session.player_id,from_player_name=session.player_name)
     from private_room_actions import invite
     invite(session,req.action_id,notice)
-    for peer in get_session():
+    for peer in channel_members(session.channel_id):
         if peer.scene_id==session.scene_id and peer.channel_id==session.channel_id and peer.dungeon[0]==session.dungeon[0]:
             peer.send(MsgId.SendActionNotice,notice,0)
     return pb.StatusCode_OK

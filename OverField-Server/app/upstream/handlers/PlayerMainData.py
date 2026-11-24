@@ -4,6 +4,7 @@ import logging
 
 from proto.net_pb2 import (
     PlayerMainDataRsp,
+    Character,
     StatusCode,
     PackNotice,
     SceneDataNotice,
@@ -13,7 +14,6 @@ from proto.net_pb2 import (
     RandomQuestBonus,
     PlayerBuff,
     PlayerQuestionnaireInfo,
-    ItemDetail,
     ServerSceneSyncDataNotice,
     SceneActionType,
     PetWarehouseLimitNotice,
@@ -26,6 +26,44 @@ import server.notice_sync as notice_sync
 from server.scene_data import up_scene_action
 
 logger = logging.getLogger(__name__)
+
+
+def inventory_notices(player_id):
+    """Build the login packets in stored order, with one packet per first-seen bag tag."""
+    rows = db.db.execute(
+        "SELECT item_detail_blob FROM items WHERE player_id=? "
+        "UNION ALL SELECT item_detail_blob FROM items_s WHERE player_id=?",
+        (player_id, player_id),
+    )
+    notices = {}
+    treasures = []
+    last_tag = None
+    packet = PackNotice(status=StatusCode.StatusCode_OK)
+    for blob, in rows:
+        # Most consecutive stored items have the same tag. Decode directly into their packet.
+        detail = packet.items.add()
+        detail.ParseFromString(blob)
+        tag = detail.main_item.item_tag
+        if tag != last_tag:
+            if last_tag is not None:
+                target = notices.get(tag)
+                if target is None:
+                    target = PackNotice(status=StatusCode.StatusCode_OK)
+                target.items.append(detail)
+                del packet.items[-1]
+                packet = target
+                detail = packet.items[-1]
+            notices[tag] = packet
+            last_tag = tag
+        if detail.main_item.HasField("treasure"):
+            treasures.append(detail)
+
+    # Legacy repairs write items_s. Exhaust the read cursor before changing that table.
+    if treasures:
+        from private_treasure_dig import repair
+        for detail in treasures:
+            repair(player_id, detail)
+    return notices.values()
 
 
 @packet_handler(MsgId.PlayerMainDataReq)
@@ -71,13 +109,15 @@ class Handler(PacketHandler):
         rsp.head = session.avatar_id
         session.player_name = rsp.player_name
         logger.info(f"Player login: {session.player_name}({session.player_id})")
+        from private_character_training import import_skills
+        from private_field_gathering import upgrade_tools
+        import_skills(player_id)
+        characters = [Character.FromString(blob) for blob in db.get_characters(player_id)]
+        upgrade_tools(player_id, characters)
         make_ScenePlayer(session)
         # Cross-server publication is disabled.
 
-        from private_character_training import import_skills
-        import_skills(player_id)
-        for chr in db.get_characters(player_id):
-            rsp.characters.add().ParseFromString(chr)
+        rsp.characters.extend(characters)
 
         rsp.scene_id = session.scene_id
         rsp.channel_id = session.channel_id
@@ -129,30 +169,8 @@ class Handler(PacketHandler):
 
         from private_bless_tree import login_notice as bless_tree_notice
         tree_progress = bless_tree_notice(player_id)
-        items_data = db.get_item_detail(session.player_id)
-        if items_data:
-            items_by_tag = {}
-
-            for item_blob in items_data:
-                item = ItemDetail()
-                item.ParseFromString(item_blob)
-                if item.main_item.HasField("treasure"):
-                    from private_treasure_dig import repair
-                    repair(player_id, item)
-                item_tag = item.main_item.item_tag
-                if item_tag not in items_by_tag:
-                    items_by_tag[item_tag] = []
-                items_by_tag[item_tag].append(item)
-
-            for item_tag, items_in_tag in items_by_tag.items():
-                rsp = PackNotice()
-                rsp.status = StatusCode.StatusCode_OK
-                for item in items_in_tag:
-                    # TODO 临时物品发到邮件
-                    rsp.items.add().CopyFrom(item)
-                session.send(
-                    MsgId.PackNotice, rsp, 0, inventory_snapshot=True
-                )  # 按物品类型分组发送items物品数据
+        for packet in inventory_notices(player_id):
+            session.send(MsgId.PackNotice, packet, 0, inventory_snapshot=True)
 
         from private_inventory import slots, publish
         publish(session, slots(player_id).values(), clear=True)

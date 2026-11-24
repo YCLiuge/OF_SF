@@ -55,7 +55,7 @@ def looks_for_actor(looks):
 
 def validate(data):
     from private_entitlements import CURRENCY_IDS
-    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
+    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
         raise ValueError("invalid data format")
     for key,limit in ARRAY_LIMITS.items():
         rows(data[key],limit)
@@ -190,7 +190,18 @@ def validate(data):
         from save_import_location import validate as validate_location
         location=validate_location(data["progress_location"])
         if location:out["progress_location"]=location
+    if "gather_totals" in data:
+        scene=out.get("progress_location",{}).get("scene")
+        known=_table("Scene","gather_number")
+        selected={}
+        for entry in rows(data["gather_totals"],6):
+            sid,kind,count=row(entry,3)
+            number(sid);number(kind,5);number(count,0xffffffff)
+            if sid==scene and sid in known and count:
+                selected[kind]=max(count,selected.get(kind,0))
+        out["gather_totals"]=[[scene,kind,value] for kind,value in sorted(selected.items())]
     totals={"队长等级":out["player"][0],**{LABELS[k]:len(out[k]) for k in LABELS}}
+    if out.get("gather_totals"):totals["场景采集记录"]=len(out["gather_totals"])
     skipped=sum(len(data[k])-len(out[k]) for k in LABELS)
     totals["穿搭预设"]=sum(len(h[6]) for h in out["heroes"])
     totals["已编队人数"]=sum(bool(i) for i in out["team"])
@@ -202,6 +213,10 @@ def validate(data):
 def restore(pid,plan):
     from private_appearance import valid_preset
     level,exp,world=plan["player"]
+    for scene,kind,count in plan.get("gather_totals",()):
+        db.conn.execute("""INSERT INTO field_gather_counts VALUES(?,0,?,?,?,'',0,0)
+            ON CONFLICT(player,scope,place,kind) DO UPDATE SET total=max(total,excluded.total)""",
+            (pid,scene,kind,count))
     db.conn.execute("UPDATE players SET level=?,exp=?,world_level=? WHERE player_id=?",(level,exp,world,pid))
     if "head" in plan:
         db.set_players_info(pid,"head",plan["head"])

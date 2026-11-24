@@ -24,15 +24,54 @@ def register_session(session):
         _sessions_by_player[session.player_id] = session
 
 
+_nearby_subscribers = {}
+_world_subscribers = {}
+
+
+def _change_room(index, session, old, new):
+    if old == new:
+        return
+    if old is not None:
+        previous = index[old]
+        del previous[session]
+        if not previous:
+            del index[old]
+    if new is not None:
+        index.setdefault(new, {})[session] = None
+
+
+def sync_chat_channels(session):
+    # Called under the gameplay lock after a successful commit, including moves into dungeons.
+    nearby = session.channel_id if session.logged_in else None
+    world = session.chat_channel_id if session.logged_in else None
+    if session.indexed_nearby == nearby and session.indexed_world == world:
+        return
+    with lock_session:
+        _change_room(_nearby_subscribers, session, session.indexed_nearby, nearby)
+        _change_room(_world_subscribers, session, session.indexed_world, world)
+        session.indexed_nearby, session.indexed_world = nearby, world
+
+
+def channel_members(channel, *, world=False):
+    with lock_session:
+        members = (_world_subscribers if world else _nearby_subscribers).get(channel, ())
+        return [peer for peer in members if peer.running and peer.logged_in]
+
+
 def unregister_session(session):
     with lock_session:
         if _sessions_by_player.get(session.player_id) is session:
             del _sessions_by_player[session.player_id]
+            _change_room(_nearby_subscribers, session, session.indexed_nearby, None)
+            _change_room(_world_subscribers, session, session.indexed_world, None)
+            session.indexed_nearby = session.indexed_world = None
 
 
 def clear_sessions():
     with lock_session:
         _sessions_by_player.clear()
+        _nearby_subscribers.clear()
+        _world_subscribers.clear()
 
 
 def online_session(player_id):

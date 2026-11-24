@@ -201,7 +201,7 @@ def source_mentions(server,known):
     return found
 
 
-def inventory_probe(game,player,sock,main):
+def inventory_probe(game,player,sock,main,scene):
     from local_game_service import pb
     from test_native_gacha import call
     char=main.characters[0]
@@ -228,9 +228,16 @@ def inventory_probe(game,player,sock,main):
     with game.lock:
         assert balance(player,shard).main_item.base_item.num==1
         assert pb.Character.FromString(db.get_characters(player,char.character_id)[0]).star==upgrade.star
-    options=res["Gather"]["gather"]["datas"][0]["gather_group_info"]
-    gather=call(sock,"Gather",87,gather_item={"reward":options[0]["reward"]})
-    assert gather.status==pb.StatusCode_OK and gather.items
+    from private_field_gathering import points
+    plant_group = 100003
+    index = next(i for i, group in points()[("Scenes", scene.scene_id)].items() if group == plant_group)
+    plant = next(row for row in res["Gather"]["gather"]["datas"] if row["i_d"] == plant_group)
+    lead = next(actor for actor in main.characters if actor.character_id == main.team.char1)
+    equipped = call(sock, "CharacterGatherWeaponUpdate", 89, character_id=lead.character_id,
+                    weapon_id=lead.character_appearance.collection_gloves_instance_id)
+    assert equipped.status == pb.StatusCode_OK
+    gather = call(sock, "Gather", 90, gather_item={"index": index, "reward": plant["gather_group_info"][0]["reward"]})
+    assert gather.status == pb.StatusCode_OK and gather.items
 
 
 def probe(resources):
@@ -247,8 +254,8 @@ def probe(resources):
         try:
             sock,_,player=login(game.port,identity.issue_ticket(*profile))
             with sock:
-                main,_=join_after_intro(sock)
-                inventory_probe(game,player,sock,main)
+                main,scene=join_after_intro(sock)
+                inventory_probe(game,player,sock,main,scene.data)
                 script=call(sock,"AcceptQuest",73,quest_id=1000001,quest_type=pb.EQuestType_MainQuest)
                 assert script.status==pb.StatusCode_OK and script.quest.quest_id==100011
                 assert call(sock,"AcceptQuest",74,quest_id=1000001,quest_type=pb.EQuestType_ExtraQuest).status==pb.StatusCode_BAD_REQ

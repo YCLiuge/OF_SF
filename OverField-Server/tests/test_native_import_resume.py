@@ -77,6 +77,37 @@ def verify(port,game,suffix,data,scene,device):
 
 def run(root,resources):
     with world(root,resources) as (port,game):
+        field=archive(9999,True)
+        frames=field["decoded"]["scene"]["frames"]
+        frames[0]["decoded"]["data"]["gather_limits"]=[{"gather_type":3,"gather_num":880}]
+        frames[1]["decoded"]["data"]["gather_limits"]=[{"gather_type":3,"gather_num":111,"gather_limit_num":6},
+                                                       {"gather_num":118,"lucky_gather_limit_num":3}]
+        frames[2]["decoded"]["data"]["gather_limits"]=[{"gather_type":3,"gather_num":100}]
+        data=project(field)
+        assert data["gather_totals"]==[[9999,0,118],[9999,3,111]]
+        data.pop("identity",None)
+        assert validate(data)[0]["gather_totals"]==data["gather_totals"]
+        assert not validate({**data,"gather_totals":[[1,3,888]]})[0]["gather_totals"]
+        auth=request(port,"POST","/local/v1/accounts/register",{
+            "username":"gather.archive","password":"private-import-validation","nickname":"采集旧档"})[1]
+        key={"import_ticket":auth["import_ticket"]}
+        def restored(action,body):
+            code,out=request(port,"POST","/local/v1/accounts/import-"+action,body)
+            assert code==200
+            return out
+        for undo in (True,False):
+            preview=restored("preview",{**key,"data":data})
+            assert preview["counts"]["场景采集记录"]==2
+            restored("apply",{**key,"preview_id":preview["preview_id"]})
+            if undo:
+                restored("undo",key)
+                assert not db.conn.execute("SELECT 1 FROM field_gather_counts").fetchone()
+        sock,_,_=login(game.port,auth["ticket"])
+        with closing(sock):
+            _,scene=join(sock)
+            counts={c.gather_type:(c.gather_num,c.gather_limit_num,c.lucky_gather_limit_num)
+                    for c in scene.data.gather_limits}
+            assert counts=={0:(118,0,0),3:(111,0,0)}
         for scene,suffix,progress in ((100,"bottle",False),(1,"sakura",True)):
             data=project(archive(scene,progress))
             data.pop("identity",None)

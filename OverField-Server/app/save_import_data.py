@@ -92,6 +92,27 @@ def projected_identity(snapshot):
     return source
 
 
+def source_gather_totals(snapshot, main):
+    scene,channel = numbers(main, ("scene_id","channel_id"))
+    owner = integer(main.get("player_id"),0xffffffff)
+    if not scene or not channel or not owner:
+        return []
+    totals = {}
+    for doc in documents(snapshot,"SceneDataNotice"):
+        data = doc.get("data",{})
+        if data.get("scene_id") != scene or data.get("channel_id") != channel:
+            continue
+        if sum(p.get("player_id") == owner for p in data.get("players",())) != 1:
+            continue
+        for row in data.get("gather_limits",()):
+            kind = row.get("gather_type",0)
+            kind = kind.get("v") if isinstance(kind,dict) else kind
+            lifetime = integer(row.get("gather_num"),0xffffffff)
+            if type(kind) is int and 0 <= kind < 6 and lifetime:
+                totals[kind] = max(totals.get(kind,0),lifetime)
+    return [[scene,kind,count] for kind,count in sorted(totals.items())]
+
+
 def project(snapshot):
     if not isinstance(snapshot,dict) or snapshot.get("format")!="overfield-snapshot/1":
         raise BackupFormatError("请选择全进度工具导出的 snapshot.json 或完整 ZIP。")
@@ -112,6 +133,8 @@ def project(snapshot):
         data["identity"] = identity
     location=source_location(snapshot,main)
     if location:data["progress_location"]=location
+    gathered = source_gather_totals(snapshot,main)
+    if gathered:data["gather_totals"]=gathered
     for h in main.get("characters",[]):
         core=numbers(h,("character_id","level","max_level","exp","star"))
         skills=[numbers(s,("skill_id","skill_level")) for s in h.get("character_skill_list",[])]

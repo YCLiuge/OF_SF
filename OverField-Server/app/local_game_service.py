@@ -20,7 +20,7 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from server import notice_sync, scene_data
 from utils import db, res_loader
-from local_game_wire import encode, receive
+from local_game_wire import broadcast_frames, encode, receive
 import realm_rules
 import realm_uids
 from online_identity import OnlineIdentity
@@ -59,6 +59,7 @@ class Session:
         self.pending_publish=None
         self.social_invite = self.social_clap = self.social_roll = None
         self.scene_membership=None
+        self.indexed_nearby = self.indexed_world = None
         self.sequence=1
         self.outbox=queue.Queue(128)
         self.outstanding=0
@@ -107,7 +108,7 @@ class Session:
         except OSError:pass
         self.sock.close()
 
-    def send(self,msg_id,message,packet_id,is_bin=False,*,inventory_snapshot=False):
+    def send(self,msg_id,message,packet_id,is_bin=False,*,inventory_snapshot=False,broadcast=None):
         if not is_bin and not inventory_snapshot and msg_id == MsgId.PackNotice and self.logged_in:
             from private_arcade_wallet import inventory_notice
             inventory_notice(self,message)
@@ -118,7 +119,7 @@ class Session:
         if len(self.responses)>=512:
             raise ValueError("too many responses")
         n=0 if msg_id in (1002,1004,1006,1008) else self.sequence
-        frame=encode(msg_id,data,packet_id,n)
+        frame=broadcast(n) if broadcast is not None else encode(msg_id,data,packet_id,n)
         if not self.responses:
             self.response_sequence=self.sequence
         self.responses.append(frame)
@@ -451,6 +452,8 @@ class LocalGameService:
             self.campfires = Campfires(self._broadcast_scene)
             from private_inventory import initialize as setup_inventory
             setup_inventory()
+            from private_field_gathering import setup as setup_gathering
+            setup_gathering()
             from private_mp_teams import initialize as setup_mp_teams
             setup_mp_teams()
             from private_gacha import setup as setup_gacha
@@ -644,6 +647,7 @@ class LocalGameService:
                 scene_data._scene.clear()
                 scene_data._rec_list.clear()
                 raise
+            scene_data.sync_chat_channels(s)
             if previous_key != s.scene_membership:
                 from private_vehicle_seats import depart as leave_vehicle
                 leave_vehicle(s)
@@ -723,9 +727,10 @@ class LocalGameService:
         if not recipients:
             return
         data=realm_uids.outgoing(notice).SerializeToString()
+        broadcast=broadcast_frames(msg_id,data) if len(recipients)>=4 else None
         for peer in recipients:
             if peer.running:
-                peer.send(msg_id,data,0,is_bin=True)
+                peer.send(msg_id,data,0,is_bin=True,broadcast=broadcast)
 
     def _drain_scene_events(self):
         for sid,channels in scene_data._scene_action.items():

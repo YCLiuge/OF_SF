@@ -95,6 +95,18 @@ def skill_values(session):
     return result
 
 
+def bait_weight(fish, quality):
+    # All 60 ordinary releases with a bait recommendation pair levels 1/2 with grade 1,
+    # levels 3/4 with grade 2, and so on. Trash and seasonal catches have no grade preference.
+    level = fish.get("need_level", 1)
+    if quality is None or not fish.get("is_show") or fish.get("new_fish_classify_type") == 3:
+        return 1
+    if quality != (level - 1) // 2:
+        return 1
+    # The client gives the preferred grade but no odds. Keep the realm's 1/10 weight scale.
+    return 1 + max(1, quality) * max(1, level - 1) / 10
+
+
 def plan(level,bait,day,skills):
     # National tables contain phase positions and effects, but omit their RNG weights.
     # Select an entry for each casting phase, in its original on-screen order.
@@ -126,13 +138,13 @@ def plan(level,bait,day,skills):
             sizes[(int(value)-30400)//100+1]+=skills.get(int(value),0)
     if random.random()>=max(0,min(1,chance)):
         return result
-    quality=_table("Item","item")[bait].get("quality",0)
+    quality = None if bait == 6021 else _table("Item","item")[bait].get("quality",0)
     limited=bait==6021 and seasonal_bait()
     candidates=[r for r in _table("Fishing","fishing_info").values()
                 if (r.get("is_show") or limited and r["i_d"] in (6022,6023,6024))
                 and r.get("need_level",1)<=level and r.get("new_day_type",0) in (2,int(not day))]
     weights=[(1+classes[r.get("new_fish_classify_type",0)]+sizes[r.get("new_size_type",0)])*
-             (1+quality*(r.get("need_level",1)-1)/10) for r in candidates]
+             bait_weight(r, quality) for r in candidates]
     quantity=1+extra+int(random.random()<skills.get(30200,0))
     for fish in random.choices(candidates,weights=weights,k=quantity):
         result.fish_infos.add(i_d=fish["i_d"],length=random.uniform(fish["min_size"],fish["max_size"]))
@@ -210,7 +222,12 @@ def achievements(session,cast,catches,pending):
     goals=_table("Achieve","achieve")
     for aid in sorted(set(daily)|atlas|published_goals()):
         rule=goals[aid]
-        value=numbers[rule.get("new_achieve_condition"),(rule.get("param") or [0])[0]]
+        condition = rule.get("new_achieve_condition")
+        # 1.1.12 omits the size parameter from the level-9 "catch a large fish" objective.
+        # Preserve its configured numeric progress threshold; size 0 means unsized items and trash.
+        fallback = 3 if aid == 100210901 and condition == 31 else 0
+        parameter = (rule.get("param") or [fallback])[0]
+        value = numbers[condition, parameter]
         if not value:
             continue
         old=progress(pid,aid)

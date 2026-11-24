@@ -3,7 +3,7 @@ import time
 
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from server.scene_data import get_session, online_session
+from server.scene_data import channel_members, online_session
 from utils import db
 from utils.res_loader import res
 from private_chat_text import chat_text
@@ -34,7 +34,7 @@ def setup():
 
 
 def global_value(key):
-    return int(next(row["values"][0] for row in res["GlobalConfig"]["config"]["datas"] if row.get("key")==key))
+    return int(_table("GlobalConfig","config","key")[key]["values"][0])
 
 
 def nearby(session):
@@ -173,11 +173,8 @@ def send(session,req,rsp):
         if destination:
             destination.send(MsgId.ChatMsgNotice,notice,0)
     else:
-        for destination in get_session():
-            if destination.player_id==player:
-                continue  # The stock UI appends its own send using SendChatMsgRsp.
-            if ((kind==NEAR and nearby(destination)==key)
-                    or (kind==WORLD and destination.chat_channel_id==session.chat_channel_id)):
+        for destination in channel_members(key[1], world=kind==WORLD):
+            if destination is not session:  # The sender's client adds its own SendChatMsgRsp.
                 destination.send(MsgId.ChatMsgNotice,notice,0)
     rsp.text=text
     return pb.StatusCode_OK
