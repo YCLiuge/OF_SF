@@ -1,19 +1,13 @@
-from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
-
-from proto.net_pb2 import ManualListRsp, StatusCode, RewardStatus
-from utils.res_loader import res
+from network.packet_handler import PacketHandler, packet_handler
+from proto import net_pb2 as pb
+import private_manual as manual
 
 
 @packet_handler(MsgId.ManualListReq)
 class Handler(PacketHandler):
-    def handle(self, session, data: bytes, packet_id: int):
-        rsp = ManualListRsp()
-        rsp.status = StatusCode.StatusCode_OK
-        for m in res["Manual"]["manual_dungeon"]["datas"]:
-            for f in m["manual_dungeon_items"]:
-                tmp = rsp.flags.add()
-                tmp.flag_id = f["flag_i_d"]
-                tmp.status = RewardStatus.Reward
-                tmp.dungeon_task_finish_num = 0
-        session.send(MsgId.ManualListRsp, rsp, packet_id)  # 1861,1862
+    def handle(self, session, data, packet_id):
+        pb.ManualListReq.FromString(data)
+        rsp = pb.ManualListRsp()
+        rsp.status = manual.list_flags(session, rsp)
+        session.send(MsgId.ManualListRsp, rsp, packet_id)

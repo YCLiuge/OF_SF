@@ -12,6 +12,7 @@ class Handler(PacketHandler):
         response = GetArchiveInfoRsp(status=StatusCode.StatusCode_OK)
         try:
             response.value = get_value(session.player_id, request.key)
+            response.key = request.key
         except ValueError:
             response.status = StatusCode.StatusCode_FAIL
         session.send(MsgId.GetArchiveInfoRsp, response, packet_id)

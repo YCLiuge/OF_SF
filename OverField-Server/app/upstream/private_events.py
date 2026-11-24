@@ -74,6 +74,7 @@ def _notice_daily(session, day, activity):
 
 def refresh(session, force=False):
     from private_battle_pass import refresh_progress, send
+    from private_panel_quests import activity_dialogue
     import private_newcomer
     instant = shop.now()
     overrides = settings()
@@ -88,7 +89,7 @@ def refresh(session, force=False):
     bounds = [midnight + timedelta(hours=hour) for hour in (4, 5, 28)]
     for activity in _table("Activity", "activity").values():
         aid = activity["i_d"]
-        if aid in (DAILY, NEWCOMER, WISH) or activity.get("new_activity_type") in (1, 3):
+        if aid in (DAILY, NEWCOMER, WISH) or activity.get("new_activity_type") in (1, 3) or activity_dialogue(activity):
             override = overrides.get(aid, {})
             if not override.get("enabled", True):
                 continue

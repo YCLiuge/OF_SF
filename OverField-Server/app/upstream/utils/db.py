@@ -651,6 +651,9 @@ def get_item_detail(player_id, item_id=None, instance_id=None, table=None) -> li
     :param table: 表名（"items" 或 "items_s"，默认为None表示两个表都查）
     :return: 物品详情列表或单个物品详情
     """
+    if item_id == 10:
+        from private_recovery import settle_vitality
+        settle_vitality(player_id)
     if item_id:
         cur = db.execute(
             "SELECT item_detail_blob FROM items WHERE player_id=? AND item_id=?",
@@ -716,6 +719,12 @@ def get_item_detail(player_id, item_id=None, instance_id=None, table=None) -> li
 
 
 def set_item_detail(player_id, item_detail_blob, item_id=None, instance_id=None):
+    if item_id == 10:
+        from private_recovery import note_vitality_write
+        note_vitality_write(player_id, item_detail_blob)
+    if item_id or instance_id:
+        from private_collection_queries import remember_item
+        remember_item(player_id, item_detail_blob)
     if item_id:
         db.execute(
             "INSERT OR REPLACE INTO items (player_id, item_id, item_detail_blob) VALUES (?, ?, ?)",

@@ -155,11 +155,11 @@ class RemoteRealm:
                     count=db.execute("SELECT COUNT(*) FROM remote_local_settings WHERE remote_slot=? AND local_slot=?",args[:2]).fetchone()[0]
                     if count>=MAX_KEYS:return response
                     db.execute("INSERT INTO remote_local_settings VALUES(?,?,?,?)",(*args,request.value))
-                response.key=request.key
                 response.value=request.value
             else:
                 value=db.execute("SELECT v FROM remote_local_settings WHERE remote_slot=? AND local_slot=? AND k=?",args).fetchone()
                 response.value=value[0] if value else ("1" if request.key=="BlessingTreeTutotal" else "")
+        response.key=request.key
         response.status=pb.StatusCode_OK
         return response
 

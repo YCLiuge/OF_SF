@@ -146,7 +146,8 @@ def run(resources,ssh_config=None,ssh_port=None,http_port=None,game_port=None):
                         from test_native_chat import history
                         assert "remote-chat-qa ＜b＞原客户端＜/b＞" in history(barrier(s),pb.ChatChannel_ChatRoom)
                         s.sendall(encode(MsgId.GetArchiveInfoReq,pb.GetArchiveInfoReq(key="qa-local").SerializeToString(),12))
-                        assert next_msg(s,MsgId.GetArchiveInfoRsp,pb.GetArchiveInfoRsp).value==private_note
+                        reply=next_msg(s,MsgId.GetArchiveInfoRsp,pb.GetArchiveInfoRsp)
+                        assert (reply.key,reply.value)==("qa-local",private_note)
                 finally:front.stop()
                 if not ssh_config:
                     wire=b"".join(seen)

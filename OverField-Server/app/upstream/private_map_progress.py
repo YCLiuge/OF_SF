@@ -122,9 +122,13 @@ def collected(session, item, collection_type):
     group = collectible(item).get(scene)
     if group is not None and COLLECTION_TYPES[group] == collection_type:
         _record(session.player_id,scene,group,item)
+        from private_story_objectives import explored
+        explored(session,scene)
 
 
 def device_opened(session, device):
     scene = session.scene_id
     if not session.dungeon[0] and (scene,device) in catalog()[2]:
         _record(session.player_id,scene,AREA,device)
+        from private_story_objectives import explored
+        explored(session,scene)

@@ -306,6 +306,17 @@ def reward_items(pid, reward_id):
     return items
 
 
+def credit_player_experience(pid, amount):
+    level,exp=db.conn.execute("SELECT level,exp FROM players WHERE player_id=?",(pid,)).fetchone()
+    exp+=amount
+    levels=_table("Level","player_level")
+    while level+1 in levels and levels[level].get("need_exp",0)>0 and exp>=levels[level]["need_exp"]:
+        exp-=levels[level]["need_exp"]
+        level+=1
+    db.conn.execute("UPDATE players SET level=?,exp=? WHERE player_id=?",(level,exp,pid))
+    return pb.PlayerLevelExpNotice(status=pb.StatusCode_OK,level=level,exp=exp)
+
+
 def grant(session, amounts, rewards):
     pid=session.player_id
     notice=pb.PackNotice(status=pb.StatusCode_OK)
@@ -321,14 +332,7 @@ def grant(session, amounts, rewards):
         delta.CopyFrom(total)
         delta.main_item.base_item.num=count
     if 1 in amounts:
-        level,exp=db.conn.execute("SELECT level,exp FROM players WHERE player_id=?",(pid,)).fetchone()
-        exp+=amounts[1]
-        levels=_table("Level","player_level")
-        while level+1 in levels and levels[level].get("need_exp",0)>0 and exp>=levels[level]["need_exp"]:
-            exp-=levels[level]["need_exp"]
-            level+=1
-        db.conn.execute("UPDATE players SET level=?,exp=? WHERE player_id=?",(level,exp,pid))
-        session.send(MsgId.PlayerLevelExpNotice,pb.PlayerLevelExpNotice(status=pb.StatusCode_OK,level=level,exp=exp),0)
+        session.send(MsgId.PlayerLevelExpNotice,credit_player_experience(pid,amounts[1]),0)
     session.send(MsgId.PackNotice,notice,0)
 
 

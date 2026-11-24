@@ -83,3 +83,5 @@ class Handler(PacketHandler):
 
         if previous_scene != session.scene_id:
             make_Achieve(session, session.scene_id)
+            from private_story_objectives import explored
+            explored(session, session.scene_id)

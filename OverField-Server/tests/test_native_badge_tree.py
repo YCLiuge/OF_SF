@@ -3,12 +3,13 @@ import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from local_game_service import LocalGameService, pb
+from local_game_service import LocalGameService, MsgId, pb
+from local_game_wire import encode
 from local_identity import LocalIdentity
 from private_badge_config import ABILITY_BY_ITEM, NODE_REWARDS
 from private_dungeons import _table
 from private_shop import balance
-from test_game_realm import login
+from test_game_realm import login, next_msg
 from test_observed_initialization import call
 from utils import db
 from utils.pb_create import make_item, make_Quest
@@ -53,6 +54,13 @@ def run(state, resources):
                 make_Quest(pid,100031,q)
                 db.set_quest(pid,100031,q.SerializeToString())
                 fund(pid,301,5)
+            assert call(a,"ChangeSceneChannel",scene_id=9999).status == pb.StatusCode_OK
+            assert starter(a).status == pb.StatusCode_BAD_REQ
+            move=pb.PlayerSceneRecordReq()
+            spot=move.data.char_recorder_data_lst.add(char_id=101001).pos
+            spot.x,spot.y,spot.z=-2538,278,-2614
+            a.sendall(encode(MsgId.PlayerSceneRecordReq,move.SerializeToString(),56))
+            next_msg(a,MsgId.PlayerSceneSyncDataNotice,pb.PlayerSceneSyncDataNotice)
             assert starter(a,pb.NpcTalkReq.NpcTalkType_Mechanism).status == pb.StatusCode_BAD_REQ
             assert starter(a).status == pb.StatusCode_OK and amount(pid,301)==6
             assert starter(a).status == pb.StatusCode_OK and amount(pid,301)==6

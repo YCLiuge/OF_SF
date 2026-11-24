@@ -2,6 +2,7 @@
 import json
 import os
 import threading
+import time
 
 _ROUTES = {
     "/dispatch/get_login_url_list": "login_urls",
@@ -23,10 +24,24 @@ class StageDiagnostics:
         self.previous = state / "stage-events.previous.jsonl"
         self.failures = state / "stage-failures.jsonl"
         self.old_failures = state / "stage-failures.previous.jsonl"
+        self.operations = state / "stage-operations.jsonl"
+        self.old_operations = state / "stage-operations.previous.jsonl"
         self.lock = threading.Lock()
         self.enabled = os.environ.get("OF_STAGE_DIAGNOSTICS") == "1"
         if self.enabled:
             from network.msg_id import MsgId
+            from proto import net_pb2 as pb
+            self.variant_requests = {}
+            for name, request_id in vars(MsgId).items():
+                if not name.endswith("Req") or name in ("VerifyLoginTokenReq", "PlayerLoginReq"):
+                    continue
+                message = getattr(pb, name, None)
+                response_id = getattr(MsgId, name[:-3] + "Rsp", None)
+                if not message or response_id is None:
+                    continue
+                enums = [f for f in message.DESCRIPTOR.fields if f.enum_type and not f.is_repeated]
+                if enums or name == "TutorialReq":
+                    self.variant_requests[request_id] = (response_id, message, enums)
             self.ids = frozenset(v for v in vars(MsgId).values() if type(v) is int and v > 0)
             try:
                 state.mkdir(parents=True, exist_ok=True)
@@ -86,6 +101,26 @@ class StageDiagnostics:
     def failure(self, msg_id, status):
         if self.enabled and msg_id in self.ids and type(status) is int and 1 < status < 65536:
             self._write("failure", [msg_id, status], self.failures, self.old_failures)
+
+    def failed_operation(self, request, reply_id, status):
+        # Log only statically declared operation modes. Arbitrary request parameters stay out of diagnostics.
+        if not self.enabled or request is None:
+            return
+        request_id, data = request
+        spec = self.variant_requests.get(request_id)
+        if spec is None or spec[0] != reply_id:
+            return
+        msg = spec[1].FromString(data)
+        values = {}
+        for field in spec[2]:
+            code = getattr(msg, field.name)
+            values[field.name] = code if code in field.enum_type.values_by_number else "other"
+        if msg.DESCRIPTOR.name == "TutorialReq":
+            from handlers.Tutorial import EVENTS, STAR_EVENTS
+            code = msg.tutorial_id
+            values["tutorial_id"] = code if code in EVENTS or code in STAR_EVENTS else "other"
+        self._write("operation", {"time":int(time.time()),"request":request_id,"reply":reply_id,
+                                 "status":status,"modes":values}, self.operations, self.old_operations)
 
     def _write(self, key, value, path=None, previous=None):
         path = path or self.path

@@ -72,7 +72,8 @@ def starter_talk(session, req, packet_id):
     raw = db.get_quest(player, 100031)
     quest = pb.Quest.FromString(raw) if raw else None
     goal = next((c for c in quest.conditions if c.condition_id == req.id), None) if quest else None
-    if req.talk_type != pb.NpcTalkReq.NpcTalkType_Npc or not goal:
+    from private_story_objectives import at_fount
+    if req.talk_type != pb.NpcTalkReq.NpcTalkType_Npc or not goal or not at_fount(session):
         session.send(MsgId.NpcTalkRsp, pb.NpcTalkRsp(status=pb.StatusCode_BAD_REQ), packet_id)
         return
     if goal.status == pb.QuestStatus_InProgress:
@@ -88,6 +89,8 @@ def starter_talk(session, req, packet_id):
     session.send(MsgId.NpcTalkRsp, pb.NpcTalkRsp(status=pb.StatusCode_OK), packet_id)
     if pack.items:
         session.send(MsgId.PackNotice, pack, 0)
+    from private_story_objectives import learned
+    learned(session)
 
 
 def list_badges(session, req, rsp):
@@ -170,6 +173,8 @@ def activate(session, req, rsp, pack, notices):
     _grant(player, dict(awards), rsp, pack, notices)
     db.set_ability_tree(player, req.page, sorted(active | {req.box_id}))
     if req.page == 1 and req.box_id == 31:
+        from private_story_objectives import learned
+        learned(session)
         msg = pb.AchieveNotice(status=pb.StatusCode_OK)
         for key in {k for n in nodes.values() for k in n.get("unlock_achieve_i_d",())}:
             if _table("Achieve","achieve")[key].get("new_achieve_condition") == 44:

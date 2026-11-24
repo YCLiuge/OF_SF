@@ -15,7 +15,8 @@ from local_identity import LocalIdentity
 from private_profiles import create_profile_server
 from stage_diagnostics import StageDiagnostics, MAX_BYTES
 from test_private_profiles import request
-from test_game_realm import login
+from test_game_realm import login, join
+from test_native_gacha import call
 
 
 def run(root, resources):
@@ -52,7 +53,13 @@ def run(root, resources):
                 _, data = receive(sock)
                 assert pb.VerifyLoginTokenRsp.FromString(data).status == pb.StatusCode_FAIL
             conn, _, _ = login(game.port, identity.issue_ticket(*profile))
-            conn.close()
+            with conn:
+                join(conn)
+                for phase in (23, 999999):
+                    rsp=call(conn,"Tutorial",37,tutorial_id=phase,tutorial_name="SECRET_LABEL")
+                    assert rsp.status == pb.StatusCode_BAD_REQ
+                rsp=call(conn,"OperateMails",38,operate_type=pb.MailOperateType_READ,mail_id=4294967294)
+                assert rsp.status == pb.StatusCode_MAIL_NOT_EXIST
         finally:
             game.stop()
         markers = list(map(json.loads, store.path.read_bytes().splitlines()))
@@ -60,9 +67,15 @@ def run(root, resources):
         assert {"verify":"rejected"} in markers and {"verify":"ok"} in markers
         assert {"msg_id":1001} in markers and {"msg_id":1003} in markers
         assert markers.count({"tcp":"open"}) == markers.count({"tcp":"close"}) == 2
-        allowed = {"http":{"health","hot_update","resources"}, "msg_id":{1001,1003},
+        allowed = {"http":{"health","hot_update","resources"}, "msg_id":{1001,1003,MsgId.PlayerMainDataReq,MsgId.TutorialReq,MsgId.OperateMailsReq},
                    "verify":{"rejected","ok"}, "tcp":{"open","close"}, "close_reason":{"eof","verify_rejected","server_stop","transport"}}
         assert all(len(row)==1 and all(val in allowed[key] for key,val in row.items()) for row in markers)
+        operations=[json.loads(line)["operation"] for line in store.operations.read_bytes().splitlines()]
+        assert [(row["request"], row["modes"]) for row in operations] == [
+            (MsgId.TutorialReq, {"tutorial_id":23}), (MsgId.TutorialReq, {"tutorial_id":"other"}),
+            (MsgId.OperateMailsReq, {"operate_type":pb.MailOperateType_READ})]
+        assert all(row["time"] > 0 for row in operations)
+        assert all(secret not in store.operations.read_bytes() for secret in (b"SECRET", b"999999", b"4294967294"))
         # Unrecognized numbers cannot carry arbitrary data into the stage stream.
         store.message(2**30)
         assert json.loads(store.path.read_bytes().splitlines()[-1]) == {"tcp":"unknown_msg"}

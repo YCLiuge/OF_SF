@@ -1,4 +1,4 @@
-"""Play all six objectives of 初入空间 on a temporary persistent realm."""
+"""Play the opening recruitment, 初入空间 and the following star-tree journey through the original protocol."""
 import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,10 +21,10 @@ def run(root, resources):
             if hdr.msg_id==getattr(MsgId,name+"Rsp") and hdr.packet_id==29:
                 return getattr(pb,name+"Rsp").FromString(raw)
         raise AssertionError(name)
-    def movement(sock,x,z):
+    def movement(sock,x,z,y=0):
         record=pb.PlayerSceneRecordReq()
         point=record.data.char_recorder_data_lst.add(char_id=101001).pos
-        point.x,point.z=x,z
+        point.x,point.y,point.z=x,y,z
         sock.sendall(encode(MsgId.PlayerSceneRecordReq, record.SerializeToString(),30))
         next_msg(sock,MsgId.PlayerSceneSyncDataNotice,pb.PlayerSceneSyncDataNotice)
     def connect():
@@ -98,11 +98,34 @@ def run(root, resources):
             assert {i.main_item.item_id:i.main_item.base_item.num for i in award.items}=={1:300,101:325,102:50,190:5}
             assert request(sock,"ClaimQuestReward",quest_id=1000002,quest_type=pb.EQuestType_MainQuest).status==pb.StatusCode_REPEAT_GET_REWARD
             assert request(sock,"AreaUnlock",area_id=1001).status==pb.StatusCode_BAD_REQ
+            assert accept(sock,1000003).quest.quest_id==100031
+            assert request(sock,"NpcTalk",id=11000311).status==pb.StatusCode_BAD_REQ
+            movement(sock,-2538,-2614,278)
+            assert request(sock,"NpcTalk",id=11000311).status==pb.StatusCode_OK
+            assert accept(sock,1000003).quest.quest_id==100032
+            assert request(sock,"AbilityBadgePageBoxActive",page=1,box_id=31).status==pb.StatusCode_OK
+            assert accept(sock,1000003).quest.quest_id==100033
+            assert interact(sock,1000341).status==pb.StatusCode_BAD_REQ
+            assert request(sock,"ChangeSceneChannel",scene_id=1).status==pb.StatusCode_OK
+            assert accept(sock,1000003).quest.quest_id==100034
+            assert interact(sock,1000351).status==pb.StatusCode_BAD_REQ
+            movement(sock,-517,3179,0)
+            assert interact(sock,1000341).status==pb.StatusCode_BAD_REQ
+            movement(sock,-517,3179,911)
+            assert interact(sock,1000341).status==pb.StatusCode_OK
+            assert accept(sock,1000003).quest.quest_id==100035
+            assert request(sock,"NpcTalk",id=1000351).status==pb.StatusCode_BAD_REQ
+            assert interact(sock,1000351).status==pb.StatusCode_OK
+            assert accept(sock,1000003).quest.status==pb.QuestStatus_Finish
+            prize=request(sock,"ClaimQuestReward",quest_id=1000003,quest_type=pb.EQuestType_MainQuest)
+            assert prize.status==pb.StatusCode_OK and prize.quest.quest_id==100035 and prize.items
         game.stop()
         game.start()
         sock,quests=connect()
         with sock:
             assert all(quests.get(q)==pb.QuestStatus_Finish for q in range(100021,100027))
+            assert all(quests.get(q)==pb.QuestStatus_Finish for q in range(100031,100036))
+            assert request(sock,"ClaimQuestReward",quest_id=1000003,quest_type=pb.EQuestType_MainQuest).status==pb.StatusCode_REPEAT_GET_REWARD
             assert request(sock,"ClaimQuestReward",quest_id=1000002,quest_type=pb.EQuestType_MainQuest).status==pb.StatusCode_REPEAT_GET_REWARD
             assert request(sock,"ChangeSceneChannel",scene_id=1).status==pb.StatusCode_OK
             scene=next_msg(sock,MsgId.SceneDataNotice,pb.SceneDataNotice)
@@ -137,7 +160,7 @@ def run(root, resources):
             assert not request(legacy,"AreaUnlock",area_id=1001).area.items
     finally:
         game.stop()
-    print("PASS six Chapter 00 objectives, one-time device reward, role-specific movement, wrong scene, replay and restart.")
+    print("PASS opening recruitment, all six 初入空间 objectives and all five star-tree objectives, chapter claims, movement, replay and restart.")
 
 
 if __name__=="__main__":

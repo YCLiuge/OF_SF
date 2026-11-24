@@ -62,6 +62,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "ArchaeologyAchieve.json"
     },
+    "resources/data/Area.json": {
+      "sha256": "f6eedfa393106bcdd9b80f14c2fbe4f6e55aa13d6241d57491873d8e84e6b647",
+      "bytes": 270676,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Area.json"
+    },
     "resources/data/Armor.json": {
       "sha256": "dfe98e6873957f94522157e548021bf727246dea5615cbb347c6c3cd7d54b255",
       "bytes": 216082,
@@ -97,6 +103,12 @@
       "bytes": 1874818,
       "source": "TapTap PC 1.1.12",
       "detail": "Character.json"
+    },
+    "resources/data/CharacterSkills.json": {
+      "sha256": "3c966da83dfaeb3cb3cac91961f047335eb45ece0db82fe8556c9399ffff5918",
+      "bytes": 6516,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Active skills and exact tier costs from Character.json and Spell.json; docs/native-config/export_character_skills.py; source Spell.json SHA-256 13b5adb6c09982dd9417d0bdbdee2c4c3bf42ced3388fc61188ce48e92fb8057"
     },
     "resources/data/Chat.json": {
       "source": "TapTap PC 1.1.12",
@@ -241,6 +253,12 @@
       "bytes": 183903,
       "source": "TapTap PC 1.1.12",
       "detail": "MoonStone.json"
+    },
+    "resources/data/NPC.json": {
+      "sha256": "cf7d9276061537b06d0bb3fb7125a8fef9bd304351134bf2100f8974f8402942",
+      "bytes": 147431,
+      "source": "TapTap PC 1.1.12",
+      "detail": "NPC.json"
     },
     "resources/data/Pet.json": {
       "sha256": "b0cdd8bbf6697bccc7558b3afe38731767380b683e4720604f408c454fd599d9",

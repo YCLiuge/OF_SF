@@ -1,27 +1,9 @@
-from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
-
-from proto.net_pb2 import (
-    CharacterSkillLevelUpReq,
-    CharacterSkillLevelUpRsp,
-    StatusCode,
-    PackNotice,
-)
-import utils.db as db
-from utils.res_loader import res
+from network.packet_handler import PacketHandler, packet_handler
+from private_character_training import handle
 
 
 @packet_handler(MsgId.CharacterSkillLevelUpReq)
 class Handler(PacketHandler):
-    def handle(self, session, data: bytes, packet_id: int):
-        req = CharacterSkillLevelUpReq()
-        rsp = CharacterSkillLevelUpRsp()
-        req.ParseFromString(data)
-
-        rsp.status = StatusCode.StatusCode_OK
-
-        # TODO 技能升级
-
-        session.send(
-            MsgId.CharacterSkillLevelUpRsp, rsp, packet_id
-        )  # 角色技能升级 1035 1036
+    def handle(self, session, data, packet_id):
+        handle(session, "CharacterSkillLevelUp", data, packet_id)

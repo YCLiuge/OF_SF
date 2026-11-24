@@ -58,6 +58,8 @@ def _catalog():
             rewards = [{"goal": item["achieve_i_d"], "items": item["activity_regular_pool_reward_item"]}
                        for item in event_pools[wish_pool]["activity_regular_pool_item"]]
             title, kind = "周年许愿", "anniversary_wish"
+        elif aid in (5075, 260815130) and row.get("new_activity_type") == 4 and row.get("quest_i_d") == 910101:
+            title, kind, rewards = "幽冥庭院", "event_dialogue", []
         elif row.get("new_activity_type") == 3 and source in passes:
             rewards = [{"level": level["level"], "items": level["battle_pass_reward"]}
                        for level in passes[source]["battle_pass_level_ups"]]

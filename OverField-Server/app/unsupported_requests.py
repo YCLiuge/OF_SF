@@ -3,6 +3,19 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 
 
+# Their status replies exist in the retail client. These activities have no private session or settlement.
+CLOSED_MINIGAMES = frozenset((
+    MsgId.GomokuSinglePlayerRewardReq, MsgId.GomokuOnlinePlayerReadyReq,
+    MsgId.GomokuOnlinePlayerWatchReq, MsgId.GetGomokuOnlineChessboardReq,
+    MsgId.GomokuOnlinePlayerPlaceStoneReq, MsgId.GomokuOnlinePlayerLeaveReq,
+    MsgId.GomokuOnlinePlayerStartPlayReq, MsgId.CollapseFailReq,
+))
+
+
+def unsupported_status(msg_id):
+    return pb.StatusCode_MODULE_CLOSE if msg_id in CLOSED_MINIGAMES else pb.StatusCode_FAIL
+
+
 def status_replies():
     pairs = {}
     for name, number in vars(MsgId).items():

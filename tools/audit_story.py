@@ -18,10 +18,11 @@ EXTRA_NAMES = {1001: "间章", 2001: "后日谈", 3001: "探索员", 4001: "闲�
 QUEST_TYPES = {0: "未标类型", 1: "主线", 2: "支线", 3: "世界", 4: "日常", 5: "循环",
                6: "秘境", 7: "随机事件", 8: "委托", 9: "额外剧情"}
 CONDITIONS = {4: "完成任务", 6: "秘境通关", 37: "任务对话", 38: "招募", 39: "进入场景", 40: "机关交互",
-              43: "区域解锁数量", 44: "持有指定能力或物品", 45: "完成遭遇", 113: "场景完成度（万分制）", 168: "制作料理次数"}
+              43: "区域解锁数量", 44: "星云树能力解锁", 45: "完成遭遇", 113: "场景完成度（万分制）", 168: "制作料理次数"}
 TESTS = ("test_bottle_intro.py", "test_story_starter.py", "test_native_first_quest.py", "test_story_entry.py",
          "test_native_badge_tree.py", "test_native_story_catalog.py", "test_native_story_dialogues.py",
-         "test_native_story_scene.py", "test_native_story_map_progress.py")
+         "test_native_story_scene.py", "test_native_story_map_progress.py", "test_native_story_objectives.py",
+         "test_native_panel_quests.py", "test_native_extra_story_rewards.py")
 
 # Each entry names the assertions that justify it. Rendering and dialogue timing need a client run.
 # Keys refer to the original concrete Quest, not a story number or a whole handler category.
@@ -35,18 +36,27 @@ STEP_EVIDENCE = {
     100024: ("test_story_entry.py", "前步自动接续", "地标机关位置核验", "原生完成", "无本步资源奖励", "重启验证"),
     100025: ("test_story_entry.py", "前步自动接续", "闪光点机关位置核验", "原生完成", "无本步资源奖励", "重启验证"),
     100026: ("test_story_entry.py", "前步自动接续", "真实切回广场场景", "原生完成", "原生故事奖励入包、防重", "重启验证"),
-    100031: ("test_native_badge_tree.py", "测试预置当前任务", "隔离原生交互", "未验证完整前置链", "起始材料防重", "本步未独立验证"),
+    100031: ("test_story_entry.py", "依序从前节接取", "靠近芳汀并对话", "原生完成", "起始材料防重另有独立测试", "重启验证"),
+    100032: ("test_story_entry.py", "前步自动接续", "消耗徽章学习二段跳", "原生完成", "整节领奖已核对", "重启验证"),
+    100033: ("test_story_entry.py", "前步自动接续", "进入樱庭世界", "原生完成", "整节领奖已核对", "重启验证"),
+    100034: ("test_story_entry.py", "前步自动接续", "抵达教学机关的水平和高度范围", "原生完成", "整节领奖已核对", "重启验证"),
+    100035: ("test_story_entry.py", "前步自动接续", "缓降专属机关交互", "原生完成", "领取故事奖励、防重", "重启验证"),
+    100086: ("test_native_story_objectives.py", "测试预置本步在途", "实际制作一道料理", "达标后接续100087", "本步未独立断言", "重启验证"),
+    100093: ("test_native_story_objectives.py", "测试预置本步在途", "以不同樱庭标记越过10%门槛", "达标后接续100094", "本步未独立断言", "重启验证"),
 }
 for _ids in ((106061,106062),(106081,),(107051,107052,107053)):
     for _index, _id in enumerate(_ids):
         STEP_EVIDENCE[_id] = ("test_native_story_dialogues.py", "原生接取（预置前章条件）" if _index == 0 else "前步自动接续",
                               "原生 NPC 对话及原场景交互位置", "原生完成", "无本步奖励，整节领取已验", "重启验证")
-COMPLETE = {1000001: "test_native_first_quest.py", 1000002: "test_story_entry.py",
+COMPLETE = {1000001: "test_native_first_quest.py", 1000002: "test_story_entry.py", 1000003: "test_story_entry.py",
             1000606: "test_native_story_dialogues.py", 1000608: "test_native_story_dialogues.py",
             1000705: "test_native_story_dialogues.py"}
 OBJECTIVE_NAMES = {11000321: "星云树解锁二段跳", 11000861: "制作任意一道料理",
                    11000931: "樱庭世界完成度达到 1000/10000（10%）"}
-TUTORIAL_EVENTS = {"count": 24, "source": "StatisticSystem.InitP2TutorialKeyToName",
+TUTORIAL_EVENTS = {"count": 53, "prologue_count": 24, "star_count": 29,
+                   "prologue_source": "StatisticSystem.InitP2TutorialKeyToName",
+                   "star_source": "StatisticSystem.TrackCustomEventP2TutorialStar",
+                   "star_ids": [*range(100,127),144,145],
                    "ranges": {"1-10": "瓶中空间、风车与字幕", "11-16": "菲、梓及招募申请对话",
                               "17-20": "招募教学与诗的对话", "21-24": "剧情菜单、领取奖励与接取任务"},
                    "evidence": "test_bottle_intro.py"}
@@ -111,6 +121,13 @@ def build(server, client):
     groups_by_id={r["i_d"]:r["quest_condition_set"] for r in table(data,"Quest","condition_set_group")}
     resources={r["i_d"]:r.get("quest_resource_items",[]) for r in table(data,"Quest","quest_resource")}
     achieves={r["i_d"]:r for r in table(data,"Achieve","achieve") if "i_d" in r}
+    npc=data.get("NPC") or checked(path/"NPC.json",manifest)
+    pools={r["i_d"]:r for r in npc["delegate_quest_pool"]["datas"]}
+    commissions={row["quest_i_d"]:actor["i_d"] for actor in npc["info"]["datas"] for func in actor.get("funcs",())
+                 if func.get("new_n_p_c_function")==13 for row in pools[func["sub_meter_i_d"]]["delegate_quest_pool_group_info"]}
+    panel_test="test_native_panel_quests.py"
+    sample_commissions={401001,401002,401103,401201,401301,401401,401501,401601}
+    extra_tails={row["quest_group"]:row["i_d"] for row in steps if row.get("new_type")==9 and row["quest_group"] in extras}
     rows=[]
     for q in steps:
         qid, group, qt = q["i_d"], q["quest_group"], q.get("new_type",0)
@@ -139,6 +156,19 @@ def build(server, client):
             evidence = "test_native_story_scene.py"
             accept,interaction,settle = "测试预置本步在途", "原生切入所需场景", "完成次数与后续步骤已核对"
             reload = "回归含一个重启样例，未逐目标重登"
+        if group in extra_tails and qid==extra_tails[group]:
+            evidence="test_native_extra_story_rewards.py"
+            accept="测试预置接取首步" if qid==220012 else "前序测试预置已完成，末步在途"
+            interaction,settle,reward="原生对话或机关完成末步", "已完成待领取2→领取后3", "原生末步ID和类型9结算，记录与实际库存已核对"
+            reload="已覆盖代表故事重启，未逐项单独重启"
+        elif qid==220011:
+            evidence,accept,interaction,settle="test_native_extra_story_rewards.py","测试预置本步在途","原生对话","自动接续220012"
+        elif qid in commissions:
+            accept="委托表的接取规则，未逐项实测"
+            if qid in sample_commissions:
+                evidence,accept=panel_test,"在对应广场NPC旁完成原生接取"
+        elif qid==910101:
+            evidence,accept,reload=panel_test,"两期限时活动在开放期间分别通过原生接取并核对重复","跨活动结束重登验证，旧进度保留"
         rows.append(dict(quest=qid,group=group,type=qt,story=sid,chapter=book,extra_catalog=extra_id,
                          phases=phases,step_reward=q.get("reward"),first_reward=q.get("first_reward"),
                          accept=accept,interaction=interaction,settlement=settle,reward=reward,relogin=reload,
@@ -155,7 +185,8 @@ def build(server, client):
                                   settlement_fixture="预置本节已完成状态，原生领取、防重与重启" if sid in listed else None))
     extra_details = [dict(group=ch["i_d"],first=r["quest_i_d"],prerequisite_quest=r.get("quest_unlock"),level=r.get("lv_unlock"),
                           time=r.get("time_unlock"),review=r.get("review_i_d"),
-                          quests=[q["quest"] for q in rows if q["group"]==r["quest_i_d"]])
+                          quests=[q["quest"] for q in rows if q["group"]==r["quest_i_d"]],
+                          verified_terminal=extra_tails[r["quest_i_d"]],settlement_test="test_native_extra_story_rewards.py",natural_full_chain=False)
                      for ch in extra for r in ch["extra_quest"]]
     optional={}
     if client:
@@ -172,7 +203,9 @@ def build(server, client):
         selected = [r for r in rows if r[section]==group_id]
         return dict(id=group_id,stories=len({r["story"] if section=="chapter" else r["group"] for r in selected}),
                     tasks=len(selected),conditions=sum(len(ph["conditions"]) for r in selected for ph in r["phases"]))
-    return dict(tutorial=TUTORIAL_EVENTS,chapters=[summarize(r["i_d"],"chapter") for r in chapters],
+    return dict(tutorial=TUTORIAL_EVENTS,panel_acceptance=dict(test=panel_test,commission_definitions=len(commissions),
+                plaza_actors=len(set(commissions.values())),tested_commission_ids=sorted(sample_commissions),
+                activity_dialogue_quest=910101,activity_ids=[5075,260815130]),chapters=[summarize(r["i_d"],"chapter") for r in chapters],
                 extra_chapters=[summarize(r["i_d"],"extra_catalog") for r in extra],
                 role_quests=dict(Counter(r["type"] for r in rows)), stories=story_details,extra=extra_details,quests=rows,
                 review_groups=len(reviews),review_dialogs=sum(map(len,review_dialogs.values())),client_index=optional)
@@ -184,6 +217,7 @@ def summary(report):
                 catalog_main_conditions=sum(ch["conditions"] for ch in cat),main_definitions=len(report["stories"]),
                 unlisted_main_ids=[s["story"] for s in report["stories"] if s["chapter"] is None],
                 catalog_extra_stories=sum(ch["stories"] for ch in ex),catalog_extra_steps=sum(ch["tasks"] for ch in ex),
+                verified_extra_terminals=len(report["extra"]),natural_full_extra=0,
                 all_quest_records=len(report["quests"]),native_finished_main=sorted(COMPLETE))
 
 
@@ -199,7 +233,8 @@ def main():
     if args.verify:
         verify(server)
     report=build(server,args.client_tables)
-    out=report if args.full else summary(report)
+    totals=summary(report)
+    out={"summary":totals, **report} if args.full else totals
     out["evidence_tests"]=list(TESTS)
     out["tests_reran_this_invocation"]=args.verify
     contents=json.dumps(out,ensure_ascii=False,indent=2)+"\n"

@@ -53,11 +53,19 @@ def run(root, resources):
     with closing(sqlite3.connect(root / "game.sqlite")) as disk:
         assert disk.execute("SELECT count(*) FROM players").fetchone()[0] > 0
         assert disk.execute("SELECT count(*) FROM sqlite_master WHERE name='private_archive'").fetchone()[0] == 0
+        pid, = disk.execute("SELECT player_id FROM players ORDER BY player_id LIMIT 1").fetchone()
+        with disk:
+            disk.execute("INSERT INTO player_kv VALUES(?,'archive','BeginnerGuideKey',?)",
+                         (pid, b"1001,2;1002,1"))
 
     server.start()
     try:
         with enter(first) as a, enter(second) as b:
             assert get(a, "BlessingTreeTutotal").value == "1"
+            imported = get(a, "BeginnerGuideKey")
+            assert (imported.status, imported.key, imported.value) == (pb.StatusCode_OK, "BeginnerGuideKey", "1001,2;1002,1")
+            assert get(b, "BeginnerGuideKey").value == ""
+            assert put(a, "BeginnerGuideKey", "").status == pb.StatusCode_OK
             assert get(a, "ButtonModeState").value == ""
             stored = put(a, "ButtonModeState", "手动")
             assert (stored.status, stored.key, stored.value) == (pb.StatusCode_OK, "ButtonModeState", "手动")
@@ -78,6 +86,7 @@ def run(root, resources):
             assert get(b, "ButtonModeState").value == "自动"
             assert get(a, "BlessingTreeTutotal").value == ""
             assert get(b, "BlessingTreeTutotal").value == "1"
+            assert get(a, "BeginnerGuideKey").value == ""
     finally:
         server.stop()
     # In the native client a verified reconnect can ask for archive settings before PlayerLogin.

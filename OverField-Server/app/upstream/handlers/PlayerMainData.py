@@ -1,6 +1,5 @@
 from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
-import time
 import logging
 
 from proto.net_pb2 import (
@@ -41,7 +40,7 @@ class Handler(PacketHandler):
 
         infos = db.get_players_info(
             player_id,
-            "player_name,unlock_functions,level,exp,head,sign,sex,avatar_frame,pendant,world_level,phone_background,create_time,team,birthday,is_hide_birthday,account_type,pet_instance_id,last_login_time",
+            "player_name,unlock_functions,level,exp,head,sign,sex,avatar_frame,pendant,world_level,phone_background,create_time,team,birthday,is_hide_birthday,account_type,pet_instance_id",
         )
         configured = [row["i_d"] for row in res["PlayerUnlock"]["player_unlock"]["datas"]]
         unlocks = list(dict.fromkeys([*(infos[1] or ()), *configured]))
@@ -66,7 +65,6 @@ class Handler(PacketHandler):
             rsp.is_hide_birthday,
             rsp.account_type,
             rsp.pet_instance_id,
-            llt,
         ) = infos
         rsp.head = session.avatar_id
         session.player_name = rsp.player_name
@@ -74,6 +72,8 @@ class Handler(PacketHandler):
         make_ScenePlayer(session)
         # Cross-server publication is disabled.
 
+        from private_character_training import import_skills
+        import_skills(player_id)
         for chr in db.get_characters(player_id):
             rsp.characters.add().ParseFromString(chr)
 
@@ -83,6 +83,9 @@ class Handler(PacketHandler):
         for chapter in db.get_chapter(session.player_id):
             rsp.quest_detail.chapters.add().ParseFromString(chapter)
         rsp.quest_detail.random_quest_bonus_left.CopyFrom(RandomQuestBonus())
+        from private_story_objectives import learned, explored
+        learned(session,notify=False)
+        explored(session,notify=False)
         for quest in db.get_quest(session.player_id):
             tmp = rsp.quest_detail.quests.add()
             tmp.ParseFromString(quest)
@@ -110,20 +113,8 @@ class Handler(PacketHandler):
         rsp.sp_check_status = True
         session.send(MsgId.PlayerMainDataRsp, rsp, packet_id)  # 1005,1006
 
-        # 计算体力和精力的回复
-        item = ItemDetail()
-        item_b = db.get_item_detail(session.player_id, 10)  # 体力
-        item.ParseFromString(item_b)
-        item.main_item.base_item.num += int((time.time() - llt) / 300)
-        if item.main_item.base_item.num > 150:
-            item.main_item.base_item.num = 150
-        db.set_item_detail(session.player_id, item.SerializeToString(), 10)
-        item_b = db.get_item_detail(session.player_id, 11)  # 精力
-        item.ParseFromString(item_b)
-        item.main_item.base_item.num += int((time.time() - llt) / 60)
-        if item.main_item.base_item.num > 800:
-            item.main_item.base_item.num = 800
-        db.set_item_detail(session.player_id, item.SerializeToString(), 11)
+        from private_recovery import settle_vitality
+        settle_vitality(player_id)
 
         from private_bless_tree import login_notice as bless_tree_notice
         tree_progress = bless_tree_notice(player_id)

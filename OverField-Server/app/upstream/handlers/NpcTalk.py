@@ -20,6 +20,11 @@ class Handler(PacketHandler):
                 return mechanism(session, MECHANISMS[req.id], packet_id)
             session.send(MsgId.NpcTalkRsp, NpcTalkRsp(status=StatusCode.StatusCode_BAD_REQ), packet_id)
             return
+        from private_story_objectives import mechanism as special_mechanism
+        response = NpcTalkRsp()
+        if special_mechanism(session, req, response):
+            session.send(MsgId.NpcTalkRsp, response, packet_id)
+            return
         from private_first_quest import CONDITIONS, talk
         if req.id in CONDITIONS:
             if req.talk_type != NpcTalkReq.NpcTalkType_Npc:

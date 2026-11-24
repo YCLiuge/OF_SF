@@ -94,6 +94,7 @@ class Session:
     def send(self,msg_id,message,packet_id,is_bin=False):
         if not is_bin and getattr(message, "status", 0) > pb.StatusCode_OK and hasattr(self, "stages"):
             self.stages.failure(msg_id, message.status)
+            self.stages.failed_operation(getattr(self, "diagnostic_request", None), msg_id, message.status)
         data=message if is_bin else realm_uids.outgoing(message).SerializeToString()
         n=0 if msg_id in (1002,1004,1006,1008) else self.sequence
         if n:
@@ -135,7 +136,7 @@ class _TCP(socketserver.ThreadingTCPServer):
 
 
 from stage_diagnostics import StageDiagnostics
-from unsupported_requests import status_replies
+from unsupported_requests import status_replies, unsupported_status
 
 
 class _Connection(socketserver.BaseRequestHandler):
@@ -441,6 +442,15 @@ class LocalGameService:
                 return s
 
     def _handle(self,s,msg_id,packet_id,body):
+        if not self.stages.enabled or msg_id not in self.stages.variant_requests:
+            return self._dispatch(s,msg_id,packet_id,body)
+        s.diagnostic_request = (msg_id, body)
+        try:
+            return self._dispatch(s,msg_id,packet_id,body)
+        finally:
+            s.diagnostic_request = None
+
+    def _dispatch(self,s,msg_id,packet_id,body):
         body=realm_uids.incoming(msg_id,body)
         if msg_id not in self.handlers:
             if not s.logged_in or msg_id not in self.failure_replies:
@@ -449,7 +459,7 @@ class LocalGameService:
             request.FromString(body)
             self.stages.unsupported(msg_id)
             with self.lock:
-                s.send(reply_id,reply(status=pb.StatusCode_FAIL),packet_id)
+                s.send(reply_id,reply(status=unsupported_status(msg_id)),packet_id)
                 s.publish()
             return
         if s.needs_name and msg_id not in (MsgId.ChangeNickNameReq, MsgId.PlayerPingReq, MsgId.GetArchiveInfoReq):

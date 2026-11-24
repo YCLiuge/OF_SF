@@ -777,8 +777,12 @@ def make_QuestNotice(session, conds, qn=None):
                 condition.status = QuestStatus.QuestStatus_Finish
         finished = all(c.status == QuestStatus.QuestStatus_Finish for c in current.conditions)
         if finished:
-            current.status = QuestStatus.QuestStatus_Finish
-            current.complete_count = max(1, current.complete_count)
+            from private_extra_story_rewards import manual_end
+            if manual_end(row):
+                current.status = QuestStatus.QuestStatus_Completed
+            else:
+                current.status = QuestStatus.QuestStatus_Finish
+                current.complete_count = max(1, current.complete_count)
         save(session, current)
         notice.quests.add().CopyFrom(current)
         if finished:

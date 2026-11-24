@@ -26,6 +26,18 @@ def get_value(player_id, key):
     ).fetchone()
     if row is not None:
         return row[0]
+    # Earlier community builds used the same role's player_kv archive namespace.
+    old = db.conn.execute("SELECT v FROM player_kv WHERE player_id=? AND ns='archive' AND k=?",
+                          (player_id, key)).fetchone()
+    if old:
+        value = old[0]
+        if isinstance(value, bytes) and len(value) <= MAX_VALUE_BYTES:
+            try:
+                value = value.decode("utf-8")
+            except UnicodeDecodeError:
+                value = None
+        if isinstance(value, str) and len(value.encode("utf-8")) <= MAX_VALUE_BYTES:
+            return value
     return "1" if key == "BlessingTreeTutotal" else ""
 
 

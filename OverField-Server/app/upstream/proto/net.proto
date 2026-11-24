@@ -6450,3 +6450,95 @@ message LinkMessage {
     bool has_state = 12;             // HEARTBEAT: 本条心跳携带 peer_names/subs
 }
 //////////////////////
+
+// National PC 1.1.12 player.proto and enum.proto.
+
+enum EGomokuChessBoardStatus {
+    EGomokuChessBoardStatus_None = 0;
+    EGomokuChessBoardStatus_Start = 1;
+    EGomokuChessBoardStatus_Playing = 2;
+    EGomokuChessBoardStatus_Over = 3;
+}
+
+message GomokuSinglePlayerRewardReq {
+    repeated int32 board = 1;
+    bool is_use_game_coin = 2;
+    int32 self = 3;
+    int32 lastRow = 4;
+    int32 lastCol = 5;
+}
+
+message GomokuSinglePlayerRewardRsp {
+    StatusCode status = 1;
+    repeated ItemDetail items = 2;
+    repeated ItemDetail extraRewards = 3;
+    bool isSelfWin = 4;
+}
+
+message CollapseFailReq {
+}
+
+message CollapseFailRsp {
+    StatusCode status = 1;
+}
+
+message GomokuOnlinePlayerReadyReq {
+    int64 id = 1;
+    uint32 coin_num = 2;
+}
+
+message GomokuOnlinePlayerReadyRsp {
+    StatusCode status = 1;
+}
+
+message GomokuOnlinePlayerWatchReq {
+    int64 id = 1;
+}
+
+message GomokuOnlinePlayerWatchRsp {
+    StatusCode status = 1;
+}
+
+message GetGomokuOnlineChessboardReq {
+    int64 id = 1;
+}
+
+message GetGomokuOnlineChessboardRsp {
+    StatusCode status = 1;
+    EGomokuChessBoardStatus boardState = 2;
+    repeated PlayerBriefInfo chest_players = 3;
+    repeated PlayerBriefInfo watch_players = 4;
+    uint32 next_player_id = 5;
+    int64 turn_deadline = 6;
+    repeated int32 board = 7;
+}
+
+message GomokuOnlinePlayerPlaceStoneReq {
+    int64 id = 1;
+    int32 row = 2;
+    int32 col = 3;
+}
+
+message GomokuOnlinePlayerPlaceStoneRsp {
+    StatusCode status = 1;
+    bool is_win = 2;
+    uint32 next_player_id = 3;
+    int64 turn_deadline = 4;
+}
+
+message GomokuOnlinePlayerLeaveReq {
+    int64 id = 1;
+}
+
+message GomokuOnlinePlayerLeaveRsp {
+    StatusCode status = 1;
+}
+
+message GomokuOnlinePlayerStartPlayReq {
+    int64 id = 1;
+}
+
+message GomokuOnlinePlayerStartPlayRsp {
+    StatusCode status = 1;
+    int64 turn_deadline = 2;
+}
