@@ -7,6 +7,7 @@ import os
 import re
 import socket
 import threading
+from urllib.parse import parse_qsl
 
 import realm_admin as admin
 
@@ -64,6 +65,10 @@ def openapi():
         if method == "post":
             operation["requestBody"] = {"required": True, "content": {
                 "application/json": {"schema": spec["inputSchema"]}}}
+        elif spec["inputSchema"]["properties"]:
+            inputs = spec["inputSchema"]
+            operation["parameters"] = [{"name": key, "in": "query", "required": key in inputs["required"],
+                                        "schema": prop} for key,prop in inputs["properties"].items()]
         paths[OPERATIONS + name] = {method: operation}
     return {"openapi": "3.1.0", "info": {"title": "OF_SF operator API", "version": "1.0"},
             "security": [{"ownerToken": []}], "components": {"securitySchemes": {
@@ -112,6 +117,23 @@ class Handler(BaseHTTPRequestHandler):
         hosts = self.headers.get_all("Host", [])
         if len(hosts) != 1 or hosts[0].lower() not in self.server.hosts:
             return self.fail(400, "invalid_host", "Use the loopback administration address.")
+        if self.path.startswith("/admin/") and not self.path.startswith(PREFIX):
+            from realm_admin_console import ASSETS
+            asset = ASSETS.get(self.path)
+            if asset is not None:
+                if self.command != "GET":
+                    return self.fail(405, "invalid_method", "Use GET.", [("Allow","GET")])
+                kind, raw = asset
+                self.send_response(200)
+                self.send_header("Content-Type", kind + "; charset=utf-8")
+                self.send_header("Content-Length", str(len(raw)))
+                self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'")
+                self.send_header("Cache-Control","no-store")
+                self.send_header("X-Content-Type-Options","nosniff")
+                self.send_header("Referrer-Policy","no-referrer")
+                self.end_headers()
+                self.wfile.write(raw)
+                return
         credentials = self.headers.get_all("Authorization", [])
         if len(credentials) != 1 or not compare_digest(credentials[0].encode("latin-1"), self.server.bearer):
             return self.fail(401, "unauthorized", "Owner token required.",
@@ -122,14 +144,26 @@ class Handler(BaseHTTPRequestHandler):
             if self.path.endswith("/openapi.json"):
                 return self.reply(200, openapi())
             return self.reply(200, admin.response_for(admin.schema))
-        name = self.path.removeprefix(OPERATIONS)
-        spec = admin.OPERATIONS.get(name) if self.path.startswith(OPERATIONS) else None
+        path, separator, query = self.path.partition("?")
+        name = path.removeprefix(OPERATIONS)
+        spec = admin.OPERATIONS.get(name) if path.startswith(OPERATIONS) else None
         if spec is None:
             return self.fail(404, "unknown_operation", "Unknown administration route.")
         expected = "GET" if spec["readOnly"] else "POST"
         if self.command != expected:
             return self.fail(405, "invalid_method", "Use " + expected + ".", [("Allow", expected)])
-        raw = b"{}"
+        values = {}
+        if separator:
+            if not spec["readOnly"] or not spec["inputSchema"]["properties"]:
+                return self.fail(400, "invalid_request", "This operation takes no URL parameters.")
+            try:
+                for key, value in parse_qsl(query, keep_blank_values=True, strict_parsing=True, max_num_fields=16):
+                    prop = spec["inputSchema"]["properties"].get(key)
+                    if prop is None or key in values:
+                        raise ValueError("Unknown or duplicate query parameter")
+                    values[key] = value if prop["type"] == "string" else json.loads(value)
+            except ValueError:
+                return self.fail(400, "invalid_request", "Invalid query parameters.")
         if self.command == "POST":
             if self.headers.get_all("Transfer-Encoding"):
                 return self.fail(400, "invalid_request", "Supply a fixed Content-Length.")
@@ -137,7 +171,12 @@ class Handler(BaseHTTPRequestHandler):
             if len(lengths) != 1 or not re.fullmatch(r"[0-9]+", lengths[0]):
                 return self.fail(400, "invalid_request", "Supply a fixed Content-Length.")
             if len(lengths[0]) > 8 or int(lengths[0]) > admin.MAX_REQUEST:
-                return self.fail(413, "invalid_request", "Input exceeds 64 KiB.")
+                self.fail(413, "invalid_request", "Input exceeds 64 KiB.")
+                # A close with unread request bytes can discard the error body on Windows.
+                # Drain only a bounded, declared payload after sending the response.
+                if len(lengths[0]) <= 8 and int(lengths[0]) <= 2 * admin.MAX_REQUEST:
+                    self.rfile.read(int(lengths[0]))
+                return
             if self.headers.get_content_type() != "application/json":
                 return self.fail(415, "invalid_request", "Use application/json.")
             size = int(lengths[0])
@@ -145,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(raw) != size:
                 return self.fail(400, "invalid_request", "Incomplete request body.")
         response = admin.response_for(lambda: admin.execute(
-            self.server.state, name, admin.decode_request(raw), self.server.request_stop,
+            self.server.state, name, admin.decode_request(raw) if self.command == "POST" else values, self.server.request_stop,
             authorize=authorize_operation))
         self.reply(200 if response["ok"] else STATUS[response["error"]["code"]], response)
 

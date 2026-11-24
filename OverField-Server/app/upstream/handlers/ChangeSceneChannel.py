@@ -43,6 +43,8 @@ class Handler(PacketHandler):
             departed(session)
         if (session.scene_id,session.channel_id)!=(req.scene_id,channel):
             session.active_flag = None
+            from private_field_activities import depart
+            depart(session)
         previous_scene = session.scene_id
         change(session,req.scene_id,channel)
 

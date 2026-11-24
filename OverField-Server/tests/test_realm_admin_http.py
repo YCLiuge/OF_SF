@@ -105,10 +105,28 @@ def run(root):
             assert request(profile, "POST", api.OPERATIONS + "notice.publish", token,
                            {"title": "Public port", "body": "test"})[0] >= 400
             assert call("GET", "maintenance.list")[1]["result"]["notices"] == []
+            assert call("GET", "photos.list?before=99&limit=1")[0] == 200
+            assert call("GET", "photos.list?limit=0")[0] == 400
+            assert call("GET", "photos.list?limit=1&limit=2")[0] == 400
+            assert {v["name"] for v in document["paths"][api.OPERATIONS+"photos.list"]["get"]["parameters"]} == {"before","limit"}
             assert call("GET", "notice.publish")[0] == 405
             assert call("GET", "missing")[0] == 404
             assert call("POST", "notice.publish", b'{"title":"a","title":"b","body":"c"}')[0] == 400
             assert call("POST", "notice.publish", b"x" * 65537)[0] == 413
+            for path,kind,text in (("/admin/","text/html","OF_SF"),("/admin/console.js","text/javascript","/admin/v1/schema"),
+                                   ("/admin/console.css","text/css","#workspace")):
+                conn=http.client.HTTPConnection("127.0.0.1",owner,timeout=3)
+                try:
+                    conn.request("GET",path)
+                    doc=conn.getresponse()
+                    raw=doc.read().decode("utf-8")
+                    assert doc.status==200 and doc.getheader("Content-Type").startswith(kind) and text in raw
+                    assert "frame-ancestors 'none'" in doc.getheader("Content-Security-Policy")
+                    assert token not in raw
+                finally:
+                    conn.close()
+            assert request(owner,"POST","/admin/")[0]==405
+            assert request(owner,"GET","/admin/v1/schema")[0]==401
             assert call("POST", "rules.set", {"world_max": 50})[1]["error"]["code"] == "state_busy"
             for path in ["//server/share/poster.png", "file://server/pkg.png", r"\\.\pipe\test"]:
                 assert call("POST", "notice.publish", {"title": "x", "body": "x", "images": [path]})[0] == 400

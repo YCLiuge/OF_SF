@@ -1,7 +1,7 @@
 """The realm's native friend requests, blocked relationships and private-role search."""
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from server.scene_data import get_session
+from server.scene_data import online_session
 from social_query import NAME_KEY, name_key, search_key
 from utils import db
 from utils.pb_create import make_PlayerBriefInfo
@@ -9,6 +9,8 @@ from utils.res_loader import res
 
 
 def setup():
+    from private_wishes import setup as setup_wishes
+    setup_wishes()
     db.conn.create_function("private_name_key",1,name_key,deterministic=True)
 
 
@@ -21,6 +23,8 @@ def state(player,other):
 
 
 def set_state(player,other,new_state):
+    from private_wishes import friendship_changed
+    friendship_changed(player, other, new_state)
     if new_state==pb.FriendStatus_NONE:
         db.conn.execute("DELETE FROM friend WHERE player_id=? AND friend_id=?",(player,other))
     else:
@@ -36,11 +40,10 @@ def at_limit(player,status):
 
 
 def notify(player,other,kind):
-    for online in get_session():
-        if online.player_id==player:
-            online.send(MsgId.FriendHandleNotice,pb.FriendHandleNotice(
-                status=pb.StatusCode_OK,type=kind,target_player_id=other),0)
-            break
+    online = online_session(player)
+    if online:
+        online.send(MsgId.FriendHandleNotice,pb.FriendHandleNotice(
+            status=pb.StatusCode_OK,type=kind,target_player_id=other),0)
 
 
 def search(session,req,rsp):

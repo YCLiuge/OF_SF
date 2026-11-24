@@ -43,17 +43,21 @@ class Session:
         self.badge_id=0
         self.scene_player=pb.ScenePlayer()
         self.home_seat=None
+        self.vehicle_seat=None
+        self.vehicle_riders={}
         self.pos={}
         self.drop_items={}
         self.color_data=[None,None,pb.PosColor()]
         self.fishing=False
         self.dungeon=[0,0,0,-1]
         self.quests={}
+        self.logout_requested=False
         self.running=True
         self.logged_in=self.remote=False
         self.responses=[]
         self.commit_callbacks=[]
         self.pending_publish=None
+        self.social_invite = self.social_clap = self.social_roll = None
         self.scene_membership=None
         self.sequence=1
         self.outbox=queue.Queue(128)
@@ -67,8 +71,9 @@ class Session:
 
     def _send_loop(self):
         while self.running:
-            try:frame=self.outbox.get(timeout=0.5)
-            except queue.Empty:continue
+            frame = self.outbox.get()
+            if frame is None:
+                break
             try:self.sock.sendall(frame)
             except OSError:
                 self.disconnect()
@@ -93,6 +98,11 @@ class Session:
 
     def disconnect(self):
         self.running=False
+        # Wake an idle writer so the connection slot is available as soon as its worker exits.
+        try:
+            self.outbox.put_nowait(None)
+        except queue.Full:
+            pass  # The writer already has work and observes running before its next wait.
         try:self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:pass
         self.sock.close()
@@ -118,6 +128,10 @@ class Session:
 class _TCP(socketserver.ThreadingTCPServer):
     daemon_threads=False
     allow_reuse_address=sys.platform!='win32'
+    def __init__(self, address, handler, limit):
+        self.request_queue_size = max(self.request_queue_size, limit)
+        super().__init__(address, handler)
+
     def server_bind(self):
         if sys.platform=='win32' and hasattr(socket,'SO_EXCLUSIVEADDRUSE'):
             self.socket.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
@@ -127,7 +141,17 @@ class _TCP(socketserver.ThreadingTCPServer):
         super().service_actions()
         # The accept loop also ticks while every player is idle.
         now = time.monotonic()
-        if self.owner.campfires.next_expiry is not None:
+        if self.owner.gomoku.due():
+            with self.owner.lock:
+                try:
+                    with db.conn:
+                        self.owner.gomoku.expire()
+                    self.owner._publish_pending()
+                except sqlite3.Error:
+                    self.owner._discard_pending()
+                    self.owner.gomoku.next_alarm=1
+                    _log.exception("Could not settle expired chessboards, will retry")
+        if self.owner.campfires.due():
             with self.owner.lock:
                 try:
                     if self.owner.campfires.expire():
@@ -135,6 +159,9 @@ class _TCP(socketserver.ThreadingTCPServer):
                 except sqlite3.Error:
                     _log.exception("Could not expire campfires, will retry")
         if now >= self.owner.next_pose_flush:
+            self.owner.next_pose_flush = now + self.owner.pose_flush_interval
+            if not (self.owner.pending_poses or self.owner.pending_dungeon_poses or self.owner.pending_reclaims):
+                return
             with self.owner.lock:
                 try:
                     self.owner._flush_poses()
@@ -145,7 +172,6 @@ class _TCP(socketserver.ThreadingTCPServer):
                         self.owner._reclaim_departed(pid)
                     except Exception:
                         _log.exception("Could not reclaim disconnected player's furniture, will retry")
-                self.owner.next_pose_flush = now + self.owner.pose_flush_interval
 
     def process_request(self,request,client_address):
         if self.owner.slots.acquire(blocking=False):
@@ -171,7 +197,7 @@ class _TCP(socketserver.ThreadingTCPServer):
 
 
 from stage_diagnostics import StageDiagnostics
-from unsupported_requests import status_replies, unsupported_status
+from unsupported_requests import OWNER_DISABLED, status_replies, unsupported_status
 
 
 class _Connection(socketserver.BaseRequestHandler):
@@ -277,6 +303,15 @@ class _Connection(socketserver.BaseRequestHandler):
                     return
                 try:
                     host._handle(session,header.msg_id,header.packet_id,body)
+                    if session.logout_requested:
+                        # Flush the native reply in FIFO order before normal leave/save cleanup.
+                        try:
+                            session.outbox.put(None, timeout=1)
+                            session.writer.join(timeout=1)
+                        except queue.Full:
+                            pass
+                        close_reason = "logout"
+                        return
                 except DecodeError:
                     close_reason = "handler_decode"
                     return
@@ -329,7 +364,7 @@ class LocalGameService:
             self.native_accounts.remote=self.remote_password
         self.bind=bind
         self.port=port
-        self.slots=BoundedSemaphore(24)
+        self.slots=BoundedSemaphore(self.realm_rules.game_connections)
         self.lock=RLock()
         self.slot_available=Condition(self.lock)
         self.connections_lock=Lock()
@@ -337,6 +372,7 @@ class LocalGameService:
         self.closing=Event()
         self.active={}
         self.scene_members={}
+        self.session_sequence=0
         self.pending_publish=set()
         self.pending_poses={}
         self.pending_dungeon_poses={}
@@ -385,6 +421,21 @@ class LocalGameService:
                 CREATE TABLE IF NOT EXISTS private_locations (
                     player_id INTEGER PRIMARY KEY, scene INTEGER NOT NULL);
             """)
+            import private_abyss
+            private_abyss.setup()
+            from private_redemption import setup as setup_redemption
+            setup_redemption()
+            import realm_reports
+            realm_reports.setup(db.conn)
+            from private_character_life import setup as setup_character_life
+            setup_character_life()
+            from private_photos import setup as setup_photos
+            setup_photos(db.conn)
+            from private_field_activities import setup as setup_field_activities
+            setup_field_activities(db.conn)
+            import private_gomoku
+            self.gomoku = private_gomoku
+            self.gomoku.initialize(db.conn,self.scene_members)
             from private_campfires import Campfires
             self.campfires = Campfires(self._broadcast_scene)
             from private_inventory import initialize as setup_inventory
@@ -401,6 +452,8 @@ class LocalGameService:
             setup_chat()
             with db.conn:
                 realm_uids.initialize(db.conn,self.realm_rules.uid_start)
+                from realm_gm import setup as setup_gm
+                setup_gm(db.conn)
             from private_channels import setup as setup_channels
             setup_channels(self.realm_rules)
             self.pending_reclaims.clear()  # Startup has reclaimed all offline public placements.
@@ -417,9 +470,13 @@ class LocalGameService:
                 raise ValueError("Initial scene lacks an authored player spawn")
             for f in sorted((UPSTREAM/"handlers").glob("*.py")):
                 if f.stem.startswith('_'):continue
+                if getattr(MsgId,f.stem+"Req",None) in OWNER_DISABLED:
+                    continue
                 handler=importlib.import_module("handlers."+f.stem).Handler()
+                if handler.msg_id in OWNER_DISABLED:
+                    continue
                 self.handlers[handler.msg_id]=handler
-            self.listener=_TCP((self.bind,self.port),_Connection)
+            self.listener=_TCP((self.bind,self.port),_Connection,self.realm_rules.game_connections)
             self.listener.owner=self
             self.port=self.listener.server_address[1]
             self.thread=Thread(target=self.listener.serve_forever,daemon=True,name="private-game")
@@ -481,7 +538,11 @@ class LocalGameService:
                 grant_private_permits(pid)
                 s=Session(sock,slot,pid,proposed)
                 s.pending_publish = self.pending_publish
+                self.session_sequence += 1
+                s.admission_order = self.session_sequence
+                s.social_rooms = self.scene_members
                 s.campfires = self.campfires
+                s.dye_texture_dir = self.resources / "swirlnoisetexture"
                 s.entitlements = self.entitlements
                 s.realm_rules = self.realm_rules
                 s.stages = self.stages
@@ -491,7 +552,7 @@ class LocalGameService:
                 s.valid_scenes=self.scene_ids
                 restore(s,saved,self.scene_ids)
             self.active[slot]=s
-            scene_data._session_list.append(s)
+            scene_data.register_session(s)
             return s
 
     def _handle(self,s,msg_id,packet_id,body):
@@ -504,17 +565,18 @@ class LocalGameService:
             s.diagnostic_request = None
 
     def _dispatch(self,s,msg_id,packet_id,body):
-        body=realm_uids.incoming(msg_id,body)
         if msg_id not in self.handlers:
             if not s.logged_in or msg_id not in self.failure_replies:
                 raise ValueError("Unsupported gameplay command")
             request, reply, reply_id = self.failure_replies[msg_id]
-            request.FromString(body)
+            if msg_id not in OWNER_DISABLED:
+                request.FromString(body)
             self.stages.unsupported(msg_id)
             with self.lock:
                 s.send(reply_id,reply(status=unsupported_status(msg_id)),packet_id)
                 s.publish()
             return
+        body=realm_uids.incoming(msg_id,body)
         if s.needs_name and msg_id not in (MsgId.ChangeNickNameReq, MsgId.PlayerPingReq, MsgId.GetArchiveInfoReq):
             pair=self.failure_replies.get(msg_id)
             if pair:
@@ -545,16 +607,27 @@ class LocalGameService:
                     if msg_id in (MsgId.ChangeSceneChannelReq,MsgId.PlayerMainDataReq):
                         db.conn.execute("INSERT OR REPLACE INTO private_locations(player_id,scene,channel) VALUES(?,?,?)",(s.player_id,s.scene_id,s.channel_id))
                     key = (s.scene_id,s.channel_id) if s.logged_in and not s.dungeon[0] else None
+                    if previous_key is not None and previous_key!=key:
+                        from private_mp_rooms import scene_departed
+                        scene_departed(s,previous_key)
+                        self.gomoku.depart(s.player_id)
                     self._index_scene(s,key)
                     self._drain_scene_events()
             except BaseException:
                 s.commit_callbacks.clear()
                 self._index_scene(s,previous_key)
+                self.gomoku.next_alarm=1
                 self._discard_pending()
                 scene_data._scene_action.clear()
                 scene_data._scene.clear()
                 scene_data._rec_list.clear()
                 raise
+            if previous_key != s.scene_membership:
+                from private_vehicle_seats import depart as leave_vehicle
+                leave_vehicle(s)
+                s.social_invite = s.social_clap = s.social_roll = None
+                s.active_challenge = None
+                s.fishing_cast = None
             if s.commit_callbacks:
                 from private_request import flush_committed
                 flush_committed(s)
@@ -666,17 +739,27 @@ class LocalGameService:
         with self.lock:
             s.running=False
             previous=s.scene_membership
+            from private_vehicle_seats import depart as leave_vehicle
+            leave_vehicle(s)
             self._index_scene(s,None)
             self.pending_publish.discard(s)
             if self.active.get(s.slot) is s:
                 self.active.pop(s.slot)
                 self.slot_available.notify_all()
-            if s in scene_data._session_list:scene_data._session_list.remove(s)
+            scene_data.unregister_session(s)
             try:
                 self._flush_poses(s.player_id)
             except sqlite3.Error:
                 _log.exception("Could not checkpoint disconnected player's pose, will retry")
             if s.logged_in:
+                from private_referrals import touch
+                import private_shop
+                try:
+                    with db.conn:
+                        touch(s.player_id,private_shop.now(),False)
+                        self.gomoku.depart(s.player_id)
+                except sqlite3.Error:
+                    _log.exception("Could not save referral logout time")
                 from private_channels import is_public
                 channel=previous[1] if previous is not None else s.channel_id
                 if is_public(s.realm_rules,channel):
@@ -711,7 +794,7 @@ class LocalGameService:
             cleanup.callback(setattr,db,"conn",None)
             cleanup.callback(db.conn.close)
             cleanup.callback(db.db._executor.shutdown,wait=True,cancel_futures=True)
-            scene_data._session_list.clear();scene_data._scene.clear()
+            scene_data.clear_sessions();scene_data._scene.clear()
             scene_data._scene_action.clear();scene_data._rec_list.clear()
             self.scene_members.clear()
             self.pending_publish.clear()

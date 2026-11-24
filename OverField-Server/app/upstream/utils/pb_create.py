@@ -86,7 +86,7 @@ def fill_scene_equipment(player_id, character, scene_character):
             scene_character.posters.add(poster_id=obj.poster_id, poster_star=obj.star)
 
 
-def make_SceneTeam(player_id, char_ids, team=None):
+def make_SceneTeam(player_id, char_ids, team=None, *, life_scope=(0,0)):
     if team == None:
         team = SceneTeam()
     if char_ids[0]:
@@ -159,6 +159,8 @@ def make_SceneTeam(player_id, char_ids, team=None):
         char3.pos.x = 2394
         char3.pos.y = 908
         char3.rot.CopyFrom(Vector3())
+    from private_character_life import apply
+    apply(player_id, team, *life_scope)
     return team
 
 
@@ -197,12 +199,20 @@ def make_SceneCharacterOutfitPreset(player_id, outfit, sc=None):
     return sc
 
 
-def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False) -> list:
+def _property_group(groups, level):
+    if level is None:
+        return random.randint(1, len(groups))
+    return next(i for i, row in enumerate(groups, 1) if row["min_level"] <= level <= row["max_level"])
+
+
+def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False, *, equipment_level=None) -> list:
     r = []
     if item_detail == None:
         item_detail = ItemDetail()
-    for i in res["Item"]["item"]["datas"]:
-        if is_all or i["i_d"] == item_id:
+    from private_dungeons import _table
+    rows = res["Item"]["item"]["datas"] if is_all else (_table("Item","item").get(item_id),)
+    for i in rows:
+        if i is not None:
             item_detail.extra_quality = i.get("quality", 0)
             match i["new_bag_item_tag"]:
                 case EBagItemTag.EBagItemTag_Weapon:  # 武器 tag:2
@@ -219,9 +229,7 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False) -> li
                             f = True
                             for prop in res["Weapon"]["weapon_property"]["datas"]:
                                 if weapon_i["weapon_property_i_d"] == prop["i_d"]:
-                                    weapon.property_index = random.randint(
-                                        1, len(prop["weapon_property_group_info"])
-                                    )
+                                    weapon.property_index = _property_group(prop["weapon_property_group_info"], equipment_level)
                                     group_s = prop["weapon_property_group_info"][
                                         weapon.property_index - 1
                                     ]
@@ -246,7 +254,7 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False) -> li
                                         )
                                         * 100
                                     )
-                                    weapon.level = random.randint(
+                                    weapon.level = equipment_level if equipment_level is not None else random.randint(
                                         group_s["min_level"], group_s["max_level"]
                                     )
                                     weapon.star = 1
@@ -280,9 +288,7 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False) -> li
                             armor.instance_id = db.get_instance_id(player_id)
                             for prop in res["Armor"]["armor_property"]["datas"]:
                                 if armor_i["armor_property_i_d"] == prop["i_d"]:
-                                    armor.property_index = random.randint(
-                                        1, len(prop["armor_property_group_info"])
-                                    )
+                                    armor.property_index = _property_group(prop["armor_property_group_info"], equipment_level)
                                     group_s = prop["armor_property_group_info"][
                                         armor.property_index - 1
                                     ]
@@ -346,7 +352,7 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False) -> li
                                         else int(val * 100)
                                     )
                                     armor.wearer_id = 0
-                                    armor.level = random.randint(
+                                    armor.level = equipment_level if equipment_level is not None else random.randint(
                                         group_s["min_level"], group_s["max_level"]
                                     )
                                     # armor.strength_level = 5
@@ -418,7 +424,8 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False) -> li
                     treasure = tmp.treasure
                     treasure.item_id = i["i_d"]
                     treasure.instance_id = db.get_instance_id(player_id)
-                    treasure.scene_id = 1  # TODO
+                    from private_treasure_dig import assign
+                    assign(player_id, treasure)
                     if is_all:
                         r.append(item_detail)
                         item_detail = ItemDetail()
@@ -678,9 +685,17 @@ def make_SceneDataNotice(session):
         data.challenges.add().ParseFromString(i)
     from private_flag_battle import fill as fill_flag_battles
     fill_flag_battles(session, data)
+    from private_room_decor import fill as fill_room_decor
+    fill_room_decor(session, data)
+    from private_field_activities import fill as fill_field_activities
+    fill_field_activities(session,data)
+    from private_mp_rooms import scene_beacons
+    scene_beacons(session, data)
     session.campfires.snapshot(session, data)
     from private_channels import fill_garden
     fill_garden(session,data.scene_garden_data)
+    from private_garden_residents import snapshot as fill_residents
+    fill_residents(session,data)
     for m in res["Flag"]["flag"]["datas"]:
         if m["scene_i_d"] == session.scene_id and m["icon_i_d"] in [
             1,
@@ -688,9 +703,11 @@ def make_SceneDataNotice(session):
             7,
         ]:  # 战斗任务，美丽景点，副本
             rsp.data.flag_ids.append(m["i_d"])
-    for i in scene_data.get_scene_player(session.scene_id, session.channel_id):
-        if i.player_id != session.player_id:
-            data.players.add().CopyFrom(i)
+    for peer in scene_data.room_members(session):
+        if peer is not session:
+            data.players.add().CopyFrom(peer.scene_player)
+    from private_vehicle_seats import fill as fill_vehicles
+    fill_vehicles(session, data)
     data.channel_id = session.channel_id
     from private_plaza import game_seconds, weather
     from private_boxes import fill_scene
@@ -704,13 +721,10 @@ def make_SceneDataNotice(session):
     return rsp
 
 
-def make_PlayerBriefInfo(player_id, info=None):
-    # 获取在线玩家列表
-    online_sessions = scene_data.get_session()
-    online_player_ids = [s.player_id for s in online_sessions]
-    if info == None:
+def make_PlayerBriefInfo(player_id, info=None, *, online=None):
+    if info is None:
         info = PlayerBriefInfo()
-    info.is_online = player_id in online_player_ids
+    info.is_online = (scene_data.online_session(player_id) is not None) if online is None else online
     (
         info.player_id,
         info.nick_name,

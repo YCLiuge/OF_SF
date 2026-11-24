@@ -255,7 +255,11 @@ class RemotePlayer:
                     if chat_text(msg.text) is None or not self.chat_guard.allows(msg.text):
                         send_client(MsgId.SendChatMsgRsp,pb.SendChatMsgRsp(status=pb.StatusCode_BAD_REQ).SerializeToString(),head.packet_id)
                         continue
-                social.outgoing(msg,clean_game_fields)
+                if social.outgoing(msg,clean_game_fields,self.chat_guard) is False:
+                    name=cls.DESCRIPTOR.name.removesuffix("Req")+"Rsp"
+                    rejected=getattr(pb,name)(status=pb.StatusCode_BAD_REQ)
+                    send_client(getattr(MsgId,name),rejected.SerializeToString(),head.packet_id)
+                    continue
                 stream.sendall(encode(head.msg_id,msg.SerializeToString(),head.packet_id))
         finally:
             shutdown(stream)

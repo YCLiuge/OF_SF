@@ -3,7 +3,7 @@ import time
 
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from server.scene_data import get_session
+from server.scene_data import get_session, online_session
 from utils import db
 from utils.res_loader import res
 from private_chat_text import chat_text
@@ -165,11 +165,16 @@ def send(session,req,rsp):
         unread(player,peer,seq,True)
         unread(peer,player,seq,False)
     notice=pb.ChatMsgNotice(status=pb.StatusCode_OK,type=kind,msg=msg)
-    for destination in get_session():
-        if destination.player_id==player:
-            continue  # The stock UI appends its own send using SendChatMsgRsp.
-        if ((kind==DM and destination.player_id==peer) or (kind==NEAR and nearby(destination)==key)
-                or (kind==WORLD and destination.chat_channel_id==session.chat_channel_id)):
+    if kind==DM:
+        destination=online_session(peer)
+        if destination:
             destination.send(MsgId.ChatMsgNotice,notice,0)
+    else:
+        for destination in get_session():
+            if destination.player_id==player:
+                continue  # The stock UI appends its own send using SendChatMsgRsp.
+            if ((kind==NEAR and nearby(destination)==key)
+                    or (kind==WORLD and destination.chat_channel_id==session.chat_channel_id)):
+                destination.send(MsgId.ChatMsgNotice,notice,0)
     rsp.text=text
     return pb.StatusCode_OK

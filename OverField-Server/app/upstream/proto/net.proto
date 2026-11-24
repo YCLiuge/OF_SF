@@ -853,15 +853,19 @@ enum ActivitySandbagRewardType {
 
 enum MPPlayRoomEventType {
     MPPlayRoomEvent_None = 0;
-    MPPlayRoomEvent_GameStart = 1;
-    MPPlayRoomEvent_GameEnd = 2;
-    MPPlayRoomEvent_DestroyObject = 3;
-    MPPlayRoomEvent_EnterPlatform = 4;
-    MPPlayRoomEvent_LeavePlatform = 5;
-    MPPlayRoomEvent_EnterMagicArea = 6;
-    MPPlayRoomEvent_LeaveMagicArea = 7;
-    MPPlayRoomEvent_ShowPlatform = 8;
-    MPPlayRoomEvent_HidePlatform = 9;
+    MPPlayRoomEvent_GameReady = 1;
+    MPPlayRoomEvent_GameStart = 2;
+    MPPlayRoomEvent_GameFinish = 3;
+    MPPlayRoomEvent_DestroyObject = 4;
+    MPPlayRoomEvent_EnterPlatform = 5;
+    MPPlayRoomEvent_LeavePlatform = 6;
+    MPPlayRoomEvent_EnterMagicArea = 7;
+    MPPlayRoomEvent_LeaveMagicArea = 8;
+    MPPlayRoomEvent_ShowPlatform = 9;
+    MPPlayRoomEvent_HidePlatform = 10;
+    MPPlayRoomEvent_StartHidePlatform = 11;
+    MPPlayRoomEvent_SinkObject = 12;
+    MPPlayRoomEvent_SendProjectile = 13;
 }
 
 message PacketHead {
@@ -6541,4 +6545,65 @@ message GomokuOnlinePlayerStartPlayReq {
 message GomokuOnlinePlayerStartPlayRsp {
     StatusCode status = 1;
     int64 turn_deadline = 2;
+}
+
+enum EGomokuOverReason {
+    EGomokuOverReason_None = 0;
+    EGomokuOverReason_Win = 1;
+    EGomokuOverReason_Leave = 2;
+    EGomokuOverReason_Furniture = 3;
+    EGomokuOverReason_Timeout = 4;
+}
+
+message GomokuOnlinePlayerNotice {
+    StatusCode status = 1;
+    int64 first_player_id = 2;
+    int64 player1_id = 3;
+    int64 player2_id = 4;
+}
+
+message GomokuOnlinePlayerWatchNotice {
+    StatusCode status = 1;
+    int64 id = 2;
+    uint32 player_id = 3;
+}
+
+message GomokuOnlinePlayerRemoveNotice {
+    StatusCode status = 1;
+    int64 id = 2;
+    int64 winner_id = 3;
+    EGomokuOverReason over_reason = 4;
+}
+
+message GomokuOnlinePlayerPlaceStoneNotice {
+    StatusCode status = 1;
+    int64 id = 2;
+    int32 row = 3;
+    int32 col = 4;
+    int32 chess = 5;
+    uint32 next_player_id = 6;
+    int64 turn_deadline = 7;
+    bool is_win = 8;
+}
+
+message GomokuOnlinePlayerLeaveNotice {
+    StatusCode status = 1;
+    int64 id = 2;
+    uint32 player_id = 3;
+    bool is_player = 4;
+}
+
+message GomokuOnlinePlayerStartPlayNotice {
+    StatusCode status = 1;
+    int64 id = 2;
+    uint32 first_player_id = 3;
+    int64 turn_deadline = 4;
+}
+
+message GomokuOnlineSettlementNotice {
+    StatusCode status = 1;
+    int64 id = 2;
+    bool is_win = 3;
+    EGomokuOverReason over_reason = 4;
+    repeated ItemDetail items = 5;
 }

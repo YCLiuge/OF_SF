@@ -32,6 +32,8 @@ def tally(pid):
 
 def setup(rules):
     with db.conn:
+        from private_garden_residents import setup as setup_residents
+        setup_residents()
         columns={r[1] for r in db.conn.execute("PRAGMA table_info(private_locations)")}
         if "channel" not in columns:db.conn.execute("ALTER TABLE private_locations ADD COLUMN channel INTEGER NOT NULL DEFAULT 1")
         db.conn.execute("CREATE TABLE IF NOT EXISTS realm_garden_migration (version INTEGER PRIMARY KEY)")
@@ -60,6 +62,8 @@ def setup(rules):
         # Unclean shutdown: nobody is online yet. A second startup sees no placements to refund.
         for pid,channel in db.conn.execute("SELECT DISTINCT player_id,channel_id FROM furnitures WHERE scene_id=? AND channel_id>0 AND channel_id < ?",(HOME,rules.uid_start)).fetchall():
             reclaim(pid,channel)
+        from private_garden_ids import reserve_chair_ids
+        reserve_chair_ids()
         for (pid,) in db.conn.execute("SELECT player_id FROM garden_info").fetchall():tally(pid)
 
 
@@ -123,6 +127,9 @@ def reclaim(pid,channel,player=None,*,notify_peers=False):
     for fid,raw in rows:
         item_id=pb.FurnitureDetailsInfo.FromString(raw).furniture_item_id
         amounts[item_id]+=1
+        if item_id==5044010:
+            from private_gomoku import remove_table
+            remove_table(channel,fid)
         db.del_furniture(HOME,channel,pid,fid)
         if player or notify_peers:
             msg=pb.SceneGardenFurnitureRemoveNotice(status=pb.StatusCode_OK,furniture_id=fid,item_id=item_id)
@@ -164,15 +171,20 @@ def fill_garden(s,world):
             world.left_like_num = remaining(s, day_key())
         row=db.conn.execute("SELECT player_name FROM players WHERE player_id=?",(owner,)).fetchone()
         if row:world.garden_name=row[0]
-    for peer in get_session()+([s] if not s.logged_in else []):
-        if peer.scene_id!=HOME or peer.channel_id!=s.channel_id:continue
-        held=db.conn.execute("SELECT fid,item FROM realm_hand_furniture WHERE player=?",(peer.player_id,)).fetchone()
-        if held:
-            fid,item=held
-            shown=world.player_handing_furniture_info_map[fid]
-            shown.player_id=peer.player_id
-            shown.furniture_info.furniture_id=fid
-            shown.furniture_info.furniture_item_id=item
+    players = [peer.player_id for peer in get_session() if peer.scene_id == HOME and peer.channel_id == s.channel_id]
+    if not s.logged_in:
+        players.append(s.player_id)
+    if players:
+        placeholders = ",".join("?" for _ in players)
+        held = {pid:(fid,item) for pid,fid,item in db.conn.execute(
+            f"SELECT player,fid,item FROM realm_hand_furniture WHERE player IN ({placeholders})",players)}
+        for player in players:
+            if player in held:
+                fid,item=held[player]
+                shown=world.player_handing_furniture_info_map[fid]
+                shown.player_id=player
+                shown.furniture_info.furniture_id=fid
+                shown.furniture_info.furniture_item_id=item
     catalog = _table("HomeItem", "home_item", "item_i_d")
     points = sum(catalog.get(entry.furniture_item_id, {}).get("home_item_point_num", 0)
                  for entry in world.garden_furniture_info_map.values())

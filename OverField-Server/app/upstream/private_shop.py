@@ -11,8 +11,8 @@ from private_dungeons import _table
 from utils.res_loader import res
 
 CN=timezone(timedelta(hours=8))
-INSTANCE_TAGS={pb.EBagItemTag_Weapon,pb.EBagItemTag_Armor,pb.EBagItemTag_Poster}
-UNSUPPORTED={pb.EBagItemTag_Gift,pb.EBagItemTag_Card,pb.EBagItemTag_Inscription,pb.EBagItemTag_TreasureMap,
+INSTANCE_TAGS={pb.EBagItemTag_Weapon,pb.EBagItemTag_Armor,pb.EBagItemTag_Poster,pb.EBagItemTag_TreasureMap}
+UNSUPPORTED={pb.EBagItemTag_Gift,pb.EBagItemTag_Card,pb.EBagItemTag_Inscription,
              pb.EBagItemTag_Pet,pb.EBagItemTag_MonthlyCard,pb.EBagItemTag_BattlePassCard,
              pb.EBagItemTag_MonthlyGiftCard,pb.EBagItemTag_BattlePassGiftCard,pb.EBagItemTag_MoonCard}
 
@@ -137,7 +137,7 @@ def award(player,amounts,rsp,notice):
             for _ in range(qty):
                 instance=make_item(item,1,player)
                 kind=instance.main_item.WhichOneof("item") if instance else None
-                if kind not in ("weapon","armor","poster"):
+                if kind not in ("weapon","armor","poster","treasure"):
                     raise UnsupportedGoods
                 db.set_item_detail(player,instance.SerializeToString(),instance_id=getattr(instance.main_item,kind).instance_id)
                 rsp.items.add().CopyFrom(instance)

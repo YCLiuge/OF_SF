@@ -188,6 +188,24 @@ def self_test():
                    "test_native_first_quest.py", "test_story_entry.py", "test_bottle_intro.py",
                    "test_native_mail.py", "test_native_manual.py", "test_native_recovery.py",
                    "test_native_story_objectives.py", "test_native_collection_queries.py", "test_native_character_skills.py", "test_native_closed_minigames.py",
+                   "test_native_archive_editions.py", "test_native_blessing_calendar.py",
+                   "test_native_local_gm.py", "test_native_player_gateway.py",
+                   "test_native_season_reopening.py", "test_native_treasure_dig.py",
+                   "test_native_vehicle_seats.py",
+                   "test_native_character_appearance.py", "test_native_fashion_gacha.py",
+                   "test_native_field_challenges.py", "test_native_gomoku.py",
+                   "test_native_owner_disabled.py",
+                   "test_native_abyss.py", "test_native_arcade_wallet.py",
+                   "test_native_archaeology.py", "test_native_character_life.py",
+                   "test_native_connection_limits.py", "test_native_dungeon_sweep.py",
+                   "test_native_festival_rewards.py", "test_native_field_activities.py",
+                   "test_native_fishing.py", "test_native_garden_residents.py",
+                   "test_native_koi.py", "test_native_mp_rooms.py",
+                   "test_native_outfit_dye.py", "test_native_photos.py",
+                   "test_native_plaza_calendar.py", "test_native_referrals.py",
+                   "test_native_reward_codes.py", "test_native_room_actions.py",
+                   "test_native_room_decor.py", "test_native_turntable.py",
+                   "test_native_wishlist.py",
                    "test_native_campfires.py", "test_native_item_sweep.py",
                    "test_native_gacha_atomicity.py", "test_native_movement_batch.py",
                    "test_native_scene_travel.py",
@@ -216,6 +234,10 @@ def main():
     commands=parser.add_subparsers(dest="command")
     import realm_admin
     realm_admin.arguments(commands)
+    from player_gateway import arguments as add_gateway
+    add_gateway(commands)
+    import realm_gm
+    realm_gm.arguments(commands)
     commands.add_parser("start"); commands.add_parser("health"); commands.add_parser("stop"); commands.add_parser("test")
     from realm_maintenance import arguments as add_maintenance
     add_maintenance(commands)
@@ -241,6 +263,8 @@ def main():
     realm_rules.parser(commands)
     args=parser.parse_args()
     state=args.state.resolve()
+    if args.command=="gm":
+        return realm_gm.command(state,args)
     if args.command=="admin":
         return realm_admin.command(state,args,request_stop)
     if args.command in ("announce","edit-notice","withdraw-notice","publish-release","withdraw-release","maintenance-info"):
@@ -248,6 +272,9 @@ def main():
         return owner_command(state,args)
     if args.command=="rules":return realm_rules.command(state,args)
     if args.command in (None,"start"):return serve(state)
+    if args.command=="player-gateway":
+        from player_gateway import run
+        return run(args,endpoint_config())
     if args.command=="test":return self_test()
     if args.command=="health":return health()
     if args.command=="stop":return request_stop(state)

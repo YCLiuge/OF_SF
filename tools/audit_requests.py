@@ -131,7 +131,7 @@ def fixed_reply(handler):
 def implementations(server,ids,classes):
     from local_game_service import LocalGameService, MsgId, pb
     from local_identity import LocalIdentity
-    from unsupported_requests import unsupported_status
+    from unsupported_requests import OWNER_DISABLED, unsupported_status
     result={}
     with TemporaryDirectory(prefix="ofs-request-routing-") as temp:
         state=Path(temp)
@@ -176,6 +176,7 @@ def implementations(server,ids,classes):
                           runtime_route=route,dispatch_source=source,delegates=closures,enum_fields=selectors)
                 if route=="explicit_unsupported":
                     item["fallback_status"]=pb.StatusCode.Name(unsupported_status(mid))
+                    item["owner_disabled"]=mid in OWNER_DISABLED
                 if name in MODES:item["known_scope"]=MODES[name]
                 result[name]=item
         finally:

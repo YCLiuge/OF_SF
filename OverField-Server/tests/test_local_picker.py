@@ -59,6 +59,20 @@ class EditorTests(TestCase):
             other=json.loads(http(port,"POST",addr,headers={"X-Forwarded-For":"192.0.2.1"})[2])
             self.assertEqual(other["LoginUrlList"],initial)
 
+    def test_preselected_private_client_skips_repeated_url_menu(self):
+        realm = GameDispatch("http://127.0.0.1:18881","127.0.0.1",11033)
+        realm.picker = LocalPicker("launcher-fixture.exe", preselected=True)
+        realm.assets = object()
+        with listening(realm) as port:
+            for prefix in ("", "/private-game"):
+                route = prefix + "/dispatch/"
+                self.assertEqual(json.loads(http(port, "POST", route+"get_login_url_list")[2]), {"LoginUrlList":[]})
+                self.assertEqual(json.loads(http(port, "POST", route+"client_hot_update")[2])["hotOssUrl"],
+                                 realm.origin + "/Resources")
+                self.assertEqual(json.loads(http(port, "POST", route+"region_info")[2])["gate_tcp_port"], 11033)
+                external = http(port, "POST", route+"get_login_url_list", headers={"X-Forwarded-For":"192.0.2.1"})
+                self.assertEqual(len(json.loads(external[2])["LoginUrlList"]), 1)
+
     def test_remote_peer_or_unsafe_listener_cannot_trigger(self):
         picker=LocalPicker("No-real-UI.exe")
         for client,bind,allowed in (("127.0.0.1","127.0.0.1",True),("::1","::1",True),

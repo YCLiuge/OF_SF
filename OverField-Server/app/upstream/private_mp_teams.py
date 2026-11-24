@@ -6,12 +6,14 @@ from network.msg_id import MsgId
 from private_dungeons import _table
 from private_friends import state as friend_state
 from proto import net_pb2 as pb
-from server.scene_data import get_session
+from server.scene_data import get_session, online_session
 from utils import db
 from utils.pb_create import make_PlayerBriefInfo
+import private_mp_rooms as rooms
 
 
 def initialize():
+    rooms.initialize()
     db.conn.executescript("""
         CREATE TABLE IF NOT EXISTS private_mp_teams (
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, leader INTEGER NOT NULL,
@@ -148,8 +150,9 @@ def invite(session,req,rsp):
     player,target=session.player_id,req.target_id
     row=team_row(team_for(player))
     if not row:return pb.StatusCode_MP_INVITER_NOT_IN_TEAM
+    if rooms.in_game(row[0]):return pb.StatusCode_MP_TEAM_GAME_STARTED
     if team_for(target):return pb.StatusCode_MP_INVITEE_IN_TEAM
-    target_session=next((p for p in get_session() if p.player_id==target),None)
+    target_session=online_session(target)
     if target_session is None:return pb.StatusCode_MP_TEAM_CANNOT_JOIN
     if blocked(player,target) or blocked(row[2],target):return pb.StatusCode_MP_LEADER_BLOCKED
     if (target_session.scene_id,target_session.channel_id)!=(session.scene_id,session.channel_id):
@@ -172,11 +175,18 @@ def join(session,req,rsp):
     if team_for(player):return pb.StatusCode_MP_ALREADY_IN_TEAM
     row=team_row(req.team_id)
     if not row:return pb.StatusCode_MP_TEAM_NOT_EXIST
+    if rooms.in_game(row[0]):return pb.StatusCode_MP_TEAM_GAME_STARTED
     invitation=db.conn.execute("""SELECT inviter FROM private_mp_invites i JOIN private_mp_members m
         ON i.inviter=m.player AND i.team=m.team WHERE i.team=? AND i.player=? AND i.expires>?""",
         (row[0],player,int(time.time()))).fetchone()
-    if not invitation:return pb.StatusCode_MP_TEAM_CANNOT_JOIN
-    if blocked(row[2],player) or blocked(invitation[0],player):return pb.StatusCode_MP_LEADER_BLOCKED
+    if not invitation:
+        beacon=rooms.beacon_for(row[0])
+        if not beacon or (beacon.scene_id,beacon.channel_label)!=(session.scene_id,session.channel_id):
+            return pb.StatusCode_MP_TEAM_CANNOT_JOIN
+        if db.conn.execute("SELECT 1 FROM private_mp_kicks WHERE team=? AND player=? AND expires>?",
+                           (row[0],player,int(time.time()))).fetchone():
+            return pb.StatusCode_MP_IN_TEAM_KICK_CD
+    if blocked(row[2],player) or (invitation and blocked(invitation[0],player)):return pb.StatusCode_MP_LEADER_BLOCKED
     members=roster(row[0])
     limit=min(session.realm_rules.mp_team_members,mode_rules(row[3],row[4])["player_max"])
     if len(members)>=limit:return pb.StatusCode_MP_TEAM_FULL
@@ -186,6 +196,7 @@ def join(session,req,rsp):
     db.conn.execute("DELETE FROM private_mp_invites WHERE player=?",(player,))
     detail(session,rsp.team_detail,row,roster(row[0]))
     member_update(row)
+    rooms.roster_changed(session, row)
     return pb.StatusCode_OK
 
 
@@ -205,6 +216,9 @@ def quit(session,req,rsp):
     row=team_row(team_for(player))
     if not row:return pb.StatusCode_MP_NOT_IN_TEAM
     team=row[0]
+    if rooms.in_game(team):return pb.StatusCode_MP_TEAM_GAME_STARTED
+    if row[2]==player:
+        rooms.remove_beacon(session,row)
     remove_member(team,player)
     members=roster(team)
     if not members:
@@ -212,7 +226,9 @@ def quit(session,req,rsp):
     else:
         if row[2]==player:
             db.conn.execute("UPDATE private_mp_teams SET leader=? WHERE id=?",(members[0][0],team))
-        member_update(team_row(team))
+        updated=team_row(team)
+        member_update(updated)
+        rooms.roster_changed(session,updated)
     rsp.team_id=team
     return pb.StatusCode_OK
 
@@ -228,6 +244,7 @@ def kick(session,req,rsp):
     row,status=leader(session)
     if not row:return status
     target=req.target_id
+    if rooms.in_game(row[0]):return pb.StatusCode_MP_TEAM_GAME_STARTED
     if target==session.player_id:return pb.StatusCode_BAD_REQ
     if team_for(target)!=row[0]:return pb.StatusCode_PLAYER_NOT_IN_MP_TEAM
     team=row[0]
@@ -236,6 +253,7 @@ def kick(session,req,rsp):
     db.conn.execute("INSERT OR REPLACE INTO private_mp_kicks VALUES(?,?,?)",(team,target,int(time.time())+seconds))
     notify([target],MsgId.MPTeamPlayerKickedNotice,pb.MPTeamPlayerKickedNotice(status=pb.StatusCode_OK,team_id=team))
     member_update(row)
+    rooms.roster_changed(session,row)
     rsp.target_id=target
     return pb.StatusCode_OK
 
@@ -244,7 +262,9 @@ def dismiss(session,req,rsp):
     row,status=leader(session)
     if not row:return status
     team=row[0]
+    if rooms.in_game(team):return pb.StatusCode_MP_TEAM_GAME_STARTED
     peers=[pid for pid,_ in roster(team) if pid!=session.player_id]
+    rooms.remove_beacon(session,row)
     remove_team(team)
     notify(peers,MsgId.MPTeamDismissNotice,pb.MPTeamDismissNotice(status=pb.StatusCode_OK,team_id=team))
     return pb.StatusCode_OK
@@ -257,6 +277,7 @@ def rename(session,req,rsp):
     if status!=pb.StatusCode_OK:return status
     if name==row[1]:return pb.StatusCode_MP_TEAM_NAME_UNCHANGED
     db.conn.execute("UPDATE private_mp_teams SET name=? WHERE id=?",(name,row[0]))
+    rooms.roster_changed(session,team_row(row[0]))
     rsp.team_id=row[0]
     rsp.new_name=name
     notify((pid for pid,_ in roster(row[0]) if pid!=session.player_id),MsgId.MPTeamRenameNotice,
@@ -267,6 +288,7 @@ def rename(session,req,rsp):
 def change_mode(session,req,rsp):
     row,status=leader(session)
     if not row:return status
+    if rooms.in_game(row[0]):return pb.StatusCode_MP_TEAM_GAME_STARTED
     options=mode_rules(req.mode_id,req.sub_mode_id)
     if not options:return pb.StatusCode_CFG_NOT_FOUND
     if (req.mode_id,options["sub_mode_id"])==row[3:]:return pb.StatusCode_MP_TEAM_UNCHANGED
@@ -277,6 +299,7 @@ def change_mode(session,req,rsp):
     rsp.game_mode.mode_id=req.mode_id
     rsp.game_mode.sub_mode_id=options["sub_mode_id"]
     rsp.game_mode.game_mode=options.get("new_play_mode",0)
+    rooms.remove_beacon(session,row)
     update=pb.MPTeamGameModeChangeNotice(status=pb.StatusCode_OK,team_id=row[0],game_mode=rsp.game_mode)
     notify((pid for pid,_ in members if pid!=session.player_id),MsgId.MPTeamGameModeChangeNotice,update)
     return pb.StatusCode_OK
@@ -287,5 +310,6 @@ def on_login(session):
     if row:
         notice=pb.PlayerMPGameNotice(status=pb.StatusCode_OK)
         detail(session,notice.m_p_team,row,roster(row[0]))
+        rooms.restore_member(session,row,notice)
         session.send(MsgId.PlayerMPGameNotice,notice,0)
 

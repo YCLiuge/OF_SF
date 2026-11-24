@@ -157,8 +157,13 @@ def enter(session, req, rsp, restart=False):
         data.pos.CopyFrom(req.pos)
         data.rot.CopyFrom(req.rot)
         save(pid, data)
+        from private_field_activities import depart
+        depart(session)
         session.dungeon = [did, 0, 0, -1]
-    make_SceneTeam(pid, [data.char1, data.char2, data.char3], rsp.team)
+        from private_character_life import start_visit
+        start_visit(pid,did,data.enter_times)
+    from private_character_life import members as active_members
+    make_SceneTeam(pid,active_members(pid,did,data),rsp.team,life_scope=(did,data.enter_times))
     born = scene(did).get("Born", ())
     if born:
         for idx, actor in enumerate((rsp.team.char1, rsp.team.char2, rsp.team.char3)):
@@ -206,6 +211,8 @@ def finish(session, rsp):
         data.last_finish_time = int(time.time())
         track(session,data)
         finish_achievements(session, did)
+        from private_abyss import record_finish
+        record_finish(session,data)
     rsp.scene_id=session.scene_id
     rsp.dungeon_data.CopyFrom(data)
     return pb.StatusCode_OK

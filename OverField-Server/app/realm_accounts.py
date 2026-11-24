@@ -160,24 +160,34 @@ class AccountService:
         self.gifts=GiftService()
         initialize(identity)
         self.identity=identity
+        from player_gateway_peer import prepare
+        self.gateway_peer_key=prepare(identity)
         self.workers=threading.BoundedSemaphore(3)
         self.lock=threading.Lock()
         self.attempts=OrderedDict()
 
-    def request(self,path,body,peer,local_bind,tls,open_registration):
+    def request(self,path,body,peer,local_bind,tls,open_registration,*,gateway_source=None):
         if not tls and not (ipaddress.ip_address(peer).is_loopback and ipaddress.ip_address(local_bind).is_loopback):
             raise AccountError(403,"secure_transport_required")
         if path==PREFIX+"register" and not open_registration:
             raise AccountError(403,"registration_closed")
         now=time.monotonic()
+        bucket, limit = peer, 30
+        if gateway_source is not None:
+            action = path.removeprefix(PREFIX)
+            family = action if action in ("register", "login") else "other"
+            bucket = (gateway_source, family)
+            limit = 6 if family == "register" else 30
         with self.lock:
-            hits=self.attempts.setdefault(peer,deque())
-            self.attempts.move_to_end(peer)
-            while len(self.attempts)>1024:
-                self.attempts.popitem(last=False)
+            if bucket not in self.attempts and len(self.attempts)>=4096:
+                self.attempts=OrderedDict((k,v) for k,v in self.attempts.items() if v and v[-1]>=now-60)
+                if len(self.attempts)>=4096:
+                    raise AccountError(429,"rate_limited")
+            hits=self.attempts.setdefault(bucket,deque())
+            self.attempts.move_to_end(bucket)
             while hits and hits[0]<now-60:
                 hits.popleft()
-            if len(hits)>=30:
+            if len(hits)>=limit:
                 raise AccountError(429,"rate_limited")
             if not self.workers.acquire(False):
                 raise AccountError(429,"rate_limited")

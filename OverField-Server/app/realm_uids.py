@@ -10,7 +10,7 @@ _legacy={}
 _reversed={}
 _TYPES={v:getattr(pb,k) for k,v in vars(MsgId).items() if type(v) is int and hasattr(pb,k)}
 _PLAYER_FIELDS={"player_id","player_label","from_player_id","target_player_id","join_player_id","to_player_id",
-                "reported_player_id","friend_id","matched_player_id_lst","action_player_ids"}
+                "reported_player_id","finished_player_list","friend_id","matched_player_id_lst","action_player_ids"}
 
 
 def initialize(conn,first=1000001):
@@ -62,7 +62,11 @@ def _translate(msg,outward):
                     value.clear()
                     for key,data in moved.items():
                         value[key].ParseFromString(data)
-            elif k=="furniture_player_map":
+            elif (name,k)==("MPBeacon","members"):
+                members={convert(key):ready for key,ready in value.items()}
+                value.clear()
+                value.update(members)
+            elif k=="furniture_player_map" or (name,k)==("VehicleInfo","seat_info"):
                 for key in list(value):
                     value[key]=convert(value[key])
         elif field.message_type:
@@ -71,7 +75,7 @@ def _translate(msg,outward):
                     _translate(part,outward)
             else:
                 _translate(value,outward)
-        elif k in _PLAYER_FIELDS or (name,k) in (("MPBeacon","owner_id"),("MPTeamMembers","leader"),("MPTeamInviteNotice","inviter")) or (k=="target_id" and name in ("MPTeamInviteReq","MPTeamKickMemberReq","MPTeamKickMemberRsp")):
+        elif k in _PLAYER_FIELDS or (name in ("SceneSitVehicleReq","SceneSitVehicleRsp","VehicleInfo") and k=="chair_id") or ("Gomoku" in name and k in {"first_player_id","player1_id","player2_id","winner_id","next_player_id"}) or (name,k) in (("MPBeacon","owner_id"),("MPTeamMembers","leader"),("MPTeamInviteNotice","inviter")) or (k=="target_id" and name in ("MPTeamInviteReq","MPTeamKickMemberReq","MPTeamKickMemberRsp")):
             if field.type in (F.TYPE_UINT32,F.TYPE_UINT64,F.TYPE_INT64,F.TYPE_INT32):
                 if field.is_repeated:
                     for i,v in enumerate(value):

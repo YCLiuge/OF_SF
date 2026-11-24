@@ -40,12 +40,40 @@ class StackChanges:
             notice.items.add().CopyFrom(item)
 
 
+def grant_typed(player, template, quantity, rewards, pack, *, balances=None):
+    """Deliver instance/role rewards or apply the existing stacked-item settlement path."""
+    from private_dungeons import _table
+    import private_shop as shop
+    tag = _table("Item","item")[template]["new_bag_item_tag"]
+    if tag == pb.EBagItemTag_Card:
+        from private_gacha import award
+        for _ in range(quantity):
+            award(player, template, rewards.add(), pack, balances=balances)
+    elif tag == pb.EBagItemTag_Fashion and shop.already_owned(player, template, tag):
+        rewards.add().CopyFrom(shop.balance(player, template))
+    elif balances is not None and tag not in shop.INSTANCE_TAGS and tag != pb.EBagItemTag_Fashion:
+        total = balances.change(template, quantity)
+        delta = rewards.add().main_item
+        delta.CopyFrom(total)
+        delta.base_item.num = quantity
+    else:
+        delivery = pb.ShopBuyRsp()
+        shop.award(player, {template:quantity}, delivery, pack)
+        rewards.extend(delivery.items)
+
+
 class GameplayWrite:
     def __init__(self, player):
         self.balances = StackChanges(player)
         self.pack = pb.PackNotice(status=pb.StatusCode_OK)
         self.notices = []
         self.after_commit = []
+
+    def grant(self, amounts, rewards):
+        """Append typed prize deltas; retain final balances for the committed inventory notice."""
+        for template,quantity in amounts.items():
+            grant_typed(self.balances.player, template, quantity, rewards, self.pack, balances=self.balances)
+
 
 
 def run(session, request, response, operation):

@@ -1,5 +1,7 @@
 """1.1.12 public game discovery and a read-only, allowlisted local YooAsset mirror."""
 import hashlib
+import io
+from threading import Lock
 import ipaddress
 import os
 from pathlib import Path
@@ -52,6 +54,21 @@ def _hash(path, algorithm):
         return hashlib.file_digest(stream, algorithm).hexdigest()
 
 
+def _issued_manifest(version, manifests, stock):
+    if not re.fullmatch(rb"[2-4]\d{3}(-\d{2}){5}", version):
+        return False
+    name = f"{PREFIX}_{version.decode('ascii')}"
+    try:
+        expected = (stock / (name + ".sha256")).read_bytes().strip()
+        if not re.fullmatch(rb"[0-9a-f]{64}", expected):
+            return False
+        blob = (manifests / (name + ".bytes")).read_bytes()
+        return (hashlib.sha256(blob).hexdigest().encode() == expected
+                and (manifests / (name + ".hash")).read_bytes().strip() == hashlib.md5(blob).hexdigest().encode())
+    except FileNotFoundError:
+        return False
+
+
 class Assets:
     """Expose the original installed client files required by this specific active manifest."""
 
@@ -63,13 +80,23 @@ class Assets:
         if (self.root / "version").read_bytes().strip() != BUILD.encode():
             raise ValueError("Unexpected client build")
         self._meta = {}
+        self.plaza_lock = Lock()
+        self.plaza_config = {}
+        self.plaza_version = PATCH
+        self.plaza_versions = {}
+        self.stock = self.root / ".of-plaza-stock"
+        self.private_copy = (self.root / ".of-private-client.json").is_file()
         version_file = cache / "ManifestFiles" / (PREFIX + ".version")
-        if version_file.read_bytes().strip() != PATCH.encode():
+        installed = version_file.read_bytes().strip()
+        if installed != PATCH.encode() and not (
+                self.private_copy and _issued_manifest(installed, version_file.parent, self.stock)):
             raise ValueError("The expected active resource patch is unavailable")
         self._meta[version_file.name] = (version_file, _hash(version_file, "sha256"))
         active = None
         for version, base in [(BUILD, streaming), (PATCH, cache / "ManifestFiles")]:
             manifest = base / f"{PREFIX}_{version}.bytes"
+            if not manifest.exists() and version == PATCH and self.private_copy:
+                manifest = self.stock / manifest.name
             checksum = manifest.with_suffix(".hash")
             blob = manifest.read_bytes()
             if hashlib.sha256(blob).hexdigest() != MANIFEST_SHA[version]:
@@ -91,7 +118,10 @@ class Assets:
             length, = struct.unpack("<Q", match[2])
             patch = cache / "CacheFiles" / name[:2] / name / "__data"
             packaged = streaming / (name + ".bundle")
-            for path in (patch, packaged):
+            candidates = [patch, packaged]
+            if self.private_copy and name == "e49d461782ed9bf3309d2c35662e132a":
+                candidates.append(self.stock / (name + ".bundle"))
+            for path in candidates:
                 try:
                     found = path.stat().st_size == length and path.is_file()
                 except (FileNotFoundError, NotADirectoryError):
@@ -107,7 +137,66 @@ class Assets:
         self.count = len(self._bundles)
         self.from_cache = cached_count
 
+    def select_plaza(self, config):
+        from plaza_assets import STOCK_BUNDLE, build
+        from realm_blessings import validate_plan
+        config = validate_plan(config, active_only=True)
+        with self.plaza_lock:
+            if config == self.plaza_config:
+                return self.plaza_version
+            if config:
+                manifest_name = PREFIX + "_" + PATCH + ".bytes"
+                bundle_name = STOCK_BUNDLE + ".bundle"
+                with self.open_stock(manifest_name) as src:
+                    manifest = src.read()
+                with self.open_stock(bundle_name) as src:
+                    bundle = src.read()
+                version, files = build(manifest, bundle, config, PATCH, PREFIX)
+                if self.private_copy:
+                    self.stock.mkdir(exist_ok=True)
+                    if self.stock.resolve().parent != self.root:
+                        raise ValueError("Invalid private stage backup directory")
+                    # YooAsset may prune unreferenced cached assets. Preserve the three
+                    # stock inputs needed for switching calendars and returning to automatic mode.
+                    import tempfile
+                    issued = f"{PREFIX}_{version}"
+                    receipt = hashlib.sha256(files[issued + ".bytes"]).hexdigest().encode()
+                    for name, content in ((manifest_name, manifest), (manifest_name[:-6]+".hash", hashlib.md5(manifest).hexdigest().encode()),
+                                          (bundle_name, bundle), (issued+".sha256", receipt)):
+                        target = self.stock / name
+                        if target.is_file() and _hash(target,"sha256") == hashlib.sha256(content).hexdigest():
+                            continue
+                        with tempfile.NamedTemporaryFile(dir=self.stock,delete=False) as stream:
+                            temporary = Path(stream.name)
+                            stream.write(content)
+                        try:
+                            os.replace(temporary,target)
+                        finally:
+                            temporary.unlink(missing_ok=True)
+                    # Continue serving the verified baseline even if a running player prunes its old cache.
+                    self._meta[manifest_name] = (self.stock / manifest_name, MANIFEST_SHA[PATCH])
+                    hash_name = manifest_name[:-6] + ".hash"
+                    self._meta[hash_name] = (self.stock / hash_name, _hash(self.stock / hash_name,"sha256"))
+                    self._bundles[bundle_name] = (self.stock / bundle_name, len(bundle), STOCK_BUNDLE)
+                self.plaza_versions[version] = files
+                if len(self.plaza_versions) > 2:
+                    del self.plaza_versions[next(iter(self.plaza_versions))]
+            else:
+                version = PATCH
+            self.plaza_version = version
+            self.plaza_config = config
+            return version
+
     def open(self, leaf):
+        if leaf == PREFIX + ".version":
+            return io.BytesIO(self.plaza_version.encode())
+        with self.plaza_lock:
+            for files in self.plaza_versions.values():
+                if leaf in files:
+                    return io.BytesIO(files[leaf])
+        return self.open_stock(leaf)
+
+    def open_stock(self, leaf):
         """Open only original manifest/version metadata or an active digest-named resource."""
         if leaf in self._meta:
             path, expected = self._meta[leaf]
@@ -144,8 +233,6 @@ class GameDispatch:
             raise ValueError("Invalid region name")
         self.game_host, self.game_port = game_host, game_port
         self.region_name = region_name
-        if os.environ.get("OF_NATIVE_PICKER")=="1" and os.environ.get("OF_REMOTE_SSH_TARGET"):
-            self.region_name = "SSH · "+os.environ["OF_REMOTE_SSH_TARGET"][:48]
         self.assets = None if client_root is None else Assets(client_root)
         self.picker = LocalPicker.configured(client_root,self.origin)
         self.maintenance = None
@@ -163,16 +250,24 @@ class GameDispatch:
             return 200, {"data": rows, "serverTime": time.time_ns() // 1_000_000}
         if route == "/dispatch/get_login_url_list":
             return 200, {"LoginUrlList": [{"loginUrl": self.origin, "name": self.region_name}]}
+        version = VERSION
+        if route in ("/dispatch/region_info", "/dispatch/client_hot_update") and self.assets and self.maintenance:
+            if hasattr(self.maintenance, "plaza") and hasattr(self.assets, "select_plaza"):
+                import http.client, sqlite3
+                try:
+                    version = BUILD + "_" + self.assets.select_plaza(self.maintenance.plaza())
+                except (OSError, ValueError, sqlite3.Error, http.client.HTTPException):
+                    return 503, {"status": False, "message": "Private plaza resource plan unavailable"}
         if route == "/dispatch/region_info":
             return 200, {"status": True, "message": "success", "gate_tcp_ip": self.game_host,
                          "gate_tcp_port": self.game_port, "is_server_open": True, "text": "",
-                         "client_log_tcp_ip": "", "client_log_tcp_port": 0, "currentVersion": VERSION,
-                         "photo_share_cdn_url": ""}
+                         "client_log_tcp_ip": "", "client_log_tcp_port": 0, "currentVersion": version,
+                         "photo_share_cdn_url": self.origin + "/private-game/photos"}
         if route == "/dispatch/client_hot_update":
             if self.assets is None:
                 return 503, {"status": False, "message": "1.1.12 client assets are not mounted on this server"}
             return 200, {"status": True, "message": "success", "hotOssUrl": self.origin + "/Resources",
-                         "currentVersion": VERSION, "server": "private", "server_id": "10001",
+                         "currentVersion": version, "server": "private", "server_id": "10001",
                          "ssAppId": "", "ssServerUrl": "", "open_gm": False, "open_error_log": False,
                          "open_netConnecting_log": False, "ipAddress": "", "payUrl": "",
                          "isTestServer": False, "error_log_level": 2, "open_cs": False}
@@ -194,7 +289,7 @@ def _resource(handler, dispatch, route):
         handler._reply(503, {"error": "original resource unavailable or changed"})
         return
     with stream:
-        size = os.fstat(stream.fileno()).st_size
+        size = stream.seek(0, 2)
         first, last, status = 0, size - 1, 200
         ranges = handler.headers.get_all("Range") or []
         if ranges:
@@ -268,7 +363,12 @@ def handle_game_dispatch(handler):
         # The response is server-wide. Don't parse, log, echo, or persist request bodies.
         status, response = dispatch.response(route)
         if route == "/dispatch/get_login_url_list" and picker and picker.local_client(handler):
-            response["LoginUrlList"].append({"loginUrl":dispatch.origin + picker.prefix,"name":PICKER_LABEL})
+            if picker.preselected:
+                # The PC launcher already selected and configured FinalLoginServer. An empty list
+                # continues on that origin. Every nonempty list opens Unity's name + URL debug menu.
+                response = {"LoginUrlList": []}
+            else:
+                response["LoginUrlList"].append({"loginUrl":dispatch.origin + picker.prefix,"name":PICKER_LABEL})
         handler._reply(status,response)
     elif handler.command in ("GET","HEAD") and route.startswith("/Resources/"):
         _resource(handler,dispatch,route)

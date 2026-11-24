@@ -6,8 +6,7 @@ from utils.res_loader import res
 
 
 def occupants(session):
-    return [s for s in scene_data.get_session()
-            if not s.dungeon[0] and (s.scene_id, s.channel_id) == (session.scene_id, session.channel_id)]
+    return scene_data.room_members(session)
 
 
 def fill(session, scene):
@@ -19,11 +18,21 @@ def fill(session, scene):
 
 
 def sit(session, req, rsp):
+    if req.is_sit and getattr(session, "vehicle_seat", None):
+        return pb.StatusCode_PlayerSitOtherChair
     cfg = res["HomeChairSeats"]
     if session.scene_id != cfg["scene"] or session.dungeon[0]:
         return pb.StatusCode_OK  # Preserve the existing acknowledgement for other maps.
     count = cfg["seats"].get(str(req.chair_id))
-    if count is None or not 0 <= req.seat_id < count:
+    if count is None:
+        from private_garden_residents import furniture, seat_count, occupant
+        from private_channels import owner_for
+        placed=furniture(session.scene_id,session.channel_id,req.chair_id)
+        count=seat_count(placed[1]) if placed else 0
+        owner=owner_for(session.channel_id)
+        if req.is_sit and owner and occupant(owner,req.chair_id,req.seat_id):
+            return pb.StatusCode_ChairSeatTaken
+    if not 0 <= req.seat_id < count:
         return pb.StatusCode_BAD_REQ
     seat = (req.chair_id, req.seat_id)
     peers = occupants(session)

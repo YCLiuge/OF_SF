@@ -54,6 +54,17 @@ def valid_local(host):
 
 @contextlib.contextmanager
 def connection(config):
+    if config.get("publicTls"):
+        from player_tls_channels import PlayerTlsChannels
+        channels = PlayerTlsChannels(config["publicTls"], config.get("caFile"))
+        with channels.open(18881) as stream:
+            client = http.client.HTTPConnection("127.0.0.1", 18881, timeout=12)
+            client.sock = stream
+            try:
+                yield client
+            finally:
+                client.close()
+        return
     target=config.get("ssh") or ""
     if config.get("viaSsh") and not target:
         raise ValueError("请选择远端 SSH 目标后再连接私服。")

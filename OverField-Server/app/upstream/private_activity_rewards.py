@@ -6,6 +6,7 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from private_dungeons import _table, reward_items
 import private_shop as shop
+from private_gameplay_transaction import grant_typed
 from utils import db
 
 
@@ -30,14 +31,7 @@ def deliver_once(session,system,key,amounts,items):
         delivery=pb.ShopBuyRsp()
         pack=pb.PackNotice(status=pb.StatusCode_OK)
         for key,num in amounts.items():
-            tag=_table("Item","item")[key]["new_bag_item_tag"]
-            if tag==pb.EBagItemTag_Card:
-                from private_gacha import award
-                for _ in range(num):award(session.player_id,key,delivery.items.add(),pack)
-            elif tag==pb.EBagItemTag_Fashion and shop.already_owned(session.player_id,key,tag):
-                delivery.items.add().CopyFrom(shop.balance(session.player_id,key))
-            else:
-                shop.award(session.player_id,{key:num},delivery,pack)
+            grant_typed(session.player_id,key,num,delivery.items,pack)
     except (shop.UnsupportedGoods,ValueError):
         db.conn.execute("ROLLBACK TO activity_reward")
         return pb.StatusCode_CFG_NOT_FOUND

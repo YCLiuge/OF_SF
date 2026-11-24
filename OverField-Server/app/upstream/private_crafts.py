@@ -10,7 +10,7 @@ from utils.pb_create import make_item
 from private_dungeons import _table
 from private_shop import balance, fixed_gift, in_window, now
 
-GROUP = {pb.LIFE_TYPE_Making: "Make", pb.LIFE_TYPE_Handicraft: "Handicraft", pb.LIFE_TYPE_Sewing: "Spin"}
+GROUP = {pb.LIFE_TYPE_Fishing: "Fishing", pb.LIFE_TYPE_Making: "Make", pb.LIFE_TYPE_Handicraft: "Handicraft", pb.LIFE_TYPE_Sewing: "Spin"}
 MAX_COUNT = 0xffffffff
 
 
@@ -43,6 +43,9 @@ def book(session, req, rsp):
 
 
 def rewards(kind):
+    if kind == pb.LIFE_TYPE_Fishing:
+        return {goal["achieve_condition_i_d"]:goal["reward_i_d"] for fish in rows(kind,"info").values()
+                for goal in fish.get("fish_achieve_rewards",())}
     tag = GROUP[kind].lower() + "_achieve_rewards"
     return {a["achieve_condition_i_d"]: a["reward_i_d"]
             for recipe in rows(kind, "item").values() for a in recipe.get(tag, ())}
@@ -53,8 +56,9 @@ def fill_achievements(player, kind, output):
     if kind not in GROUP:
         return
     allowed = set(rewards(kind))
+    tasks = "fishing_level_quest" if kind == pb.LIFE_TYPE_Fishing else GROUP[kind].lower() + "_level_achieve"
     for row in rows(kind, "level").values():
-        allowed.update(a["achieve_condition_i_d"] for a in row.get(GROUP[kind].lower() + "_level_achieve", ()))
+        allowed.update(a["achieve_condition_i_d"] for a in row.get(tasks, ()))
     for aid, raw in db.conn.execute("SELECT achieve_id,achieve_blob FROM achieve WHERE player_id=?", (player,)):
         if aid in allowed:
             entry = pb.Achieve.FromString(raw)
@@ -116,6 +120,17 @@ def previous_count(player, aid):
     return pb.Achieve.FromString(raw).count if raw else 0
 
 
+def daily_proficiency(player,aid,day,old,new,condition,task):
+    key = f"{day}:{aid}"
+    db.conn.execute("INSERT OR IGNORE INTO player_kv VALUES(?,'life_proficiency_base',?,?)", (player,key,old))
+    start = int(db.conn.execute("SELECT v FROM player_kv WHERE player_id=? AND ns='life_proficiency_base' AND k=?",
+                                (player,key)).fetchone()[0])
+    threshold,limit = max(condition.get("count_param",1),1),task.get("complete_limit",MAX_COUNT)
+    before = min(limit,max(0,old-start)//threshold)
+    after = min(limit,max(0,new-start)//threshold)
+    return (after-before)*task.get("proficiency",0)
+
+
 def note_success(session, kind, recipe, life):
     group = GROUP[kind].lower()
     output = recipe["get_item_i_d"]
@@ -155,15 +170,7 @@ def note_success(session, kind, recipe, life):
         updated = changed.life_achieve_.add(achieve_id=aid, count=min(old + 1, MAX_COUNT))
         db.set_achieve(player, aid, updated.SerializeToString())
         if aid in daily:
-            key = f"{day}:{aid}"
-            db.conn.execute("INSERT OR IGNORE INTO player_kv VALUES(?,'life_proficiency_base',?,?)", (player, key, old))
-            start = int(db.conn.execute("SELECT v FROM player_kv WHERE player_id=? AND ns='life_proficiency_base' AND k=?",
-                                        (player, key)).fetchone()[0])
-            threshold = max(condition.get("count_param", 1), 1)
-            limit = daily[aid].get("complete_limit", MAX_COUNT)
-            before = min(limit, max(0, old - start) // threshold)
-            after = min(limit, max(0, updated.count - start) // threshold)
-            gain += (after - before) * daily[aid].get("proficiency", 0)
+            gain += daily_proficiency(player,aid,day,old,updated.count,condition,daily[aid])
     if changed.life_achieve_:
         session.send(MsgId.LifeAchieveNotice, notice, 0)
     if gain:
@@ -264,7 +271,8 @@ def level_up(session, req, rsp):
     cost = row["upgrade_level_by_proficiency"]
     if life.proficiency_value < cost:
         return pb.StatusCode_ProficiencyNotEnough
-    changes, status = payments(player, {row["need_item_i_d"]: row["need_item_count"]})
+    cost_fields = ("up_level_need_item_i_d","up_level_need_item_count") if kind==pb.LIFE_TYPE_Fishing else ("need_item_i_d","need_item_count")
+    changes, status = payments(player, {row[cost_fields[0]]: row[cost_fields[1]]})
     if changes is None:
         return status
     life.level += 1

@@ -38,11 +38,29 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Activity.json"
     },
+    "resources/data/ActivityFashionShow.json": {
+      "sha256": "934973ca57480d80855f38d1559db946de3631b5d1d87bbaa00ed3c9ab8983aa",
+      "bytes": 750,
+      "source": "TapTap PC 1.1.12",
+      "detail": "ActivityFashionShow.json"
+    },
     "resources/data/ActivityGift.json": {
       "sha256": "4aa8b4a72a4763b9855425113692cb2343e0867f645ea4b1750c54406fe9c1f8",
       "bytes": 7402,
       "source": "TapTap PC 1.1.12",
       "detail": "ActivityGift.json"
+    },
+    "resources/data/ActivityInvite.json": {
+      "sha256": "c6336e09521e8940a0feb7164c3807d700fa055e2a83875bb3be2f175f85b6fd",
+      "bytes": 82180,
+      "source": "TapTap PC 1.1.12",
+      "detail": "ActivityInvite.json"
+    },
+    "resources/data/ActivityJinli.json": {
+      "sha256": "0e72501d601cede8eec91556e3f4200ecab6944dfc7089465456a92b0aebb57f",
+      "bytes": 236,
+      "source": "TapTap PC 1.1.12",
+      "detail": "ActivityJinli.json"
     },
     "resources/data/ActivityQuest.json": {
       "sha256": "d557deed18d6c628a1c6ee537897277cdf03baaf03385497928465471763fa21",
@@ -62,6 +80,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "ActivitySign.json"
     },
+    "resources/data/ActivityTurntable.json": {
+      "sha256": "c0ad3d08926de6e03c890da25911b763f8430800f00522b90530d6e552d7136c",
+      "bytes": 81781,
+      "source": "TapTap PC 1.1.12",
+      "detail": "ActivityTurntable.json"
+    },
     "resources/data/ArchaeologyAchieve.json": {
       "sha256": "29439eead7b8b72aca39e3363e5d57ecbb5c207b4426609b7379ee30f1a28161",
       "bytes": 2060,
@@ -80,6 +104,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Armor.json"
     },
+    "resources/data/BattleEncounter.json": {
+      "sha256": "95d98f1dd74deece502f8d476cbdf6b0fbab1772c1a9389bad0c2c97928108bb",
+      "bytes": 102830,
+      "source": "TapTap PC 1.1.12",
+      "detail": "BattleEncounter.json"
+    },
     "resources/data/BattlePass.json": {
       "sha256": "e9e62431c1e341793d6888c386d06f33cb09a5135d31dfd9fb467d3a31aa51dc",
       "bytes": 475569,
@@ -91,6 +121,12 @@
       "bytes": 126961,
       "source": "TapTap PC 1.1.12",
       "detail": "BlessingTree.json"
+    },
+    "resources/data/Book.json": {
+      "sha256": "728697885a2f2e2009b708e92db898a25072fcb1abb8d900acbff7224a7bcc79",
+      "bytes": 18394,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Book.json"
     },
     "resources/data/BossRush.json": {
       "sha256": "18561ac63d9faea1e8ddb2b408f1667dc2d81b31899ad5c49110b6a94c5e8e40",
@@ -134,6 +170,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Cooking.json"
     },
+    "resources/data/DailyTask.json": {
+      "sha256": "0cfa251054889a2b041f4e4ca05ff2eaad278dda17e6477db4c57a53f17dffe3",
+      "bytes": 2562,
+      "source": "TapTap PC 1.1.12",
+      "detail": "DailyTask.json"
+    },
     "resources/data/Dungeon.json": {
       "sha256": "ae65f5557cfaff209115e8444249baa36a4e60976b01f5e64cccc9e8302a7b48",
       "bytes": 359967,
@@ -145,6 +187,12 @@
       "bytes": 2269,
       "source": "TapTap PC 1.1.12",
       "detail": "Monster.json: monster_character_data, i_d/new_tag only"
+    },
+    "resources/data/DyeStuff.json": {
+      "sha256": "14ccf4668623be25779bb0c7e30f1464e3a20d900ae03a8404d7a5e04f7ef335",
+      "bytes": 9326,
+      "source": "TapTap PC 1.1.12",
+      "detail": "DyeStuff.json"
     },
     "resources/data/Explore.json": {
       "sha256": "79557aeca6a06cabafe2e7136abef936564e3a9578e81b868dff24e9ae899c5d",
@@ -164,6 +212,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Fashion.json"
     },
+    "resources/data/FishPond.json": {
+      "sha256": "4b566f6ea0a48c1e2eb9db205510628d304e91f1e33023a8c5c76b61c38bb4ff",
+      "bytes": 126,
+      "source": "TapTap PC 1.1.12",
+      "detail": "FishPond.json"
+    },
     "resources/data/Fishing.json": {
       "sha256": "16c8257334ac8944ebcfc9e5ff79639cd1305ff9dc6ae9acaac4adb3ea257546",
       "bytes": 49496,
@@ -176,11 +230,23 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Flag.json"
     },
+    "resources/data/Furniture.json": {
+      "sha256": "c080163903275827efef9839fa6e36eaba595f39917e5f198c0da29f2c9e3e8c",
+      "bytes": 2492,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Furniture.json"
+    },
     "resources/data/Gacha.json": {
       "sha256": "d072dafec2234b023c7e928832e1a6d4b19f093be43b538f6183c35f76ac416b",
       "bytes": 40834,
       "source": "TapTap PC 1.1.12",
       "detail": "Gacha.json"
+    },
+    "resources/data/GardenCharacterSeats.json": {
+      "sha256": "84cf95027bb1f84a5de583789ea930be8a3b1fc6c041181516868ba07195e690",
+      "bytes": 1905,
+      "source": "TapTap PC 1.1.12",
+      "detail": "ChairController.Seats on national HomeItem prefab instances, excluding IsInVehicle."
     },
     "resources/data/Gather.json": {
       "sha256": "cbcda0a4c12eb7f08b297f218ba79579bd7a8e73add691db3dcc98c4b0498798",
@@ -229,6 +295,12 @@
       "bytes": 196673,
       "source": "TapTap PC 1.1.12",
       "detail": "Inscription.json"
+    },
+    "resources/data/InteractionActivity.json": {
+      "sha256": "c9c1c96d9f34d821bf7e792c2eb2993608dcb8b1ae39eaa95d46faf7d34c9248",
+      "bytes": 9066,
+      "source": "TapTap PC 1.1.12",
+      "detail": "InteractionActivity.json"
     },
     "resources/data/Intimacy.json": {
       "sha256": "ce094c6d07dd301eb9cedb5c401f195db3903be59cd3b228072049d308615d6d",
@@ -350,6 +422,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Reward.json"
     },
+    "resources/data/Riddle.json": {
+      "sha256": "b638b771d81ad7153dbbf475661262c54c0a0036ad552cca8d1908b8c9042c55",
+      "bytes": 37280,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Riddle.json"
+    },
     "resources/data/Scene.json": {
       "sha256": "35efc304d58f8964d44e6f44a7344220afc6c976117e83878d6fb6c92a7fc5cd",
       "bytes": 66695,
@@ -373,6 +451,12 @@
       "bytes": 705695,
       "source": "TapTap PC 1.1.12",
       "detail": "Shop.json"
+    },
+    "resources/data/Shovel.json": {
+      "sha256": "687914e1a2dfdd832e5d63d828df5846c31bb5a4e916de09acc1b687a23849ab",
+      "bytes": 554,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Shovel.json"
     },
     "resources/data/Spin.json": {
       "sha256": "af071ffc0617517643c022bfa6079373f6d3a9a395f6861a019a836d5fd3eeb8",
@@ -398,11 +482,35 @@
       "source": "TapTap PC 1.1.12",
       "detail": "TeamGameplay.json"
     },
+    "resources/data/Treasure.json": {
+      "sha256": "6bfffeacc5d717f9c0fb42d45b9a6fb1198cb9fa22d3f9ad6b756982633ab89a",
+      "bytes": 208,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Treasure.json"
+    },
     "resources/data/TreasureBox.json": {
       "sha256": "8e19baf74ff07a88ec78c068145a4e27312e383795d68346a3bc465febde41c1",
       "bytes": 277064,
       "source": "TapTap PC 1.1.12",
       "detail": "TreasureBox.json"
+    },
+    "resources/data/Umbrella.json": {
+      "sha256": "3a5a47adba363fee85b63fbc05b511522adf6c307988c14558ede4c338c290e2",
+      "bytes": 31310,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Umbrella.json"
+    },
+    "resources/data/Utensil.json": {
+      "sha256": "71f88e738f9e9d6726072aa4677b58bf7efe3b9ba29d0065a687d719fbe7c97a",
+      "bytes": 2490,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Utensil.json"
+    },
+    "resources/data/VoiceRegion.json": {
+      "sha256": "20088f77eec56e54a6f52fbcd6e91b6a10a1734ff66c4bf3d4a8e1ee8063978b",
+      "bytes": 1969,
+      "source": "TapTap PC 1.1.12",
+      "detail": "VoiceRegion.json"
     },
     "resources/data/Weapon.json": {
       "sha256": "590410422b23c77165549e81066bc3781e438a4da2be1e5d1a51dd454c0f0e14",

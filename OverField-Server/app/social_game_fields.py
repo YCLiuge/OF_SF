@@ -26,7 +26,14 @@ class SocialGameFields:
                 if row.player_id and row.create_time>0 and key not in self.rifts:
                     self.rifts.append(key)
 
-    def outgoing(self,msg,clean):
+    def outgoing(self,msg,clean,guard=None):
+        if isinstance(msg,(pb.UploadPhotoShareReq,pb.ChangePhotoShareTitleReq,pb.PhotoShareSearchReq)):
+            from player_photo_fields import prepare
+            try:
+                prepare(msg,clean,guard)
+            except ValueError:
+                return False
+            return True
         if isinstance(msg,pb.SendChatMsgReq):
             from private_chat_text import chat_text
             text=chat_text(msg.text)
@@ -35,6 +42,13 @@ class SocialGameFields:
                 msg.text=text
             else:
                 msg.expression=0
+        elif isinstance(msg,pb.GmCodeReq):
+            from private_chat_text import chat_text
+            value=chat_text(msg.param)
+            if not value or guard is not None and not guard.allows(value):
+                return False
+            clean(msg)
+            msg.param=value
         elif isinstance(msg,pb.FriendSearchReq):
             value=search_key(msg.search_args)
             clean(msg)
@@ -48,6 +62,8 @@ class SocialGameFields:
             except ValueError:
                 name,birthday="",""
             clean(msg)
+            if guard is not None and (not guard.allows(name) or not guard.allows(birthday)):
+                return False
             msg.nick_name,msg.birthday=name,birthday
         elif isinstance(msg,(pb.IntervalJoinReq,pb.IntervalRewardReq)):
             key=(msg.friend_id,msg.interval_param)

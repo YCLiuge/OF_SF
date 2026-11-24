@@ -49,7 +49,7 @@ def run(root, resources):
         sock, _, pid = login(service.port, identity.issue_ticket(*profile))
         with sock:
             join(sock)
-            assert [r.gacha_id for r in call(sock, "GachaList", 4).gachas] == [2000, 3000, 3001, 3023, 203014, 203015, 3002, 9000]
+            assert [r.gacha_id for r in call(sock, "GachaList", 4).gachas] == [2000, 3000, 3001, 3023, 203014, 203015, 3002, 4000, 9000]
             def balance(item):
                 raw = db.get_item_detail(pid, item)
                 return pb.ItemDetail.FromString(raw).main_item.base_item.num if raw else 0
@@ -64,7 +64,7 @@ def run(root, resources):
                 if pool["id"] == 3001:
                     pool.update(enabled=False)
             configure(root, settings)
-            assert [r.gacha_id for r in call(sock, "GachaList", 5).gachas] == [2000, 3000, 3023, 203014, 203015, 3002, 9000]
+            assert [r.gacha_id for r in call(sock, "GachaList", 5).gachas] == [2000, 3000, 3023, 203014, 203015, 3002, 4000, 9000]
             assert call(sock, "Gacha", 6, gacha_id=3001, is_single=True).status == pb.StatusCode_BAD_REQ
             assert call(sock, "GachaFullPick", 7, gacha_id=2000, item_id=302002).status == pb.StatusCode_BAD_REQ
             assert call(sock, "ChooseGacha", 70, gacha_id=9000, choose_gacha_pool=3001).status == pb.StatusCode_BAD_REQ
@@ -110,7 +110,7 @@ def run(root, resources):
                 if pool["id"] in (3000, 3002):
                     pool["enabled"] = False
             configure(root, settings)
-            assert [r.gacha_id for r in call(sock, "GachaList", 20).gachas] == [2000, 3023, 203014, 203015]
+            assert [r.gacha_id for r in call(sock, "GachaList", 20).gachas] == [2000, 3023, 203014, 203015, 4000]
             assert len(call(sock, "GachaRecord", 21, gacha_id=3000, page=1).records) == 5
     finally:
         service.stop()

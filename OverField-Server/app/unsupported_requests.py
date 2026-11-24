@@ -3,13 +3,16 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 
 
-# Their status replies exist in the retail client. These activities have no private session or settlement.
-CLOSED_MINIGAMES = frozenset((
-    MsgId.GomokuSinglePlayerRewardReq, MsgId.GomokuOnlinePlayerReadyReq,
-    MsgId.GomokuOnlinePlayerWatchReq, MsgId.GetGomokuOnlineChessboardReq,
-    MsgId.GomokuOnlinePlayerPlaceStoneReq, MsgId.GomokuOnlinePlayerLeaveReq,
-    MsgId.GomokuOnlinePlayerStartPlayReq, MsgId.CollapseFailReq,
+# These features have no local operator or gameplay use. Keep the previously
+# observed failure code and do not register or process any future upstream handler.
+OWNER_DISABLED = frozenset((
+    MsgId.GetExpressAddressReq, MsgId.UploadExpressAddressReq,
+    MsgId.ClientLogAuthReq, MsgId.ClientLogMessageReq,
 ))
+
+
+# Their status replies exist in the retail client. These activities have no private session or settlement.
+CLOSED_MINIGAMES = frozenset((MsgId.CollapseFailReq,))
 
 
 def unsupported_status(msg_id):

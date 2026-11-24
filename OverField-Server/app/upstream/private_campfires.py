@@ -48,6 +48,10 @@ class Campfires:
         if self.next_expiry is None or expires < self.next_expiry:
             self.next_expiry = expires
 
+    def due(self):
+        deadline = self.next_expiry
+        return deadline is not None and now_ms() >= deadline
+
     def expire(self):
         now = now_ms()
         if self.next_expiry is None or now < self.next_expiry:

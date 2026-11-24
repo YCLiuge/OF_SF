@@ -118,6 +118,8 @@ def replace_layout(session, target):
     db.conn.execute("DELETE FROM furnitures WHERE scene_id=? AND channel_id=? AND player_id=?", (HOME, channel, pid))
     blocked = {fid for fid, in db.conn.execute("SELECT furniture_id FROM furnitures WHERE scene_id=? AND channel_id=?",
                                                 (HOME, channel))}
+    from private_garden_ids import chair_ids
+    blocked.update(chair_ids())
     blocked.update(fid for fid, in db.conn.execute("SELECT fid FROM realm_hand_furniture"))
     # A previous application can have remapped a saved ID that now belongs to a visitor.
     # Reuse that live ID on a retry while reserving the IDs of all unblocked saved instances.
@@ -139,6 +141,11 @@ def replace_layout(session, target):
                     obj.furniture_id = fresh_id(pid, HOME, channel)
         db.set_furniture(HOME, channel, pid, obj.furniture_id, obj.SerializeToString())
         blocked.add(obj.furniture_id)
+    from private_garden_residents import clear_furniture
+    kept={(obj.furniture_id,obj.furniture_item_id) for obj in target}
+    for obj in current:
+        if (obj.furniture_id,obj.furniture_item_id) not in kept:
+            clear_furniture(session,obj.furniture_id)
     pack = pb.PackNotice(status=pb.StatusCode_OK)
     for item, diff in changes.items():
         if diff:

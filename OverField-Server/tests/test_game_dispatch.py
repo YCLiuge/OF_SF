@@ -83,6 +83,9 @@ class PublicDiscovery(unittest.TestCase):
             source=object.__new__(Assets)
             source.root=root
             source._meta={}
+            from threading import Lock
+            source.plaza_lock=Lock()
+            source.plaza_versions={}
             expected=hashlib.md5(b"test").hexdigest()
             path=root/"bundle"
             name=expected+".bundle"
@@ -95,6 +98,25 @@ class PublicDiscovery(unittest.TestCase):
                 source.open(name)
             with self.assertRaises(FileNotFoundError):
                 source.open("../../file.txt")
+
+    def test_only_recognizes_previously_issued_private_manifests(self):
+        from game_dispatch import _issued_manifest
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stock = root / "issued"
+            stock.mkdir()
+            version = b"2150-01-01-00-00-00"
+            name = PREFIX + "_" + version.decode()
+            blob = b"test staged content"
+            (root / (name + ".bytes")).write_bytes(blob)
+            (root / (name + ".hash")).write_text(hashlib.md5(blob).hexdigest())
+            self.assertFalse(_issued_manifest(version, root, stock))
+            (stock / (name + ".sha256")).write_text(hashlib.sha256(blob).hexdigest())
+            self.assertTrue(_issued_manifest(version, root, stock))
+            self.assertFalse(_issued_manifest(b"../../alternate", root, stock))
+            (root / (name + ".bytes")).write_bytes(b"changed")
+            (root / (name + ".hash")).write_text(hashlib.md5(b"changed").hexdigest())
+            self.assertFalse(_issued_manifest(version, root, stock))
 
     def test_invalid_private_origin(self):
         for value in ("https://8.8.8.8","http://0.0.0.0","file://localhost","http://127.0.0.1/other","http://test@127.0.0.1"):
@@ -115,6 +137,45 @@ class MountedClient(unittest.TestCase):
         self.assertEqual(source.count,8936)
         self.assertEqual(source.from_cache + (source.count-source.from_cache),8936)
         print(f"Verified source availability and listed lengths: {source.count} active bundles, {source.from_cache} using update-cache copies.",flush=True)
+
+    def test_scheduled_plaza_package(self):
+        import struct
+        import zlib
+        import plaza_assets
+        from realm_plaza import validate
+
+        plan = validate({"theme": 23, "activities": [4010,5087,260212103,260212104], "arcade": 12003,
+                         "opens_at":"2001-01-01 00:00:00", "closes_at":"2099-12-31 23:59:59"})
+        class Schedule:
+            def plaza(self):
+                return plan
+        self.dispatch.maintenance = Schedule()
+        try:
+            with listening(self.dispatch) as port:
+                root = f"/Resources/{BUILD}/"
+                def package():
+                    status,_,body = http(port,"POST","/dispatch/client_hot_update")
+                    self.assertEqual(status,200)
+                    return json.loads(body)["currentVersion"].split("_")[1]
+                version = package()
+                self.assertNotEqual(version,PATCH)
+                self.assertEqual(version,http(port,"GET",root+PREFIX+".version")[2].decode())
+                fname = root+PREFIX+"_"+version
+                manifest = http(port,"GET",fname+".bytes")[2]
+                self.assertEqual(hashlib.md5(manifest).hexdigest(),http(port,"GET",fname+".hash")[2].decode())
+                p = manifest.index(b"pbstaticconfigure_resbundle_pbstaticconfigure.bundle") + len(b"pbstaticconfigure_resbundle_pbstaticconfigure.bundle")
+                bundle_name = manifest[p+6:p+38].decode()
+                self.assertNotEqual(bundle_name,plaza_assets.STOCK_BUNDLE)
+                bundle = http(port,"GET",root+bundle_name+".bundle")[2]
+                self.assertEqual(bundle_name,hashlib.md5(bundle).hexdigest())
+                self.assertEqual(manifest[p+40:p+48].decode(),struct.pack("<I",zlib.crc32(bundle)).hex())
+                self.assertEqual(struct.unpack_from("<Q",manifest,p+48)[0],len(bundle))
+                self.assertEqual(http(port,"GET",root+bundle_name+".bundle",headers={"Range":"bytes=3-17"})[2],bundle[3:18])
+                plan.clear()
+                self.assertEqual(package(),PATCH)
+                self.assertEqual(http(port,"GET",root+PREFIX+".version")[2].decode(),PATCH)
+        finally:
+            self.dispatch.maintenance = None
 
     def test_http_reads_real_manifest_and_bundle(self):
         with listening(self.dispatch) as port:

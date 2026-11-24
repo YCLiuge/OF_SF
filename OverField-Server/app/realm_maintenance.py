@@ -81,6 +81,14 @@ class Maintenance:
         with closing(sqlite3.connect(self.dbfile)) as db, db:
             for sql in SCHEMA:db.execute(sql)
 
+    def plaza(self):
+        with closing(sqlite3.connect(self.dbfile)) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='private_event_config'").fetchone():
+                return {}
+            row = db.execute("SELECT settings FROM private_event_config WHERE id=1").fetchone()
+            from realm_blessings import client_plan
+            return client_plan(json.loads(row[0])) if row else {}
+
     def stored_feed(self):
         with closing(sqlite3.connect(self.dbfile)) as db, db:
             db.row_factory=sqlite3.Row
@@ -141,6 +149,10 @@ class Maintenance:
             if assets is not None:
                 self._set_images(db,number,assets)
         return number
+
+    def open_photo(self, code, *, head=False):
+        from photo_media import local_photo
+        return local_photo(self.data,code,head=head)
 
     def open_image(self,digest):
         with closing(sqlite3.connect(self.dbfile)) as db:
@@ -243,6 +255,29 @@ class SelectedFeed:
         if len(data)>MAX_FEED:raise ValueError("Public maintenance data too large")
         return checked_feed(json.loads(data))
 
+    def plaza(self):
+        from realm_blessings import validate_plan
+        with self.remote.channels.open(self.remote.http_port) as channel:
+            conn = http.client.HTTPConnection("127.0.0.1", self.remote.http_port, timeout=14)
+            conn.sock = channel
+            try:
+                conn.request("GET", "/private/plaza", headers={"Connection": "close"})
+                response = conn.getresponse()
+                if response.status == 404:
+                    return {}
+                if response.status != 200:
+                    raise ValueError("Selected realm plaza schedule unavailable")
+                data = response.read(16385)
+                if len(data) > 16384:
+                    raise ValueError("Invalid plaza schedule size")
+                return validate_plan(json.loads(data))
+            finally:
+                conn.close()
+
+    def open_photo(self, code, *, head=False):
+        from photo_media import forwarded_photo
+        return forwarded_photo(self.remote,code,head=head)
+
     def open_image(self,digest):
         if not DIGEST.fullmatch(digest):
             raise FileNotFoundError
@@ -278,11 +313,16 @@ def native_notices(feed,origin=""):
 
 
 def public_get(handler):
+    from photo_media import serve as serve_photo
+    if serve_photo(handler):
+        return True
     route=handler.path
-    if route!="/private/maintenance" and not route.startswith((PATH,notice_images.IMAGE_PATH,NATIVE_IMAGE_PATH)):return False
+    if route not in ("/private/plaza", "/private/maintenance") and not route.startswith((PATH,notice_images.IMAGE_PATH,NATIVE_IMAGE_PATH)):return False
     if any(key in handler.headers for key in ("Cookie","Authorization","Proxy-Authorization")):
         handler._reply(403,{"error":"public maintenance does not take credentials"});return True
     try:
+        if route == "/private/plaza":
+            handler._reply(200, handler.server.maintenance.plaza()); return True
         if route=="/private/maintenance":
             handler._reply(200,handler.server.maintenance.feed());return True
         if route.startswith((notice_images.IMAGE_PATH,NATIVE_IMAGE_PATH)):

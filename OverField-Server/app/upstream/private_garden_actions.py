@@ -4,7 +4,7 @@ import time
 
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from server.scene_data import get_session
+from server.scene_data import room_members
 from utils import db
 from private_dungeons import grant
 from private_channels import count_here, room_limit, tally, bag_adjust
@@ -13,13 +13,14 @@ from private_initial_queries import supply,table
 
 def publish(session, notice):
     msg_id = getattr(MsgId, notice.DESCRIPTOR.name)
-    for peer in get_session():
-        if not peer.dungeon[0] and (peer.scene_id,peer.channel_id) == (session.scene_id,session.channel_id):
-            peer.send(msg_id,notice,0)
+    for peer in room_members(session):
+        peer.send(msg_id,notice,0)
 
 
 def fresh_id(pid,scene,channel):
-    fid=db.get_instance_id(pid)
+    from private_garden_ids import chair_ids
+    minimum=max(chair_ids(),default=0)+1
+    fid=db.get_instance_id(pid,minimum=minimum)
     while db.conn.execute("SELECT 1 FROM furnitures WHERE scene_id=? AND channel_id=? AND furniture_id=?", (scene,channel,fid)).fetchone() or db.conn.execute("SELECT 1 FROM realm_hand_furniture WHERE fid=?",(fid,)).fetchone():
         fid=db.get_instance_id(pid)
     return fid
@@ -64,6 +65,9 @@ def place(session, req, rsp):
         return pb.StatusCode_BAD_REQ
     pid=session.player_id
     fid=req.furniture_id
+    from private_garden_ids import chair_ids
+    if fid in chair_ids():
+        return pb.StatusCode_FURNITURE_OCCUPY
     held=db.conn.execute("SELECT fid,item FROM realm_hand_furniture WHERE player=?",(pid,)).fetchone()
     if not fid:fid=held[0] if held and held[1]==req.furniture_item_id else fresh_id(pid,session.scene_id,session.channel_id)
     existing=db.conn.execute("SELECT player_id,furniture_detail_blob FROM furnitures WHERE scene_id=? AND channel_id=? AND furniture_id=?",
@@ -100,6 +104,11 @@ def remove(session, req, rsp):
         if db.conn.execute("SELECT 1 FROM realm_hand_furniture WHERE player=?",(session.player_id,)).fetchone():
             return pb.StatusCode_CANT_HANDING_MORE
         db.conn.execute("INSERT INTO realm_hand_furniture VALUES(?,?,?)",(session.player_id,req.furniture_id,details.furniture_item_id))
+    from private_garden_residents import clear_furniture
+    clear_furniture(session,req.furniture_id)
+    if details.furniture_item_id==5044010:
+        from private_gomoku import remove_table
+        remove_table(session.channel_id,req.furniture_id)
     db.del_furniture(session.scene_id,session.channel_id,session.player_id,req.furniture_id)
     tally(session.player_id)
     if req.is_put_in_package:grant(session,{details.furniture_item_id:1},pb.PackNotice().items)

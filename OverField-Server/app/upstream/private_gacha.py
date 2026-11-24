@@ -12,12 +12,14 @@ from private_request import cache_after_commit
 import private_tutorial_recruit as tutorial
 import private_gacha_rewards as rewards
 import private_gameplay_transaction as gameplay
-from realm_gacha import SCHEMA, defaults
+from realm_gacha import FASHION, defaults, upgrade
+import private_fashion_gacha as fashion
 
 
 def setup():
     rewards.setup(db.conn)
-    db.conn.execute("CREATE TABLE IF NOT EXISTS authority.private_gacha_config " + SCHEMA)
+    upgrade(db.conn,"authority.")
+    fashion.setup()
     db.conn.execute("""CREATE TABLE IF NOT EXISTS private_gacha_picks (
         player INTEGER NOT NULL, pool INTEGER NOT NULL, item INTEGER NOT NULL,
         PRIMARY KEY(player,pool)) WITHOUT ROWID""")
@@ -64,6 +66,8 @@ def info(pid, pool, stats=None):
     if stats is None:
         stats = pool_stats(pid, (key,))
     count, picked, misses = stats[key]
+    if key==FASHION:
+        return fashion.info(pid,count)
     if misses is None:
         misses = recent_misses(pid, pool["pity"] - 1, 4) if key == 2000 else 0
     return pb.GachaInfo(gacha_id=key, gacha_times=count, has_full_pick=bool(picked),
@@ -271,6 +275,8 @@ def regular_draw(session, req, rsp, pending):
     if pool is None or session.dungeon[0]:
         return pb.StatusCode_BAD_REQ
     pid = session.player_id
+    if pool_id==FASHION:
+        return fashion.draw(session,req,rsp,pending,pool)
     config = _table("Gacha", "info")[req.gacha_id]
     key = "1" if req.is_single else "2"
     count = config["method" + key + "_count"]

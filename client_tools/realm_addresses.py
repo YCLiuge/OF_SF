@@ -47,7 +47,7 @@ def recent(home, endpoint, local, remote):
     if not isinstance(history,list):
         raise ValueError("已保存的服务器地址文件格式错误。")
     def identity(row):
-        return tuple(row.get(k) for k in ("url","localServer","remoteSsh","remoteSshPort","remoteProfile"))
+        return tuple(row.get(k) for k in ("url","localServer","remoteSsh","remoteSshPort","remoteProfile","publicTls"))
     rows = [item for item in history if isinstance(item,dict) and identity(item)!=identity(entry)]
     save(target,[entry,*rows[:23]])
 

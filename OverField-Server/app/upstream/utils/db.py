@@ -728,6 +728,9 @@ def set_item_detail(player_id, item_detail_blob, item_id=None, instance_id=None)
     if item_id == 10:
         from private_recovery import note_vitality_write
         note_vitality_write(player_id, item_detail_blob)
+    elif item_id == 117:
+        from private_arcade_wallet import note_coin_write
+        note_coin_write(player_id,item_detail_blob)
     if item_id or instance_id:
         from private_collection_queries import remember_item
         remember_item(player_id, item_detail_blob)
@@ -1072,7 +1075,7 @@ def del_mail(
     )
 
 
-def get_instance_id(player_id, no_change=False):
+def get_instance_id(player_id, no_change=False, *, minimum=1):
     cur = db.execute(
         "SELECT instance_id FROM instance WHERE player_id=?",
         (player_id,),
@@ -1084,6 +1087,7 @@ def get_instance_id(player_id, no_change=False):
         instance_id = row[0] + 1
     else:
         instance_id = 1
+    instance_id = max(minimum, instance_id)
     db.execute(
         f"INSERT OR REPLACE INTO instance (player_id, instance_id) VALUES (?, ?)",
         (player_id, instance_id),

@@ -64,7 +64,41 @@ def asset_paths(src):
                 if p.is_symlink():raise ValueError("游戏资源含文件链接。")
                 yield p
 
-def _from_installed(source, home, endpoint, progress):
+BUILT = Path("launcher_Data/StreamingAssets/yoo/DefaultPackage")
+
+
+def shared_bundle(relative):
+    return relative.parent == BUILT and re.fullmatch(r"[a-f0-9]{32}\.bundle", relative.name) is not None
+
+
+def compact_space(source, home, inputs, config):
+    # Probe a real source bundle rather than trusting drive letters or assuming NTFS.
+    bundle = next((path for path in inputs if shared_bundle(path.relative_to(source))), None)
+    if bundle is None:
+        raise ValueError("轻量补丁未找到此版本的只读资源包。")
+    probe = home / (".of-link-check-" + uuid4().hex)
+    try:
+        os.link(bundle, probe)
+    except OSError as error:
+        raise ValueError("轻量补丁需要在原游戏同卷、支持硬链接的目录中运行。请选择同盘私服目录。") from error
+    else:
+        probe.unlink()
+    partial = home / ".client-preparing"
+    required = 3 * config.stat().st_size + 64 * 1024 * 1024
+    for path in inputs:
+        relative = path.relative_to(source)
+        if shared_bundle(relative):
+            continue
+        existing = partial / relative
+        size = path.stat().st_size
+        if not existing.is_file() or existing.stat().st_size != size:
+            required += size
+    if shutil.disk_usage(home).free < required:
+        raise ValueError(f"独立的程序和可写缓存需要至少 {required/(1024**3):.2f} GiB 可用空间。")
+    return required
+
+
+def _from_installed(source, home, endpoint, progress, *, compact_only=False):
     src=Path(source).resolve()
     home=Path(home).resolve()
     dest=home/"Client"
@@ -155,6 +189,9 @@ def _from_installed(source, home, endpoint, progress):
         (src/"launcher_Data/yoo/DefaultPackage/ManifestFiles/PackageManifest_DefaultPackage.version").read_text(encoding="utf-8-sig").strip()!=PATCH or
         sha(src/"launcher.exe")!=LAUNCHER or sha(src/"GameAssembly.dll")!=ASSEMBLY):
         raise ValueError("需要 TapTap 国服 PC 1.1.12 的原版程序与 11 月 7 日资源。")
+    inputs=list(asset_paths(src))
+    if compact_only:
+        compact_space(src,home,inputs,original)
     original=settings_source()
     partial=home/".client-preparing"
     owner=partial/".of-private-client.json"
@@ -166,9 +203,7 @@ def _from_installed(source, home, endpoint, progress):
         partial.mkdir()
         meta={"format":1,"instance":uuid4().hex,"source":str(src)}
         save(owner,meta)
-    inputs=list(asset_paths(src))
     shared=copied=0
-    built=Path("launcher_Data/StreamingAssets/yoo/DefaultPackage")
     for index,p in enumerate(inputs):
         if index%1000==0:progress("正在准备原版资源 %d / %d"%(index,len(inputs)),flush=True)
         rel=p.relative_to(src);out=partial/rel
@@ -176,14 +211,25 @@ def _from_installed(source, home, endpoint, progress):
         if out.is_symlink():raise ValueError("暂存文件不能是符号链接。")
         length=p.stat().st_size
         if out.exists() and out.stat().st_size==length:
-            if os.path.samefile(p,out):shared+=length
-            else:copied+=length
-            continue
-        if rel.parent==built and re.fullmatch(r"[a-f0-9]{32}\.bundle",p.name):
+            if os.path.samefile(p,out):
+                shared+=length
+                continue
+            if not (compact_only and shared_bundle(rel)):
+                copied+=length
+                continue
+        if shared_bundle(rel):
+            # Replace an interrupted earlier copy without ever writing to an official hard link.
+            link=out.with_name(out.name+".of-link-"+uuid4().hex)
             try:
-                os.link(p,out);shared+=length;continue
-            except OSError:
-                pass
+                os.link(p,link)
+                os.replace(link,out)
+                shared+=length
+                continue
+            except OSError as error:
+                if compact_only:
+                    raise ValueError("此目录无法硬链接原版资源。请在原游戏同一卷选择支持硬链接的目录。") from error
+            finally:
+                link.unlink(missing_ok=True)
         # Cache, executables, settings and DLLs are independent files.
         tmp=out.with_name(out.name+".of-partial")
         try:
@@ -295,17 +341,19 @@ def _install_media(media,home,endpoint,progress):
     return meta
 
 
-def prepare(source,home,endpoint,progress=print):
+def prepare(source,home,endpoint,progress=print,*,compact_only=False):
     from client_media import locate
     src=Path(source).resolve()
     home=Path(home).resolve()
     if (home/"Client").exists():
         # A migrated kit can run entirely from the already imported private copy.
         use_src=src if (src/"launcher.exe").is_file() and src!=home/"Client" else home/"Client"
-        result=_from_installed(use_src,home,endpoint,progress)
+        result=_from_installed(use_src,home,endpoint,progress,compact_only=compact_only)
     elif (src/"launcher.exe").is_file():
-        result=_from_installed(src,home,endpoint,progress)
+        result=_from_installed(src,home,endpoint,progress,compact_only=compact_only)
     else:
+        if compact_only:
+            raise ValueError("轻量玩家补丁需要本机已安装的国服 PC 1.1.12。请选择原游戏目录。")
         media=locate(src,home)
         if media is None:
             raise ValueError("请选择已安装的 TapTap 客户端，或选择配套原版 ISO / ZIP 安装媒体。")

@@ -155,8 +155,18 @@ class ProfileHandler(BaseHTTPRequestHandler):
                 self._reply(200,{"ok":True})
                 return
             if self.path in ACCOUNT_ROUTES:
+                import player_gateway_peer as proof
+                values = self.headers.get_all(proof.HEADER) or []
+                source = None
+                if values:
+                    if len(values)==1:
+                        source=proof.verify(self.server.accounts.gateway_peer_key,values[0],self.path,raw,
+                                            self.client_address[0],self.server.server_address[0])
+                    if source is None:
+                        raise AccountError(403,"invalid_gateway_source")
                 result = self.server.accounts.request(self.path,body,self.client_address[0],self.server.server_address[0],
-                                                      self.server.tls_context is not None,self.server.account_registration)
+                                                      self.server.tls_context is not None,self.server.account_registration,
+                                                      gateway_source=source)
                 self._reply(200 if self.path.endswith(("/login","/launch","/claim-gift")) else 201,result)
                 return
             if self.path == "/local/v1/profiles":

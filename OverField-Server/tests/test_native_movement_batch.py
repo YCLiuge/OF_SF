@@ -215,7 +215,7 @@ def run(root, resources):
             db.conn.set_authorizer(None)
             assert failed[0] not in host.active
             from server import scene_data
-            assert not scene_data._session_list
+            assert not scene_data._sessions_by_player
         connected, _, _ = connect(failed)
         with connected:
             pass

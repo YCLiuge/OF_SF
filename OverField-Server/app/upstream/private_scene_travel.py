@@ -2,7 +2,7 @@
 from private_channels import HOME, selected
 from private_friends import state
 from proto import net_pb2 as pb
-from server.scene_data import get_session
+from server.scene_data import online_session
 
 
 def destination(session, other, reply, *, require_friend):
@@ -16,7 +16,7 @@ def destination(session, other, reply, *, require_friend):
         return pb.StatusCode_FRIEND_BLACK
     if require_friend and (relation, reverse) != (pb.FriendStatus_FRIEND, pb.FriendStatus_FRIEND):
         return pb.StatusCode_FRIEND_NOT_EXIST
-    target = next((peer for peer in get_session() if peer.player_id == other), None)
+    target = online_session(other)
     if target is None:
         return pb.StatusCode_PLAYER_NOT_FOUND
     if target.dungeon[0] or target.scene_id != HOME:

@@ -36,7 +36,7 @@ def changing(home):
 def json_call(url,path,method,body=None):
     u=urlsplit(url);cls=http.client.HTTPSConnection if u.scheme=='https' else http.client.HTTPConnection
     extra={'context':ssl.create_default_context()} if u.scheme=='https' else {}
-    c=cls(u.hostname,u.port,timeout=4,**extra)
+    c=cls(u.hostname,u.port,timeout=(20 if path=="/local/v1/accounts/attach" else 4),**extra)
     try:
         c.request(method,path,body=(json.dumps(body).encode("utf8") if body is not None else b"{}") if method=='POST' else None,
                   headers={'Content-Type':'application/json','Connection':'close'})
@@ -109,6 +109,14 @@ def close_player(home):
 
 
 def remote_settings(args):
+    if getattr(args, "public_tls", None):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"OverField-Server"/"app"))
+        from player_tls_channels import player_address
+        if args.remote_ssh or args.remote_profile or args.local_server:
+            raise ValueError("公开玩家地址只能单独使用。")
+        if args.action in ("launch", "relaunch") and not args.account_stdin:
+            raise ValueError("请先登录所选区服的私服账号。")
+        return {"publicTls": player_address(args.public_tls), "caFile":str(args.ca_file.resolve()) if args.ca_file else None}
     target=(args.remote_ssh or "").strip()
     if not target:
         if args.remote_profile or args.remote_ssh_port or args.remote_pair_first:
@@ -135,7 +143,7 @@ def remote_settings(args):
 def realm_state(home,remote):
     if not remote:
         return home/"State"/"realm"
-    alias=[remote["remoteSsh"],remote["remoteSshPort"],remote.get("slot","native-accounts")]
+    alias=([remote["publicTls"],"tls-native"] if "publicTls" in remote else [remote["remoteSsh"],remote["remoteSshPort"],remote.get("slot","native-accounts")])
     label=hashlib.sha256(json.dumps(alias).encode()).hexdigest()[:20]
     return home/"State"/("remote-"+label)
 
@@ -154,7 +162,7 @@ def revision(server,url,state,remote,account_native=False):
             version.update(str(file.relative_to(parent)).encode("utf8"))
             version.update(file.read_bytes())
     version.update((server/"of.py").read_bytes())
-    version.update(b"native-picker-accounts-v2")
+    version.update(b"preselected-realm-v3")
     version.update(json.dumps([url,str(state),remote,account_native,managed_game_port()],sort_keys=True).encode())
     return version.hexdigest()[:32]
 
@@ -211,11 +219,17 @@ def local_start(home,tools,src,url,remote,account_native=False):
     env.update(OF_BIND="127.0.0.1",OF_GAME_HOST="127.0.0.1",OF_CLIENT_ROOT=str(src),
                OF_HTTP_PORT=str(u.port or 80),OF_HTTP_HOSTS="localhost,127.0.0.1",OF_DISPATCH_URL=url,
                OF_GAME_PORT=str(managed_game_port()),OF_STAGE_DIAGNOSTICS="1",OF_QUICKSDK_VERIFY_URL=VERIFY_URL,
-               OF_QUICKSDK_CREATE_PLAYERS="1",OF_NATIVE_SESSION=desired,OF_NATIVE_PICKER="1",
+               OF_QUICKSDK_CREATE_PLAYERS="1",OF_NATIVE_SESSION=desired,OF_NATIVE_PICKER="launcher",
                OF_ACCOUNT_REGISTRATION="open",OF_PRIVATE_CLIENT_EXE=str((src/"launcher.exe").resolve()))
     if account_native:
         env["OF_ACCOUNT_NATIVE"]="1"
-    if remote:
+    if remote.get("publicTls"):
+        if not account_native:
+            raise ValueError("公开区服须使用本服的私服账号。")
+        env.update(OF_PLAYER_REALM_TLS=remote["publicTls"], OF_REMOTE_ACCOUNT_NATIVE="1")
+        if remote.get("caFile"):
+            env["OF_PLAYER_REALM_CA"]=remote["caFile"]
+    elif remote:
         env["OF_REMOTE_SSH_TARGET"]=remote["remoteSsh"]
         if account_native:
             env["OF_REMOTE_ACCOUNT_NATIVE"]="1"
@@ -230,17 +244,24 @@ def local_start(home,tools,src,url,remote,account_native=False):
     proc=subprocess.Popen([sys.executable,"-B",str(tools/"of.py"),"--state",str(state),"start"],
                           env=env,cwd=tools,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                           creationflags=subprocess.CREATE_NO_WINDOW,close_fds=True)
-    for _ in range(120):
-        if proc.poll() is not None:
-            raise ValueError("私服启动失败。请检查玩法端口 %d、远端模式的 SSH 配置和档案，以及游戏资源版本。"%managed_game_port())
-        status=endpoint_status(url)
-        if status:
-            if status.get("nativeSession")!=desired:
-                raise ValueError("派发端口上的服务与本次配置不匹配。")
-            save(marker,{"tag":desired,"url":url,"state":str(state)})
-            return
-        time.sleep(.25)
-    raise ValueError("等待本机私服启动超时。")
+    try:
+        for _ in range(120):
+            if proc.poll() is not None:
+                raise ValueError("本机服务启动失败，请检查玩法端口 %d、区服配置和游戏资源版本。"%managed_game_port())
+            status=endpoint_status(url)
+            if status:
+                if status.get("nativeSession")!=desired:
+                    raise ValueError("派发端口上的服务与本次配置不匹配。")
+                save(marker,{"tag":desired,"url":url,"state":str(state)})
+                return
+            time.sleep(.25)
+        raise ValueError("等待本机私服启动超时。")
+    except BaseException:
+        # This child failed before it issued a usable endpoint or accepted a game session.
+        if remote.get("publicTls") and proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=5)
+        raise
 
 
 def preflight(url):
@@ -261,6 +282,9 @@ def main():
     parser.add_argument('--endpoint',required=True)
     parser.add_argument('--local-server',action='store_true')
     parser.add_argument('--account-stdin',action='store_true')
+    parser.add_argument('--public-tls')
+    parser.add_argument('--ca-file',type=Path)
+    parser.add_argument('--compact-only', action='store_true')
     parser.add_argument('--remote-ssh')
     parser.add_argument('--remote-profile',type=Path)
     parser.add_argument('--remote-ssh-port',type=int)
@@ -292,8 +316,8 @@ def main():
         if args.action=="relaunch" and is_running(home):
             close_player(home)
         if is_running(home):raise ValueError("请先正常退出当前私服游戏窗口，再应用服务器设置。")
-        meta=prepare(src,home,url)
-        for key in ('remoteSsh','remoteProfile','remoteSshPort','remotePairFirst'):
+        meta=prepare(src,home,url,compact_only=True) if args.compact_only else prepare(src,home,url)
+        for key in ('remoteSsh','remoteProfile','remoteSshPort','remotePairFirst','publicTls','caFile'):
             meta.pop(key,None)
         meta.update({k:v for k,v in remote.items() if k!='slot' and v is not None})
         meta['localServer']=bool(args.local_server and not remote)

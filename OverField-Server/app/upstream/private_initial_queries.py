@@ -79,6 +79,9 @@ def supply(session,req,rsp):
 
 def generic(session,req,rsp):
     # The upstream PC region query (6) returns one integer parameter, with the response ID unset.
+    if req.generic_msg_id == 2:
+        from private_dungeon_sweep import preference
+        return preference(session, req, rsp)
     if req.generic_msg_id != 6:
         rsp.generic_msg_id=req.generic_msg_id
         return pb.StatusCode_FAIL

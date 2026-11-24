@@ -24,11 +24,14 @@ class RealmRules:
     mp_team_members:int=16
     mp_team_name_length:int=20
     mp_team_limit:int=0
+    game_connections:int=24
 
     def validated(self):
         numbers=[value for k,value in asdict(self).items() if k!="public_furniture_scope"]
         if any(type(num) is not int or not 0<=num<0xffffffff for num in numbers):
             raise ValueError("Invalid integer for realm rules")
+        if not 1<=self.game_connections<=512:
+            raise ValueError("Choose 1..512 simultaneous game connections")
         if not 1<=self.public_min<=self.public_max<self.uid_start<0xffffffff:
             raise ValueError("Public channels must be positive, nonempty and below the first private home UID")
         if not 1<=self.world_min<=self.world_max:

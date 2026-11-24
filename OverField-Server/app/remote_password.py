@@ -28,8 +28,15 @@ class RemotePassword:
             return None
         if not ipaddress.ip_address(bind).is_loopback or os.environ.get("OF_ACCOUNT_NATIVE")!="1":
             raise ValueError("Remote native account selection requires the local private game launcher")
-        channels=SshChannels(os.environ.get("OF_REMOTE_SSH_TARGET",""),os.environ.get("OF_REMOTE_SSH_PORT"),os.environ.get("OF_REMOTE_SSH_CONFIG"))
-        return cls(identity,channels,port_value(os.environ.get("OF_REMOTE_HTTP_PORT",18881)),port_value(os.environ.get("OF_REMOTE_GAME_PORT",11033)))
+        http_port = port_value(os.environ.get("OF_REMOTE_HTTP_PORT", "18881"))
+        game_port = port_value(os.environ.get("OF_REMOTE_GAME_PORT", "11033"))
+        if os.environ.get("OF_PLAYER_REALM_TLS"):
+            from player_tls_channels import PlayerTlsChannels
+            channels = PlayerTlsChannels(os.environ["OF_PLAYER_REALM_TLS"], os.environ.get("OF_PLAYER_REALM_CA"),
+                                         account_port=http_port, game_port=game_port)
+        else:
+            channels = SshChannels(os.environ.get("OF_REMOTE_SSH_TARGET", ""),os.environ.get("OF_REMOTE_SSH_PORT"),os.environ.get("OF_REMOTE_SSH_CONFIG"))
+        return cls(identity, channels, http_port, game_port)
 
     def reserve(self,slot,ticket):
         if not isinstance(slot,str) or not SLOT.fullmatch(slot) or not isinstance(ticket,str) or not TICKET.fullmatch(ticket):

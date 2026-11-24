@@ -71,7 +71,7 @@ def _counts(player):
     return stored
 
 
-def record(session, condition):
+def record(session, condition, params=()):
     """Record a successful gameplay transition; repeated no-op requests never reach the call sites."""
     current = _stored(session.player_id)
     changes = pb.AchieveNotice(status=pb.StatusCode_OK)
@@ -79,7 +79,7 @@ def record(session, condition):
     for task in tasks():
         key = task["achieve_i_d"]
         rule = configs[key]
-        if rule["new_achieve_condition"] != condition or rule.get("param"):
+        if rule["new_achieve_condition"] != condition or tuple(rule.get("param",())) != params:
             continue
         before = current.get(key, 0)
         if before >= rule["count_param"]:

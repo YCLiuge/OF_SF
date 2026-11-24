@@ -8,21 +8,54 @@ from proto import net_pb2 as pb
 from private_dungeons import _table
 import private_shop as shop
 from realm_events import DAILY, NEWCOMER, WISH, SCHEMA
+import realm_plaza
 from utils import db
 
 
 def setup():
     db.conn.execute("CREATE TABLE IF NOT EXISTS authority.private_event_config " + SCHEMA)
+    import private_turntable
+    private_turntable.setup()
+    import private_koi
+    private_koi.setup()
+    import private_sandbag
+    private_sandbag.setup()
+    import private_activity_gift
+    private_activity_gift.setup()
+    import private_referrals
+    private_referrals.setup()
 
 
 @lru_cache(maxsize=4)
-def _overrides(raw):
-    return {row["id"]: row for row in json.loads(raw)["events"]} if raw else {}
+def _decoded(raw):
+    return json.loads(raw) if raw else {"events": []}
 
 
-def settings():
+def raw_settings():
     row = db.conn.execute("SELECT settings FROM authority.private_event_config WHERE id=1").fetchone()
-    return _overrides(row[0] if row else None)
+    return row[0] if row else None
+
+
+@lru_cache(maxsize=4)
+def _overrides(raw, in_plaza):
+    data = _decoded(raw)
+    result = {row["id"]: row for row in data["events"]}
+    if in_plaza:
+        plaza = data["plaza"]
+        for aid in realm_plaza.controlled_activities(plaza["activities"]):
+            result[aid] = {"enabled": aid in plaza["activities"], "opens_at": plaza["opens_at"],
+                           "closes_at": plaza["closes_at"]}
+    return result
+
+
+def settings(instant=None):
+    raw = raw_settings()
+    return _overrides(raw, realm_plaza.active(_decoded(raw).get("plaza"), instant or shop.now()))
+
+
+def active_arcade():
+    plaza = _decoded(raw_settings()).get("plaza")
+    return plaza["arcade"] if realm_plaza.active(plaza, shop.now()) else None
 
 
 def current(activity, instant, overrides):
@@ -77,19 +110,28 @@ def refresh(session, force=False):
     from private_panel_quests import activity_dialogue
     import private_newcomer
     instant = shop.now()
-    overrides = settings()
+    overrides = settings(instant)
     if (not force and getattr(session, "event_overrides", None) is overrides
             and getattr(session, "event_checked", instant) <= instant < getattr(session, "next_event_check", instant)):
+        import private_referrals
+        private_referrals.heartbeat(session,instant)
         refresh_progress(session, instant)
+        import private_sandbag
+        private_sandbag.heartbeat(session)
         private_newcomer.heartbeat(session, instant)
         return
+    import private_referrals
+    returning_until = private_referrals.touch(session.player_id,instant,force and not session.logged_in)
     rows = {}
     # Sign-in counts renew at 04:00, whereas the native dessert page specifies 05:00.
     midnight = instant.replace(hour=0, minute=0, second=0, microsecond=0)
     bounds = [midnight + timedelta(hours=hour) for hour in (4, 5, 28)]
+    if returning_until > instant.timestamp():
+        bounds.append(datetime.fromtimestamp(returning_until,shop.CN))
     for activity in _table("Activity", "activity").values():
         aid = activity["i_d"]
-        if aid in (DAILY, NEWCOMER, WISH) or activity.get("new_activity_type") in (1, 3) or activity_dialogue(activity):
+        if (aid in (DAILY, NEWCOMER, WISH) or activity.get("new_activity_type") in (1, 2, 3, 6, 12, 13)
+                or activity.get("new_activity_type") in (8,9,10,11) or activity_dialogue(activity) or (aid in overrides and aid in realm_plaza.PAGES)):
             override = overrides.get(aid, {})
             if not override.get("enabled", True):
                 continue
@@ -98,7 +140,7 @@ def refresh(session, force=False):
                 if value:
                     bounds.append(datetime.fromisoformat(value).replace(tzinfo=shop.CN) + timedelta(seconds=seconds))
             row = current(activity, instant, overrides)
-            if row:
+            if row and (row.get("new_activity_type")!=11 or returning_until>instant.timestamp()):
                 rows[aid] = row
     # A persistent client receives changes on its next normal heartbeat, including the daily reset.
     day = _day(instant)
@@ -118,6 +160,15 @@ def refresh(session, force=False):
                 status=pb.StatusCode_OK, is_open=is_open, activity_id=sorted(ids)), 0)
     from private_activity_rewards import send_signs
     send_signs(session, instant, rows.values())
+    from private_turntable import send as send_turntables
+    send_turntables(session, rows.values())
+    from private_sandbag import send as send_sandbags
+    send_sandbags(session, rows.values())
+    from private_activity_gift import send as send_gifts
+    send_gifts(session, rows.values(), instant)
+    import private_koi
+    private_koi.send(session, rows.values(), instant)
+    private_referrals.refresh(session,rows.values(),instant)
     if DAILY in rows:
         _notice_daily(session, day, rows[DAILY])
     send(session, instant, rows.values())

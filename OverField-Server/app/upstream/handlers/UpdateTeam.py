@@ -22,6 +22,12 @@ class Handler(PacketHandler):
             session.send(MsgId.UpdateTeamRsp, rsp, packet_id)
             return
 
+        from private_garden_residents import find as placed
+        if placed(pid,req.char1):
+            rsp.status=pb.StatusCode_CHARACTER_PLACED
+            session.send(MsgId.UpdateTeamRsp,rsp,packet_id)
+            return
+
         # Build a fresh team so empty slots disappear. Keep the party at its current scene position.
         team = make_SceneTeam(pid, slots)
         previous_leader = session.scene_player.team.char1
@@ -34,6 +40,9 @@ class Handler(PacketHandler):
         db.set_players_info(pid, "character_id", req.char1)
         db.set_players_info(pid, "team_leader_badge", team.char1.character_appearance.badge)
         session.scene_player.team.CopyFrom(team)
+        if session.vehicle_riders:
+            from private_vehicle_seats import refresh_equipment
+            session.commit_callbacks.append((refresh_equipment, (session,)))
         if old_leader and old_leader != req.char1:
             from private_newcomer import record
             record(session, 128)

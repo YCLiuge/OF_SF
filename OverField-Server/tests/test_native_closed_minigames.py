@@ -1,4 +1,4 @@
-"""PC 1.1.12's eight unavailable activity requests receive the native module-closed reply."""
+"""Still-closed retail mini-games receive the native module-closed reply."""
 import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,13 +14,6 @@ from utils import db
 
 # Values are independently checked against the PC NetworkEventIDNew constants.
 EXAMPLES = (
-    (4600,4601,"GomokuSinglePlayerReward",dict(board=[0,1,2],is_use_game_coin=True,self=1,lastRow=1,lastCol=2)),
-    (4602,4603,"GomokuOnlinePlayerReady",dict(id=246,coin_num=5)),
-    (4604,4605,"GomokuOnlinePlayerWatch",dict(id=246)),
-    (4609,4610,"GetGomokuOnlineChessboard",dict(id=246)),
-    (4611,4612,"GomokuOnlinePlayerPlaceStone",dict(id=246,row=3,col=4)),
-    (4614,4615,"GomokuOnlinePlayerLeave",dict(id=246)),
-    (4617,4618,"GomokuOnlinePlayerStartPlay",dict(id=246)),
     (4700,4701,"CollapseFail",{}),
 )
 
@@ -60,7 +53,7 @@ def run(root,resources):
             assert call(sock,"ChangeSceneChannel",99,scene_id=9999).status==pb.StatusCode_OK
     finally:
         game.stop()
-    print("PASS all eight retail requests returned native MODULE_CLOSE, followed by live pings and a scene change; no inventory or quest mutation.")
+    print("PASS closed retail mini-games returned native MODULE_CLOSE, followed by live pings and a scene change; no inventory or quest mutation.")
 
 
 if __name__=="__main__":

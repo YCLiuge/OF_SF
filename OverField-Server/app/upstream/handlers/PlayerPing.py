@@ -17,6 +17,14 @@ class Handler(PacketHandler):
 
         session.send(MsgId.PlayerPingRsp, rsp, packet_id)
         if getattr(session, "logged_in", False):
+            if getattr(session,"fishing_cast",None):
+                from private_fishing import tick as settle_cast
+                settle_cast(session)
+            from private_arcade_wallet import recover
+            recover(session)
+            if getattr(session,"mp_room_team",0):
+                from private_mp_rooms import tick
+                tick(session)
             from private_life_skills import refresh
             refresh(session)
         if hasattr(session, "event_calendar"):

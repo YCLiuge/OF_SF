@@ -12,7 +12,6 @@ from proto.net_pb2 import (
     QuestStatus,
     RandomQuestBonus,
     PlayerBuff,
-    UnSaveOutfitDyeScheme,
     PlayerQuestionnaireInfo,
     ItemDetail,
     ServerSceneSyncDataNotice,
@@ -66,6 +65,8 @@ class Handler(PacketHandler):
             rsp.account_type,
             rsp.pet_instance_id,
         ) = infos
+        from private_garden_residents import own_residents
+        own_residents(player_id,rsp.placed_characters)
         rsp.hide_value, = db.get_players_info(player_id, "hide_value")
         rsp.head = session.avatar_id
         session.player_name = rsp.player_name
@@ -94,7 +95,8 @@ class Handler(PacketHandler):
                 session.quests[tmp.quest_id] = tmp
 
         rsp.player_buffs.add().system_type = PlayerBuff.BuffSystemType_GLOBAL
-        rsp.un_save_outfit_dye_scheme.CopyFrom(UnSaveOutfitDyeScheme())
+        from private_outfit_dye import fill_login
+        fill_login(player_id, rsp)
         rsp.player_drop_rate_info.kill_drop_rate = 1000
         rsp.player_drop_rate_info.treasure_drop_rate = 1000
         rsp.questionnaire_info.CopyFrom(PlayerQuestionnaireInfo())
@@ -107,7 +109,9 @@ class Handler(PacketHandler):
         rsp.daily_task.tasks[2] = 521005
         rsp.daily_task.tasks[3] = 521006
         rsp.daily_task.tasks[4] = 521007
-        rsp.daily_task.exchange_times_left = 0
+        from private_arcade_wallet import snapshot, recover
+        snapshot(session,rsp.daily_task)
+        recover(session)
         from private_appearance import phone_case
         rsp.phone_case=phone_case(player_id)
         rsp.sp_open_status = True
@@ -129,6 +133,9 @@ class Handler(PacketHandler):
             for item_blob in items_data:
                 item = ItemDetail()
                 item.ParseFromString(item_blob)
+                if item.main_item.HasField("treasure"):
+                    from private_treasure_dig import repair
+                    repair(player_id, item)
                 item_tag = item.main_item.item_tag
                 if item_tag not in items_by_tag:
                     items_by_tag[item_tag] = []
@@ -172,6 +179,8 @@ class Handler(PacketHandler):
             session.logged_in = True
             from private_mp_teams import on_login as mp_login
             mp_login(session)
+            from private_wishes import deliver
+            deliver(session)
 
             notice = ServerSceneSyncDataNotice()
             notice.status = StatusCode.StatusCode_OK

@@ -1,0 +1,4 @@
+from private_request import handler
+from private_turntable import draw
+
+Handler = handler("ActivityTurntableDraw", draw, replay=True)

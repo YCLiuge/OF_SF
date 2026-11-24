@@ -226,6 +226,12 @@ def reward(session,req,rsp,cfg,state):
 def handle(session,data,packet_id,name,action):
     req=getattr(pb,name+"Req").FromString(data)
     rsp=getattr(pb,name+"Rsp")(activity_id=req.activity_id)
+    from private_events import active_arcade
+    selected = active_arcade()
+    if selected is not None and selected != req.activity_id:
+        rsp.status = pb.StatusCode_Activity_Close
+        session.send(getattr(MsgId,name+"Rsp"),rsp,packet_id)
+        return
     cfg=activity_config(req.activity_id)
     if not cfg:
         rsp.status=pb.StatusCode_CFG_NOT_FOUND

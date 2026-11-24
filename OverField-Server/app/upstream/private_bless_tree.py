@@ -63,6 +63,17 @@ def login_notice(player):
     return notice
 
 
+def is_open(tree, period):
+    from private_events import _decoded,raw_settings
+    from realm_blessings import dates
+    overrides=_decoded(raw_settings()).get("blessings",())
+    match=next((row for row in overrides if row["id"]==tree),None)
+    if match is None:
+        return shop.in_window(period,now())
+    start,end=dates(match)
+    return match["enabled"] and start<=now().strftime("%Y-%m-%d %H:%M:%S")<=end
+
+
 def unlock(session, req, rsp):
     rsp.def_id, rsp.tree_id = req.def_id, req.tree_id
     player = session.player_id
@@ -74,7 +85,7 @@ def unlock(session, req, rsp):
     if req.tree_id in got:
         return pb.StatusCode_PLAYER_BLESS_TREE_EXIST
     period = _table("BlessingTree", "blessing_tree", "blessing_tree_info_i_d").get(req.def_id)
-    if not period or not shop.in_window(period, now()):
+    if not period or not is_open(req.def_id, period):
         return pb.StatusCode_Activity_Close
     parent = node.get("relate_box_i_d")
     if parent and parent not in got:

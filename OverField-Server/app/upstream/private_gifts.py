@@ -123,8 +123,14 @@ def claim(player, shop_id, grid_id, request_id, *, pool=0):
             totals[item]+=num
     extra = []
     activity = next((r for r in res["ActivityGift"]["activity_gift"]["datas"] if r.get("shop_i_d")==shop_id),None)
+    staged = False
     if activity and not totals:
-        for stage in activity["activity_gift_item"]:
+        import private_activity_gift
+        purchased = private_activity_gift.mode(player,activity)
+        if purchased is True:
+            return failure(pb.StatusCode_ActivityGift_HasBuy)
+        staged = purchased is None and private_activity_gift.new_staged(activity)
+        for stage in (() if staged else activity["activity_gift_item"]):
             for reward in stage["a_activity_gift_reward_item"]:
                 totals[reward["item_i_d"]]+=reward.get("item_num",0)
         extra.append((MsgId.ActivityGiftBuyNotice, pb.ActivityGiftBuyNotice(
@@ -139,7 +145,7 @@ def claim(player, shop_id, grid_id, request_id, *, pool=0):
                 if len(rewards)>1:
                     premium = rewards[1]
                     totals[premium["item_i_d"]]+=premium.get("item_num",1)
-    if not totals:
+    if not totals and not staged:
         return failure(pb.StatusCode_CFG_NOT_FOUND)
     item_table = _table("Item","item")
     for item, quantity in totals.copy().items():
@@ -161,6 +167,14 @@ def claim(player, shop_id, grid_id, request_id, *, pool=0):
                 delivery.items.add().CopyFrom(shop.balance(player,item))
                 continue
             shop.award(player,{item:qty},delivery,pack)
+        if activity:
+            from private_activity_gift import edition, notice
+            from private_events import current, settings
+            db.conn.execute("INSERT OR IGNORE INTO private_activity_gift_modes VALUES(?,?,?)",
+                            (player,activity["i_d"],int(staged)))
+            opened=current(edition(activity),instant,settings(instant))
+            if opened:
+                extra.append((MsgId.ActivityGiftDataNotice,notice(player,[opened],instant)))
         if shop_id==200:
             timestamp=int(instant.timestamp())
             current=db.get_month_card_over_due_time(player) or 0
@@ -174,6 +188,8 @@ def claim(player, shop_id, grid_id, request_id, *, pool=0):
                 status=pb.StatusCode_OK,activity_battle_pass_id=battle_pass["i_d"],battle_pass_lv=1)))
         db.conn.execute("INSERT OR REPLACE INTO player_kv VALUES(?,'shop_buy',?,?)",(player,key,bought+1))
         delivery.status=pb.StatusCode_OK
+        import private_koi
+        private_koi.virtual_purchase(player,instant,goods,delivery,pack,extra)
         shop.grid_info(delivery.grids,shop_id,grid,goods,bought+1)
         delivery.grids.pool_id=selected
         db.conn.execute("INSERT INTO private_gift_claims VALUES(?,?,?,?,?)",

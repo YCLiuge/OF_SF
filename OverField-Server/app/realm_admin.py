@@ -14,6 +14,7 @@ from realm_maintenance import Maintenance
 import realm_rules
 import realm_gacha
 import realm_events
+import realm_plaza
 from state_lock import StateBusy, exclusive_state
 
 VERSION = "overfield.admin/v1"
@@ -40,8 +41,33 @@ BANNER = {"type": "object", "additionalProperties": False,
 EVENT_TIME = {"type": ["string", "null"]}
 EVENT = {"type": "object", "additionalProperties": False,
          "required": ["id", "enabled", "opens_at", "closes_at"],
-         "properties": {"id": ID, "enabled": {"type": "boolean"}, "opens_at": EVENT_TIME, "closes_at": EVENT_TIME}}
+         "properties": {"id": ID, "enabled": {"type": "boolean"}, "opens_at": EVENT_TIME, "closes_at": EVENT_TIME,
+                        "staged_gifts": {"type":"boolean"}}}
+CODE_REWARD = {"type":"object","properties":{"item":ID,"quantity":{"type":"integer","minimum":1,"maximum":1000000}},
+               "required":["item","quantity"],"additionalProperties":False}
 OPERATIONS = {
+    "reports.list": operation("any","查询玩家主动提交的举报，可分页查看待处理或已处理的记录。",
+                              {"before":ID,"limit":{"type":"integer","minimum":1,"maximum":100},
+                               "resolved":{"type":"boolean"}},read_only=True),
+    "reports.resolve": operation("any","将一条举报标记为已处理。",{"id":ID},("id",)),
+    "codes.list": operation("any", "列出本服发行的兑换码、数量和有效期。", read_only=True),
+    "codes.issue": operation("any", "发行区服兑换码。quota 为总名额，0 代表不限，每个角色可领一次。",
+                             {"code":STRING,"quota":{"type":"integer","minimum":0,"maximum":10000000},
+                              "expires_at":EVENT_TIME,"rewards":{"type":"array","maxItems":16,"items":CODE_REWARD}},
+                             ("code","quota","rewards")),
+    "codes.withdraw": operation("any","停止此码后续兑换。",{"code":STRING},("code",)),
+    "blessings.catalog": operation("any", "查看国服祈愿树名称、期数、兑换节点、货币和原始排期。",read_only=True),
+    "blessings.get": operation("any", "读取区服各期祈愿树的排期覆盖。",read_only=True),
+    "blessings.set": operation("any", "设置各期祈愿树排期。空数组恢复国服原始日历。",
+        {"trees":{"type":"array","maxItems":63,"items":{"type":"object","additionalProperties":False,
+         "required":["id","enabled","opens_at","closes_at"],
+         "properties":{"id":ID,"enabled":{"type":"boolean"},"opens_at":EVENT_TIME,"closes_at":EVENT_TIME}}}},("trees",)),
+    "plaza.catalog": operation("any", "List native plaza stages, seasonal arcades and activity entrances.", read_only=True),
+    "plaza.get": operation("any", "Read the configured plaza schedule.", read_only=True),
+    "plaza.set": operation("any", "Schedule the plaza stage and its entrances; an empty object restores retail dates.",
+                           {"theme": ID, "arcade": {"type": "integer", "minimum": 0},
+                            "activities": {"type": "array", "maxItems": 64, "items": ID},
+                            "opens_at": STRING, "closes_at": STRING}),
     "events.catalog": operation("any", "List supported native activity pages, game schedules and rewards.", read_only=True),
     "events.get": operation("any", "Read this realm's activity overrides.", read_only=True),
     "events.set": operation("any", "Replace the overrides for native activity pages.",
@@ -56,6 +82,11 @@ OPERATIONS = {
     "realm.stop": operation("running", "Request graceful shutdown of this server instance."),
     "rules.get": operation("any", "Read configured gameplay rules.", read_only=True),
     "rules.set": operation("stopped", "Update supplied rules atomically.", RULES, minimum=1),
+    "photos.list": operation("any", "List published player photos, newest first.",
+                             {"before": {"type":"integer","minimum":1,"maximum":2**63-1},
+                              "limit": {"type":"integer","minimum":1,"maximum":100}},read_only=True),
+    "photos.withdraw": operation("any", "Withdraw one published player photo by its share code.",
+                                 {"code":{"type":"integer","minimum":1,"maximum":2**63-1}}, ("code",)),
     "maintenance.list": operation("any", "Read active announcements and the visible client release.", read_only=True),
     "notice.publish": operation("any", "Publish a new announcement with optional local image files.",
                                 {"title": STRING, "body": STRING, "images": IMAGES}, ("title", "body")),
@@ -186,6 +217,28 @@ def validate(value, schema, name="input"):
 
 
 def run(state, name, data, request_stop):
+    if name in ("reports.list", "reports.resolve"):
+        from realm_reports import manage
+        with exclusive_state(state,purpose="profiles") as root:
+            return manage(root,name,data)
+    if name in ("codes.list", "codes.issue", "codes.withdraw"):
+        from realm_codes import manage
+        return manage(state,name,data)
+    if name in ("photos.list", "photos.withdraw"):
+        from photo_media import moderate
+        if not (state/"game.sqlite").is_file() and name=="photos.list":
+            return {"photos":[]}
+        with exclusive_state(state,purpose="profiles") as root:
+            return moderate(root,name,data)
+    if name in ("blessings.catalog","blessings.get","blessings.set"):
+        import realm_blessings
+        return realm_blessings.manage(state,name,data)
+    if name == "plaza.catalog":
+        return realm_plaza.catalog()
+    if name == "plaza.get":
+        return realm_events.configure(state, plaza=True) if (state / "identity.sqlite3").is_file() else {}
+    if name == "plaza.set":
+        return realm_events.configure(state, data, plaza=True)
     if name == "events.catalog":
         return {"events": realm_events.available()}
     if name == "events.get":
