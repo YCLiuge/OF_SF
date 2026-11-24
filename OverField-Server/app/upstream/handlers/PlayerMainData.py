@@ -66,6 +66,7 @@ class Handler(PacketHandler):
             rsp.account_type,
             rsp.pet_instance_id,
         ) = infos
+        rsp.hide_value, = db.get_players_info(player_id, "hide_value")
         rsp.head = session.avatar_id
         session.player_name = rsp.player_name
         logger.info(f"Player login: {session.player_name}({session.player_id})")
@@ -113,6 +114,9 @@ class Handler(PacketHandler):
         rsp.sp_check_status = True
         session.send(MsgId.PlayerMainDataRsp, rsp, packet_id)  # 1005,1006
 
+        from private_social_profile import daily, gift_count
+        gift_count(session, daily(player_id)[1])
+
         from private_recovery import settle_vitality
         settle_vitality(player_id)
 
@@ -159,7 +163,8 @@ class Handler(PacketHandler):
 
         rsp = PetWarehouseLimitNotice()
         rsp.status = StatusCode.StatusCode_OK
-        rsp.warehouse_limit = 65536
+        from private_pets import capacity
+        rsp.warehouse_limit = capacity(player_id)
         session.send(MsgId.PetWarehouseLimitNotice, rsp, packet_id)
 
         # 视为完成登录，同步场景玩家并广播加入事件

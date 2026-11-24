@@ -22,7 +22,7 @@ CONDITIONS = {4: "完成任务", 6: "秘境通关", 37: "任务对话", 38: "招
 TESTS = ("test_bottle_intro.py", "test_story_starter.py", "test_native_first_quest.py", "test_story_entry.py",
          "test_native_badge_tree.py", "test_native_story_catalog.py", "test_native_story_dialogues.py",
          "test_native_story_scene.py", "test_native_story_map_progress.py", "test_native_story_objectives.py",
-         "test_native_panel_quests.py", "test_native_extra_story_rewards.py")
+         "test_native_panel_quests.py", "test_native_extra_story_rewards.py", "test_native_field_flags.py")
 
 # Each entry names the assertions that justify it. Rendering and dialogue timing need a client run.
 # Keys refer to the original concrete Quest, not a story number or a whole handler category.
@@ -48,7 +48,23 @@ for _ids in ((106061,106062),(106081,),(107051,107052,107053)):
     for _index, _id in enumerate(_ids):
         STEP_EVIDENCE[_id] = ("test_native_story_dialogues.py", "原生接取（预置前章条件）" if _index == 0 else "前步自动接续",
                               "原生 NPC 对话及原场景交互位置", "原生完成", "无本步奖励，整节领取已验", "重启验证")
-COMPLETE = {1000001: "test_native_first_quest.py", 1000002: "test_story_entry.py", 1000003: "test_story_entry.py",
+# Same new role throughout these six stories; every saved step is re-read after restart.
+_PROLOGUE = {
+    100041:"樱庭教学区域",100042:"采集点触发范围",100043:"回溯操作",100044:"采集点交互",100045:"采集结尾",
+    100051:"芳汀",100052:"进入樱庭",100053:"先过野外战斗110210，再交互机关",100054:"地标",100055:"芳汀",
+    100061:"荧荧",100062:"进入樱庭",100063:"研究机关",100064:"野外战斗110300",100065:"返回广场",100066:"荧荧",
+    100071:"芳汀",100072:"进入樱庭",100073:"三个不同的水阀",100074:"首开水车景点1002",100075:"到达水车顶",
+    100081:"荧荧",100082:"梓",100083:"采集火花",100084:"绫",100085:"餐厅NPC",100086:"购买食材后烹饪成功",
+    100087:"餐厅NPC",100088:"芳汀",100089:"篝火机关",100090:"篝火过场区域",100098:"焰火收尾",
+    100091:"芳汀",100092:"进入樱庭",100093:"收集不同樱庭水晶累计46/456",100094:"返回广场与芳汀交谈",
+}
+_REWARDS = {100051:"三项解锁物品入包",100063:"十份饮料入包",100064:"一件独立装备入包",
+            100074:"景点初次四张明信片入包，重复开不重发",100085:"五份料理入包",
+            100098:"焰火解锁道具入包",100094:"探索解锁道具入包"}
+for _id, _action in _PROLOGUE.items():
+    STEP_EVIDENCE[_id] = ("test_story_entry.py", "依序接取或自动接续", _action, "原生完成",
+                          _REWARDS.get(_id,"无本步资源奖励"), "重启验证")
+COMPLETE = {1000001: "test_native_first_quest.py", 1000002: "test_story_entry.py", **{sid: "test_story_entry.py" for sid in range(1000003,1000010)},
             1000606: "test_native_story_dialogues.py", 1000608: "test_native_story_dialogues.py",
             1000705: "test_native_story_dialogues.py"}
 OBJECTIVE_NAMES = {11000321: "星云树解锁二段跳", 11000861: "制作任意一道料理",

@@ -86,6 +86,8 @@ def strengthen(session, req, rsp, kind):
     obj.strength_level, obj.strength_exp = level, 0
     rsp.strength_level = level
     save(session, [item], costs)
+    from private_equipment_presets import sync_scene_equipment
+    sync_scene_equipment(session, instances=(key,))
     from private_newcomer import record
     record(session, 123)
     return pb.StatusCode_OK
@@ -142,6 +144,9 @@ def inscription(session, req, rsp, remove=False):
         changed.append(old)
     slot.inscription1 = new_id
     save(session, changed, costs)
+    from private_equipment_presets import sync_scene_equipment
+    sync_scene_equipment(session, instances=(item.main_item.weapon.instance_id for item in changed
+                                            if item.main_item.WhichOneof("item") == "weapon"))
     if not remove:
         for item in changed:
             rsp.items.add().CopyFrom(item)

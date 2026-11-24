@@ -41,6 +41,8 @@ class Handler(PacketHandler):
         from private_bottle_intro import SCENE, PLAZA, departed
         if session.scene_id == SCENE and req.scene_id == PLAZA:
             departed(session)
+        if (session.scene_id,session.channel_id)!=(req.scene_id,channel):
+            session.active_flag = None
         previous_scene = session.scene_id
         change(session,req.scene_id,channel)
 

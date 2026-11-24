@@ -231,6 +231,8 @@ def wear(session, req, rsp):
     replace_slots(pid,held)
     fill_pack(rsp.temp_pack,held)
     publish(session,changed)
+    from private_equipment_presets import sync_scene_equipment
+    sync_scene_equipment(session, characters={req.char_id:char})
     return pb.StatusCode_OK
 
 
@@ -251,6 +253,6 @@ def page(session, req, rsp, kind):
     end = min(end or len(entries), len(entries))
     values = entries[start:end]
     rsp.end_index = min(start,len(entries)) + len(values)
-    getattr(rsp, {"weapon":"weapons","armor":"armors","poster":"posters"}[kind]).extend(values)
+    getattr(rsp, {"weapon":"weapons","armor":"armors","poster":"posters","pet":"pets"}[kind]).extend(values)
     return pb.StatusCode_OK
 

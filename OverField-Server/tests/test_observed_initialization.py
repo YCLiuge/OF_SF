@@ -99,11 +99,21 @@ def run(root, resources):
             sock,again,owned=initialize(game.port,identity.issue_ticket(*one))
             with sock:
                 assert pid==again
-                assert [(x.poster_illustration_id,x.status) for x in owned.poster_illustrations]==[(10010,pb.Reward)]
+                assert [(x.poster_illustration_id,x.status) for x in owned.poster_illustrations]==[(10010,pb.NotReward)]
                 sock.sendall(encode(MsgId.PosterIllustrationRewardReq,pb.PosterIllustrationRewardReq().SerializeToString(),9))
                 h,raw=receive(sock)
                 assert h.msg_id==MsgId.PosterIllustrationRewardRsp and h.packet_id==9
-                assert pb.PosterIllustrationRewardRsp.FromString(raw).status==pb.StatusCode_FAIL
+                assert pb.PosterIllustrationRewardRsp.FromString(raw).status==pb.StatusCode_CFG_NOT_FOUND
+                # Choose an actually unimplemented operation so adding a feature does not stale the transport test.
+                from unsupported_requests import unsupported_status
+                fallbacks = set(game.failure_replies) - set(game.handlers)
+                fallback = min(fallbacks) if fallbacks else None
+                if fallback is not None:
+                    message, response, reply_id = game.failure_replies[fallback]
+                    sock.sendall(encode(fallback,message().SerializeToString(),12))
+                    h,raw=receive(sock)
+                    assert (h.msg_id,h.packet_id)==(reply_id,12)
+                    assert response.FromString(raw).status==unsupported_status(fallback)
                 sock.sendall(encode(MsgId.PlayerPingReq,b"",10))
                 h,raw=receive(sock)
                 assert h.msg_id==MsgId.PlayerPingRsp and h.packet_id==10
@@ -120,7 +130,8 @@ def run(root, resources):
         assert {"close_reason":"eof"} in entries
         assert {"close_reason":"unsupported_message"} in entries
         assert {"close_reason":"timeout"} in entries
-        assert {"unsupported_msg_id":MsgId.PosterIllustrationRewardReq} in entries
+        if fallback is not None:
+            assert {"unsupported_msg_id":fallback} in entries
     print("PASS observed 1005,1611,1443,1423,1523,2685+ping, original poster mapping, isolation, reconnection and close reasons.")
 
 

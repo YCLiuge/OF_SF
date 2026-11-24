@@ -2,6 +2,12 @@
   "upstream_commit": "fa2142b8521e802beb23fc6ed538205b9f4f1513",
   "old_data_fallbacks": [],
   "files": {
+    "resources/data/Ability.json": {
+      "sha256": "2b651d1d9cab6eabfcd6486e2338cf6f598d09f2ee17010684265b49689ebc39",
+      "bytes": 96140,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Ability.json"
+    },
     "resources/data/Abyss.json": {
       "sha256": "7d36ec423ed07e7f6a99b0e7c97197fe59bd0a45807a718a8d8b793ea0dccf24",
       "bytes": 93422,
@@ -224,6 +230,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Inscription.json"
     },
+    "resources/data/Intimacy.json": {
+      "sha256": "ce094c6d07dd301eb9cedb5c401f195db3903be59cd3b228072049d308615d6d",
+      "bytes": 3855,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Intimacy.json"
+    },
     "resources/data/Item.json": {
       "sha256": "aa5cee92f2e6a4ba536975c9a21c40da68918dfb9a0a0a73756282935a43db67",
       "bytes": 1205924,
@@ -235,6 +247,12 @@
       "bytes": 61480,
       "source": "TapTap PC 1.1.12",
       "detail": "Level.json"
+    },
+    "resources/data/LifeGather.json": {
+      "sha256": "5379cfda19a9318d019e318a88e0eb9ba5bffbd044974600deebf23d4fa520e5",
+      "bytes": 93970,
+      "source": "TapTap PC 1.1.12",
+      "detail": "LifeGather.json"
     },
     "resources/data/Make.json": {
       "source": "TapTap PC 1.1.12",
@@ -337,6 +355,12 @@
       "bytes": 856476,
       "source": "TapTap PC 1.1.12",
       "detail": "ScenesConfigAsset.json"
+    },
+    "resources/data/Scenic.json": {
+      "sha256": "f2d99157217bc1c6381dde2d3510cbf7bdc612ee38191eb9fdb7794702b3ee3e",
+      "bytes": 8217,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Scenic.json"
     },
     "resources/data/Shop.json": {
       "sha256": "c8415d524e71e75a0290accd5eadaa9803d67f1539a29e94865beafc7b43c0bb",

@@ -205,6 +205,12 @@ def init():
             FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS realm_life_study (
+            player INTEGER NOT NULL REFERENCES players(player_id) ON DELETE CASCADE,
+            kind INTEGER NOT NULL, skill INTEGER NOT NULL, level INTEGER NOT NULL DEFAULT 0,
+            start INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(player,kind,skill)
+        );
         CREATE TABLE IF NOT EXISTS life_info (
             player_id INTEGER PRIMARY KEY,
             life_blob BLOB NOT NULL,

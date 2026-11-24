@@ -107,16 +107,18 @@ def list_badges(session, req, rsp):
 
 def list_abilities(session, req, rsp):
     player = session.player_id
-    marks = ",".join("?" for _ in ABILITY_BY_ITEM)
+    abilities = {r["need_item_i_d"]:r["i_d"] for r in _table("Ability","ability").values()}
+    marks = ",".join("?" for _ in abilities)
     inventory = db.conn.execute(f"SELECT item_id,item_detail_blob FROM items WHERE player_id=? AND item_id IN ({marks})",
-                                (player,*ABILITY_BY_ITEM))
+                                (player,*abilities))
     for key, blob in inventory:
         info = pb.ItemDetail.FromString(blob).main_item
         if info.WhichOneof("item") == "base_item" and info.base_item.num:
-            db.conn.execute("INSERT OR IGNORE INTO player_kv VALUES(?,'ability',?,0)", (player,str(ABILITY_BY_ITEM[key])))
+            db.conn.execute("INSERT OR IGNORE INTO player_kv VALUES(?,'ability',?,0)", (player,str(abilities[key])))
+    limits = {r["i_d"]: max(t["level"] for t in r["level_info"]) for r in _table("Ability", "ability").values()}
     for key, val in db.conn.execute("SELECT k,v FROM player_kv WHERE player_id=? AND ns='ability' ORDER BY CAST(k AS INTEGER)",
                                     (player,)):
-        if str(key).isdigit() and isinstance(val, (int,str)) and str(val).isdigit():
+        if str(key).isdecimal() and str(val).isdecimal() and int(val) <= limits.get(int(key), -1):
             rsp.ability_list.add(ability_id=int(key), level=int(val))
     return pb.StatusCode_OK
 

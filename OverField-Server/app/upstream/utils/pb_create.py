@@ -9,7 +9,6 @@ from proto.net_pb2 import (
     EBagItemTag,
     StatusCode,
     SceneDataNotice,
-    PBCollectionRewardData,
     PlayerBriefInfo,
     Quest,
     QuestStatus,
@@ -25,6 +24,19 @@ import server.scene_data as scene_data
 import server.notice_sync as notice_sync
 
 
+def update_birthday(session):
+    birthday, hidden = db.get_players_info(session.player_id, "birthday,is_hide_birthday")
+    session.scene_player.is_birthday = False
+    if not birthday or hidden:
+        return
+    try:
+        birthday_date = datetime.strptime(birthday, "%Y-%m-%d")
+    except ValueError:
+        return
+    today = datetime.now()
+    session.scene_player.is_birthday = (today.month, today.day) == (birthday_date.month, birthday_date.day)
+
+
 def make_ScenePlayer(session):
     # 构造ScenePlayer
     player = session.scene_player
@@ -33,6 +45,8 @@ def make_ScenePlayer(session):
     from private_appearance import phone_case
     player.avatar_frame=db.get_players_info(session.player_id,"avatar_frame")[0]
     player.phone_case=phone_case(session.player_id)
+    from private_pets import update_scene
+    update_scene(session)
     player.ClearField("team")
     player.ClearField("food_buff_ids")
     player.ClearField("global_buff_ids")
@@ -40,31 +54,36 @@ def make_ScenePlayer(session):
     player.food_buff_ids.extend([5013073])  # 食物buff ID
     player.global_buff_ids.extend([481, 491])  # 全局buff ID buff未实现
 
-    birthday_str, char_ids = db.get_players_info(session.player_id, "birthday,team")
-    if birthday_str:
-        birthday_date = datetime.strptime(birthday_str, "%Y-%m-%d")
-        today = datetime.now()
-        player.is_birthday = (
-            today.month == birthday_date.month and today.day == birthday_date.day
-        )
-    else:
-        player.is_birthday = False  # 判断生日
+    char_ids, = db.get_players_info(session.player_id, "team")
+    update_birthday(session)
 
     make_SceneTeam(session.player_id, char_ids, player.team)
 
 
-def fill_scene_weapon(player_id, character, scene_character):
-    # Scene display needs the item template, while the stored equipment field identifies its local instance.
-    preset = next((p for p in character.equipment_presets
-                   if p.preset_index == character.in_use_equipment_preset_index), None)
-    if preset is None or not preset.weapon:
+def fill_scene_equipment(player_id, character, scene_character):
+    from private_equipment import load
+    from private_equipment_presets import preset_at, slots
+    for field in ("weapon_id", "weapon_star", "inscription_id", "inscription_lv", "armors", "posters"):
+        scene_character.ClearField(field)
+    preset = preset_at(character, character.in_use_equipment_preset_index)
+    if preset is None:
         return
-    raw = db.get_item_detail(player_id, instance_id=preset.weapon)
-    if raw:
-        weapon = ItemDetail.FromString(raw).main_item
-        if weapon.HasField("weapon"):
-            scene_character.weapon_id = weapon.item_id
-            scene_character.weapon_star = weapon.weapon.star
+    for kind, _, key in slots(preset):
+        item = load(player_id, key, kind)
+        if item is None:
+            continue
+        obj = getattr(item.main_item, kind)
+        if kind == "weapon":
+            scene_character.weapon_id = obj.weapon_id
+            scene_character.weapon_star = obj.star
+            inscription = load(player_id, obj.inscription1, "inscription")
+            if inscription:
+                scene_character.inscription_id = obj.inscription1
+                scene_character.inscription_lv = inscription.main_item.inscription.level
+        elif kind == "armor":
+            scene_character.armors.add(armor_id=obj.armor_id, armor_star=obj.strength_level)
+        else:
+            scene_character.posters.add(poster_id=obj.poster_id, poster_star=obj.star)
 
 
 def make_SceneTeam(player_id, char_ids, team=None):
@@ -86,9 +105,8 @@ def make_SceneTeam(player_id, char_ids, team=None):
         char1.char_lv = chr.level
         char1.char_star = chr.star
         char1.char_break_lv = chr.max_level
-        fill_scene_weapon(player_id, chr, char1)
+        fill_scene_equipment(player_id, chr, char1)
         char1.gather_weapon = chr.gather_weapon  # 设置采集武器
-        # TODO: 铭文id 铭文等级 防具列表 映像列表
 
         # char1.pos.CopyFrom(Vector3())
         # char1.rot.CopyFrom(Vector3())
@@ -112,9 +130,8 @@ def make_SceneTeam(player_id, char_ids, team=None):
         char2.char_star = chr.star
         char2.char_break_lv = chr.max_level
         # 从equipment_presets中获取武器ID
-        fill_scene_weapon(player_id, chr, char2)
+        fill_scene_equipment(player_id, chr, char2)
         char2.gather_weapon = chr.gather_weapon  # 设置采集武器
-        # TODO: 铭文id 铭文等级 防具列表 映像列表
 
         char2.pos.x = 2394
         char2.pos.y = 908
@@ -136,9 +153,8 @@ def make_SceneTeam(player_id, char_ids, team=None):
         char3.char_star = chr.star
         char3.char_break_lv = chr.max_level
         # 从equipment_presets中获取武器ID
-        fill_scene_weapon(player_id, chr, char3)
+        fill_scene_equipment(player_id, chr, char3)
         char3.gather_weapon = chr.gather_weapon  # 设置采集武器
-        # TODO: 铭文id 铭文等级 防具列表 映像列表
 
         char3.pos.x = 2394
         char3.pos.y = 908
@@ -428,10 +444,11 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False) -> li
                     attrs = [0, 1, 2, 3, 4, 5]
                     random.shuffle(attrs)
                     num_integrity = random.randint(2, 4)
+                    species = next((row for row in res["Pet"]["pet"]["datas"] if row["i_d"] == i["i_d"]), {})
                     for attr in attrs[:num_integrity]:
                         integrity = pet.integrity.add()
                         integrity.attr = attr
-                        base_stat = i.get(
+                        base_stat = species.get(
                             ("hp", "pow", "str", "int", "dex", "luc")[attr], 50
                         )
                         integrity.value = random.randint(
@@ -655,15 +672,12 @@ def make_SceneDataNotice(session):
     data.players.add().CopyFrom(session.scene_player)
     from private_chairs import fill
     fill(session, data)
-    for i in range(0, 12):
-        tmp = data.collections.add()
-        tmp.type = i
-    for i in db.get_collection(session.player_id):
-        crd = PBCollectionRewardData()
-        crd.ParseFromString(i[1])
-        data.collections[i[0]].item_map[crd.item_id].CopyFrom(crd)
+    from private_collection_rewards import fill_scene as fill_collections
+    fill_collections(session, data)
     for i in db.get_challenge(session.player_id, session.scene_id):
         data.challenges.add().ParseFromString(i)
+    from private_flag_battle import fill as fill_flag_battles
+    fill_flag_battles(session, data)
     from private_channels import fill_garden
     fill_garden(session,data.scene_garden_data)
     for m in res["Flag"]["flag"]["datas"]:
@@ -721,6 +735,13 @@ def make_PlayerBriefInfo(player_id, info=None):
     )
     from private_appearance import phone_case
     info.phone_case=phone_case(player_id)
+    from proto import net_pb2 as pb
+    if info.hide_value & pb.HideType_SIGN_Type:
+        info.ClearField("sign")
+    if info.hide_value & pb.HideType_Account_Type:
+        info.ClearField("account_type")
+    if db.get_players_info(player_id,"is_hide_birthday")[0]:
+        info.ClearField("birthday")
     return info
 
 
@@ -783,6 +804,9 @@ def make_QuestNotice(session, conds, qn=None):
             else:
                 current.status = QuestStatus.QuestStatus_Finish
                 current.complete_count = max(1, current.complete_count)
+        if finished and row.get("reward") and row.get("is_immed_reward"):
+            from private_field_story import step_reward
+            step_reward(session, row)
         save(session, current)
         notice.quests.add().CopyFrom(current)
         if finished:
@@ -791,7 +815,12 @@ def make_QuestNotice(session, conds, qn=None):
             if index < len(steps) and saved(session.player_id, steps[index]) is None:
                 following = make_Quest(session.player_id, steps[index])
                 save(session, following)
-                notice.quests.add().CopyFrom(following)
+                from private_flag_battle import prior_completion
+                completed = prior_completion(session,following)
+                if completed is None:
+                    notice.quests.add().CopyFrom(following)
+                else:
+                    make_QuestNotice(session,(completed,),notice)
     if notice.quests:
         notice.status = StatusCode.StatusCode_OK
         return notice

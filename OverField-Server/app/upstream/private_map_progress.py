@@ -70,7 +70,7 @@ def rebuild(pid):
             item = pb.PBCollectionRewardData.FromString(blob)
         except DecodeError:
             continue
-        if item.item_id == cid and item.status == pb.Reward:
+        if item.item_id == cid and (item.status == pb.Reward or kind not in (8, 9)):
             totals[scene,group] += _mark(pid,scene,group,cid)
     for scene, device, blob in db.conn.execute("SELECT scene_id,area_id,area_blob FROM areas WHERE player_id=?", (pid,)):
         if (scene,device) not in devices:

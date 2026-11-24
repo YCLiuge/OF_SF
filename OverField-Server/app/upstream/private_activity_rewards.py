@@ -14,6 +14,10 @@ def _claimed(player,system):
 
 
 def _reward(session,system,key,amounts,response):
+    return deliver_once(session,system,key,amounts,response.rewards)
+
+
+def deliver_once(session,system,key,amounts,items):
     if not amounts or any(item not in _table("Item","item") or num<=0 for item,num in amounts.items()):
         return pb.StatusCode_CFG_NOT_FOUND
     if not db.conn.in_transaction:
@@ -39,7 +43,7 @@ def _reward(session,system,key,amounts,response):
         return pb.StatusCode_CFG_NOT_FOUND
     finally:
         db.conn.execute("RELEASE activity_reward")
-    response.rewards.extend(delivery.items)
+    items.extend(delivery.items)
     if pack.items:session.send(MsgId.PackNotice,pack,0)
     return pb.StatusCode_OK
 

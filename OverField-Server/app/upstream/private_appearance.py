@@ -101,6 +101,10 @@ def player_appearance(session,req,rsp):
 def publish(session,change):
     from utils.pb_create import make_ScenePlayer
     make_ScenePlayer(session)
+    broadcast(session, change)
+
+
+def broadcast(session, change):
     notice=pb.ServerSceneSyncDataNotice(status=pb.StatusCode_OK)
     record=notice.data.add(player_id=session.player_id).server_data.add(action_type=change)
     record.player.CopyFrom(session.scene_player)

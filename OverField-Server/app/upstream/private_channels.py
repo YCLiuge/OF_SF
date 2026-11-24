@@ -36,6 +36,13 @@ def setup(rules):
         if "channel" not in columns:db.conn.execute("ALTER TABLE private_locations ADD COLUMN channel INTEGER NOT NULL DEFAULT 1")
         db.conn.execute("CREATE TABLE IF NOT EXISTS realm_garden_migration (version INTEGER PRIMARY KEY)")
         db.conn.execute("CREATE TABLE IF NOT EXISTS realm_hand_furniture (player INTEGER PRIMARY KEY, fid INTEGER NOT NULL, item INTEGER NOT NULL)")
+        db.conn.execute("CREATE TABLE IF NOT EXISTS realm_garden_schemes "
+                        "(player INTEGER NOT NULL, slot INTEGER NOT NULL CHECK(slot BETWEEN 0 AND 2), "
+                        "name TEXT NOT NULL DEFAULT '', layout BLOB, PRIMARY KEY(player,slot))")
+        db.conn.execute("CREATE TABLE IF NOT EXISTS realm_home_likes "
+                        "(owner INTEGER, visitor INTEGER, count INTEGER NOT NULL, PRIMARY KEY(owner,visitor))")
+        db.conn.execute("CREATE TABLE IF NOT EXISTS realm_like_daily "
+                        "(player INTEGER PRIMARY KEY, day TEXT NOT NULL, count INTEGER NOT NULL)")
         if not db.conn.execute("SELECT 1 FROM realm_garden_migration WHERE version=1").fetchone():
             # The previous implementation had only public channel 1. Preserve every existing object and owner.
             rows=db.conn.execute("SELECT player_id,furniture_id,furniture_detail_blob FROM furnitures WHERE scene_id=? AND channel_id=1",(HOME,)).fetchall()
@@ -129,7 +136,8 @@ def reclaim(pid,channel,player=None):
 def change(s,new_scene,new_channel):
     if (s.scene_id, s.channel_id) != (new_scene, new_channel):
         s.scene_player.ClearField("status")
-    if s.channel_id!=new_channel and is_public(s.realm_rules,s.channel_id):reclaim(s.player_id,s.channel_id,s)
+        if s.scene_id == HOME and is_public(s.realm_rules, s.channel_id):
+            reclaim(s.player_id, s.channel_id, s)
     if new_scene==HOME and s.channel_id!=new_channel:
         owner=owner_for(new_channel)
         if owner and owner!=s.player_id:db.conn.execute("UPDATE garden_info SET access_num=access_num+1 WHERE player_id=?",(owner,))
@@ -151,6 +159,9 @@ def fill_garden(s,world):
             other=world.other_player_furniture_info_map[fid];other.player_id=pid;other.furniture_info.CopyFrom(obj)
     if owner:
         world.likes_num,world.access_player_num,*_=db.get_garden_info(owner)
+        if owner != s.player_id and db.get_garden_info(owner)[4]:
+            from private_garden_likes import day_key, remaining
+            world.left_like_num = remaining(s, day_key())
         row=db.conn.execute("SELECT player_name FROM players WHERE player_id=?",(owner,)).fetchone()
         if row:world.garden_name=row[0]
     for peer in get_session()+([s] if not s.logged_in else []):

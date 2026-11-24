@@ -32,6 +32,11 @@ class Handler(PacketHandler):
                 return
             return talk(session, req.id, packet_id)
 
+        from private_field_story import talk as field_talk
+        field_response = NpcTalkRsp()
+        if field_talk(session, req, field_response):
+            session.send(MsgId.NpcTalkRsp, field_response, packet_id)
+            return
         from private_story_dialogues import talk as story_dialogue
         rsp = NpcTalkRsp()
         if story_dialogue(session, req, rsp):

@@ -70,7 +70,10 @@ def info(session, req, rsp):
     if not detail:
         return pb.StatusCode_BAD_REQ
     rsp.life_base_info.CopyFrom(detail)
+    from private_life_skills import refresh, write_entries
+    refresh(session)
     rsp.life_skill.life_type = req.life_type
+    write_entries(session.player_id, req.life_type, rsp.life_skill.life_skill_info)
     fill_achievements(session.player_id, req.life_type, rsp.life_achieve)
     return pb.StatusCode_OK
 

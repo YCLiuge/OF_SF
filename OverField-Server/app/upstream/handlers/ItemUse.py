@@ -1,3 +1,4 @@
+from private_request import cached_mutation
 from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
 
@@ -25,6 +26,9 @@ class Handler(PacketHandler):
             session.send(MsgId.ItemUseRsp,rsp,packet_id)
             return
         tag = _table("Item", "item").get(req.item_id, {}).get("new_bag_item_tag")
+        if tag == pb.EBagItemTag_PetGrid:
+            from private_pets import expand
+            return cached_mutation(session, "ItemUse", data, packet_id, expand)
         potion = tag in (pb.EBagItemTag_Vitality, pb.EBagItemTag_Energy)
         if potion or req.item_id in _table("GiftBag","gift_bag"):
             key=(packet_id,req.item_id,req.num,req.choose_item_id)

@@ -51,13 +51,13 @@ def run(root,resources):
             assert switch(b,1).scene_garden_data.furniture_player_map[100]==aid
             assert call(a,"ChangeSceneChannel",scene_id=9999,channel_label=100000).status!=pb.StatusCode_OK
             assert bag(aid)==6
-            switch(a,1,scene=1)
-            assert bag(aid)==6
-            switch(a,2)
-            assert bag(aid)==7
+            assert switch(a,1,scene=1).scene_id==1 and bag(aid)==7
             remove=next_msg(b,MsgId.SceneGardenFurnitureRemoveNotice,pb.SceneGardenFurnitureRemoveNotice)
             assert remove.furniture_id==100
             assert not switch(b,1).scene_garden_data.garden_furniture_info_map
+            switch(a,1,scene=1)
+            switch(a,2)
+            assert bag(aid)==7
             assert switch(a,aid).channel_id==aid
             assert put(a,200).status==put(a,201).status==pb.StatusCode_OK
             assert call(a,"GetGardenInfo").garden_info.furniture_limit_num==500
@@ -76,6 +76,8 @@ def run(root,resources):
         game.stop();game.start()
         b,bid,scene=connect(1)
         with b:
+            # The earlier cross-scene departure refunded once; reconnecting another character or restarting cannot replay it.
+            assert bag(aid)==5
             assert scene.channel_id==99999 and not scene.scene_garden_data.garden_furniture_info_map and bag(bid)==6
             assert len(switch(b,aid).scene_garden_data.garden_furniture_info_map)==3
             assert call(b,"TakeOutFurniture",furniture_id=202,is_put_in_package=False).status==pb.StatusCode_OK
@@ -95,7 +97,9 @@ def run(root,resources):
         stored_public(423)
         game.start()
         a,_,scene=connect(0)
-        with a:assert scene.channel_id==aid and set(scene.scene_garden_data.garden_furniture_info_map)=={200,201,423}
+        with a:
+            assert bag(aid)==5
+            assert scene.channel_id==aid and set(scene.scene_garden_data.garden_furniture_info_map)=={200,201,423}
         game.stop()
         # Simulate unscheduled power loss after a verified public placement was committed.
         stored_public(424)
