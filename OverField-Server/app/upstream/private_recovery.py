@@ -1,5 +1,5 @@
 """Native paid recovery purchases. The gameplay host commits wallet, stat and daily counter together."""
-from collections import OrderedDict
+from private_request import cache_after_commit
 from datetime import timedelta
 from time import time
 
@@ -117,10 +117,8 @@ def handle(session, name, raw, packet_id):
 
 def purchase(session, rsp, name, packet_id, resource, item, day, count, current):
     receipts = getattr(session,"recovery_receipts",None)
-    if receipts is None:
-        receipts = session.recovery_receipts = OrderedDict()
     receipt = name, packet_id
-    if packet_id and receipt in receipts:
+    if packet_id and receipts is not None and receipt in receipts:
         rsp.ParseFromString(receipts[receipt])
         return
     pid = session.player_id
@@ -156,6 +154,4 @@ def purchase(session, rsp, name, packet_id, resource, item, day, count, current)
     rsp.items.add().CopyFrom(current)
     session.send(MsgId.PackNotice,pb.PackNotice(status=pb.StatusCode_OK,items=[wallet,current]),0)
     if packet_id:
-        receipts[receipt]=rsp.SerializeToString()
-        if len(receipts)>64:
-            receipts.popitem(last=False)
+        cache_after_commit(session, "recovery_receipts", receipt, rsp.SerializeToString())

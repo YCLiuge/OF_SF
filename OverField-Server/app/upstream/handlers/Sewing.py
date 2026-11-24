@@ -1,3 +1,4 @@
+from private_request import set_after_commit
 from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
 from proto import net_pb2 as pb
@@ -17,5 +18,5 @@ class Handler(PacketHandler):
         else:
             rsp.status = craft(session, kind, req.sewing_id, rsp)
             if packet_id and rsp.status == pb.StatusCode_OK:
-                session.craft_receipt = (request, rsp.SerializeToString())
+                set_after_commit(session, "craft_receipt", (request, rsp.SerializeToString()))
         session.send(MsgId.SewingRsp, rsp, packet_id)

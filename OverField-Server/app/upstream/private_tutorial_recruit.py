@@ -4,7 +4,7 @@ from proto import net_pb2 as pb
 from utils import db
 from utils.res_loader import res
 from private_dungeons import grant, reward_items
-from private_first_quest import CONDITIONS, STEPS, STORY, save, saved
+from private_first_quest import CONDITIONS, STEPS, STORY, saved
 import private_gacha_rewards as rewards
 
 POOL = 2000
@@ -28,7 +28,7 @@ def list_pools(session, req, rsp):
     return pb.StatusCode_OK
 
 
-def draw(session, req, rsp):
+def draw(session, req, rsp, pending):
     pid = session.player_id
     if req.gacha_id != POOL or not req.is_single or session.dungeon[0] or session.scene_id != 9999:
         return pb.StatusCode_BAD_REQ
@@ -43,27 +43,20 @@ def draw(session, req, rsp):
     config = row("Gacha", "info", POOL)
     ticket_id = config["consume_item1_i_d"]
     cost = config["consume_item1_num"]
-    raw = db.get_item_detail(pid, ticket_id)
-    ticket = pb.ItemDetail.FromString(raw) if raw else None
-    if not ticket or ticket.main_item.WhichOneof("item") != "base_item" or ticket.main_item.base_item.num < cost:
-        return pb.StatusCode_ITEM_NOT_ENOUGH
-    ticket.main_item.base_item.num -= cost
-    db.set_item_detail(pid, ticket.SerializeToString(), ticket_id)
+    pending.balances.change(ticket_id, -cost)
 
     # The tutorial fixes the explorer, but it is still a paid draw with regular bonuses.
     from private_gacha import award
     item = rsp.items.add()
-    notice = pb.PackNotice(status=pb.StatusCode_OK)
-    notice.items.add().CopyFrom(ticket)
-    award(pid, SHI, item, notice, set())
+    award(pid, SHI, item, pending.pack, balances=pending.balances, recruit=True)
     rewards.record(db, pid, POOL, item, "tutorial")
     db.set_gacha_guarantee(pid, POOL, db.get_gacha_guarantee(pid, POOL) + 1)
     rsp.info.CopyFrom(pool_info(pid))
     quest.conditions[0].progress = quest.complete_count = 1
     quest.conditions[0].status = quest.status = pb.QuestStatus_Finish
-    save(session, quest)
-    session.send(MsgId.PackNotice, notice, 0)
-    session.send(MsgId.QuestNotice, pb.QuestNotice(status=pb.StatusCode_OK, quests=[quest]), 0)
+    db.set_quest(pid, quest.quest_id, quest.SerializeToString())
+    pending.after_commit.append((session.quests.pop, (quest.quest_id, None)))
+    pending.notices.append((MsgId.QuestNotice, pb.QuestNotice(status=pb.StatusCode_OK, quests=[quest])))
     return pb.StatusCode_OK
 
 

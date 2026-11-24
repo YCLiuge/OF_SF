@@ -55,6 +55,18 @@ def run(root,resources):
             remove=next_msg(b,MsgId.SceneGardenFurnitureRemoveNotice,pb.SceneGardenFurnitureRemoveNotice)
             assert remove.furniture_id==100
             assert not switch(b,1).scene_garden_data.garden_furniture_info_map
+            switch(a,1)
+            assert put(a,110).status==pb.StatusCode_OK
+            assert call(a,"DungeonEnter",dungeon_id=11101,char1=999).status==pb.StatusCode_BAD_REQ
+            assert bag(aid)==6 and 110 in switch(b,1).scene_garden_data.garden_furniture_info_map
+            assert call(a,"DungeonEnter",dungeon_id=11101,char1=101001).status==pb.StatusCode_OK
+            removed=next_msg(b,MsgId.SceneGardenFurnitureRemoveNotice,pb.SceneGardenFurnitureRemoveNotice)
+            assert removed.furniture_id==110 and bag(aid)==7
+            assert not switch(b,1).scene_garden_data.garden_furniture_info_map
+            assert call(a,"DungeonEnter",dungeon_id=11101,char1=101001).status==pb.StatusCode_OK
+            assert call(a,"DungeonRepeatEnter",char1=101001).status==pb.StatusCode_OK
+            assert call(a,"DungeonExit").status==pb.StatusCode_OK and bag(aid)==7
+            next_msg(a,MsgId.SceneDataNotice,pb.SceneDataNotice)
             switch(a,1,scene=1)
             switch(a,2)
             assert bag(aid)==7
@@ -64,6 +76,10 @@ def run(root,resources):
             other=switch(b,0,target_player_label=aid)
             assert set(other.scene_garden_data.garden_furniture_info_map)=={200,201}
             assert put(b,202).status==pb.StatusCode_OK and put(b,203).status!=pb.StatusCode_OK
+            assert call(a,"DungeonEnter",dungeon_id=11101,char1=101001).status==pb.StatusCode_OK
+            assert set(switch(b,aid).scene_garden_data.garden_furniture_info_map)=={200,201,202}
+            assert call(a,"DungeonExit").status==pb.StatusCode_OK and bag(aid)==5
+            next_msg(a,MsgId.SceneDataNotice,pb.SceneDataNotice)
             assert call(b,"TakeOutFurniture",furniture_id=200,is_put_in_package=True).status!=pb.StatusCode_OK
             assert switch(c,cid).scene_garden_data.garden_furniture_info_map=={}
             assert call(a,"SwitchGardenStatus",is_open=False).status==pb.StatusCode_OK
@@ -123,7 +139,7 @@ def run(root,resources):
             assert call(b,"GetGardenInfo").garden_info.furniture_limit_num==0
             assert put(b,523).status!=pb.StatusCode_OK
     finally:game.stop()
-    print("PASS 3 native players: public/home admission, ownership, channel broadcasts, 3 limits, return on channel exit/disconnect/power loss, legacy relocation, hand/bag transfers and restart.")
+    print("PASS 3 native players: public/home admission, ownership, channel broadcasts, 3 limits, return on channel exit/dungeon entry/disconnect/power loss, legacy relocation, hand/bag transfers and restart.")
 
 
 if __name__=="__main__":

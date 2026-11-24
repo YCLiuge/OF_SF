@@ -1,5 +1,6 @@
 """Paid, timed life-skill training using the six PC discipline tables."""
-from collections import Counter, OrderedDict
+from collections import Counter
+from private_request import cache_after_commit
 import pickle
 import time
 
@@ -172,15 +173,11 @@ def start(session, req, rsp):
 
 def learn(session, req, packet):
     receipts = getattr(session, "life_study_receipts", None)
-    if receipts is None:
-        receipts = session.life_study_receipts = OrderedDict()
     key = packet, req.life_type, req.skill_id, req.is_force_study
-    if packet and key in receipts:
+    if packet and receipts is not None and key in receipts:
         return pb.LifeSkillLevelUpRsp.FromString(receipts[key])
     rsp = pb.LifeSkillLevelUpRsp()
     rsp.status = start(session, req, rsp)
     if packet and rsp.status == pb.StatusCode_OK:
-        receipts[key] = rsp.SerializeToString()
-        if len(receipts) > 64:
-            receipts.popitem(last=False)
+        cache_after_commit(session, "life_study_receipts", key, rsp.SerializeToString())
     return rsp

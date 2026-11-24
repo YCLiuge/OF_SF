@@ -1,3 +1,4 @@
+from private_request import set_after_commit
 from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
 from proto import net_pb2 as pb
@@ -16,5 +17,5 @@ class Handler(PacketHandler):
             reply=pb.ShopBuyRsp()
             reply.status=buy(session,req,reply)
             if packet_id and reply.status==pb.StatusCode_OK:
-                session.last_shop_purchase=(packet_id,fields,reply.SerializeToString())
+                set_after_commit(session, "last_shop_purchase", (packet_id,fields,reply.SerializeToString()))
         session.send(MsgId.ShopBuyRsp,reply,packet_id)

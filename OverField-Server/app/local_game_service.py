@@ -52,6 +52,9 @@ class Session:
         self.running=True
         self.logged_in=self.remote=False
         self.responses=[]
+        self.commit_callbacks=[]
+        self.pending_publish=None
+        self.scene_membership=None
         self.sequence=1
         self.outbox=queue.Queue(128)
         self.outstanding=0
@@ -74,6 +77,8 @@ class Session:
                 with self.out_lock:self.outstanding-=len(frame)
 
     def publish(self):
+        if self.pending_publish is not None:
+            self.pending_publish.discard(self)
         frames,self.responses=self.responses,[]
         for frame in frames:
             with self.out_lock:
@@ -90,18 +95,24 @@ class Session:
         self.running=False
         try:self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:pass
+        self.sock.close()
 
     def send(self,msg_id,message,packet_id,is_bin=False):
         if not is_bin and getattr(message, "status", 0) > pb.StatusCode_OK and hasattr(self, "stages"):
             self.stages.failure(msg_id, message.status)
             self.stages.failed_operation(getattr(self, "diagnostic_request", None), msg_id, message.status)
         data=message if is_bin else realm_uids.outgoing(message).SerializeToString()
-        n=0 if msg_id in (1002,1004,1006,1008) else self.sequence
-        if n:
-            self.sequence=1 if n==0xffffffff else n+1
         if len(self.responses)>=512:
             raise ValueError("too many responses")
-        self.responses.append(encode(msg_id,data,packet_id,n))
+        n=0 if msg_id in (1002,1004,1006,1008) else self.sequence
+        frame=encode(msg_id,data,packet_id,n)
+        if not self.responses:
+            self.response_sequence=self.sequence
+        self.responses.append(frame)
+        if n:
+            self.sequence=1 if n==0xffffffff else n+1
+        if self.pending_publish is not None:
+            self.pending_publish.add(self)
 
 
 class _TCP(socketserver.ThreadingTCPServer):
@@ -111,6 +122,23 @@ class _TCP(socketserver.ThreadingTCPServer):
         if sys.platform=='win32' and hasattr(socket,'SO_EXCLUSIVEADDRUSE'):
             self.socket.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
         super().server_bind()
+
+    def service_actions(self):
+        super().service_actions()
+        # The accept loop also ticks while every player is idle.
+        now = time.monotonic()
+        if now >= self.owner.next_pose_flush:
+            with self.owner.lock:
+                try:
+                    self.owner._flush_poses()
+                except sqlite3.Error:
+                    _log.exception("Could not checkpoint player movement, will retry")
+                for pid in tuple(self.owner.pending_reclaims):
+                    try:
+                        self.owner._reclaim_departed(pid)
+                    except Exception:
+                        _log.exception("Could not reclaim disconnected player's furniture, will retry")
+                self.owner.next_pose_flush = now + self.owner.pose_flush_interval
 
     def process_request(self,request,client_address):
         if self.owner.slots.acquire(blocking=False):
@@ -218,6 +246,7 @@ class _Connection(socketserver.BaseRequestHandler):
                     with db.conn:
                         host.handlers[MsgId.GetArchiveInfoReq].handle(session, body, head.packet_id)
                     frames, session.responses = session.responses, []
+                    host.pending_publish.discard(session)
                 for frame in frames:
                     self.request.sendall(frame)
             if head.msg_id != MsgId.PlayerLoginReq:
@@ -300,6 +329,12 @@ class LocalGameService:
         self.connections=set()
         self.closing=Event()
         self.active={}
+        self.scene_members={}
+        self.pending_publish=set()
+        self.pending_poses={}
+        self.pending_dungeon_poses={}
+        self.pending_reclaims={}
+        self.pose_flush_interval=1.0
         self.listener=None
         self.thread=None
         self.handlers={}
@@ -310,6 +345,7 @@ class LocalGameService:
             raise RuntimeError("A game realm is already running in this process")
         try:
             self.closing.clear()
+            self.next_pose_flush=time.monotonic()+self.pose_flush_interval
             self.data_dir.mkdir(parents=True,exist_ok=True)
             res_loader.init(self.resources)
             Config.DB_PATH=str(self.data_dir/"game.sqlite")
@@ -358,6 +394,8 @@ class LocalGameService:
                 realm_uids.initialize(db.conn,self.realm_rules.uid_start)
             from private_channels import setup as setup_channels
             setup_channels(self.realm_rules)
+            self.pending_reclaims.clear()  # Startup has reclaimed all offline public placements.
+            self._flush_poses()  # Retry a failed final checkpoint when restarting the same realm.
             from private_activity_rewards import setup as setup_activity_rewards
             setup_activity_rewards()
             from private_entitlements import catalog, migrate
@@ -395,8 +433,12 @@ class LocalGameService:
                 lambda: slot not in self.active or self.closing.is_set(), timeout=1.0)
             if not available or self.closing.is_set():
                 raise ValueError("Profile already connected or server stopping")
+            row=db.conn.execute("SELECT player_id FROM private_slots WHERE slot=?",(slot,)).fetchone()
+            if row:
+                # A failed disconnect checkpoint must complete before the next session reads its save.
+                self._flush_poses(row[0])
+                self._reclaim_departed(row[0])
             with db.conn:
-                row=db.conn.execute("SELECT player_id FROM private_slots WHERE slot=?",(slot,)).fetchone()
                 if row:
                     pid=row[0]
                 else:
@@ -429,6 +471,7 @@ class LocalGameService:
                 from private_explore import grant_private_permits
                 grant_private_permits(pid)
                 s=Session(sock,slot,pid,proposed)
+                s.pending_publish = self.pending_publish
                 s.entitlements = self.entitlements
                 s.realm_rules = self.realm_rules
                 s.stages = self.stages
@@ -437,9 +480,9 @@ class LocalGameService:
                 saved=db.conn.execute("SELECT scene,channel FROM private_locations WHERE player_id=?",(pid,)).fetchone()
                 s.valid_scenes=self.scene_ids
                 restore(s,saved,self.scene_ids)
-                self.active[slot]=s
-                scene_data._session_list.append(s)
-                return s
+            self.active[slot]=s
+            scene_data._session_list.append(s)
+            return s
 
     def _handle(self,s,msg_id,packet_id,body):
         if not self.stages.enabled or msg_id not in self.stages.variant_requests:
@@ -479,72 +522,165 @@ class LocalGameService:
             return
         # Channel admission is transactional in the scene-switch handler.
         with self.lock:
-            with db.conn:
-                if s.logged_in and msg_id==MsgId.PlayerMainDataReq:
-                    raise ValueError("Request main data once per session")
-                notice_sync.tod_time=int((21600+time.time()*50)%86400)
-                self.handlers[msg_id].handle(s,body,packet_id)
-                if msg_id==MsgId.PlayerSceneRecordReq and not s.dungeon[0]:
-                    self._movement(s,body)
-                if msg_id in (MsgId.ChangeSceneChannelReq,MsgId.PlayerMainDataReq):
-                    db.conn.execute("INSERT OR REPLACE INTO private_locations(player_id,scene,channel) VALUES(?,?,?)",(s.player_id,s.scene_id,s.channel_id))
-                self._drain_scene_events()
-            # Publish after the database commits. Push unsolicited notices to peers immediately.
-            for peer in self.active.values():
-                if peer.responses and peer.running:
-                    peer.publish()
+            if msg_id in (MsgId.ChangeSceneChannelReq, MsgId.DungeonEnterReq, MsgId.DungeonExitReq, MsgId.DungeonRepeatEnterReq):
+                # Scene construction reads committed poses, including switches to this same scene.
+                self._flush_poses(s.player_id)
+            previous_key = s.scene_membership
+            try:
+                with db.conn:
+                    if s.logged_in and msg_id==MsgId.PlayerMainDataReq:
+                        raise ValueError("Request main data once per session")
+                    notice_sync.tod_time=int((21600+time.time()*50)%86400)
+                    result = self.handlers[msg_id].handle(s,body,packet_id)
+                    if msg_id in (MsgId.ChangeSceneChannelReq,MsgId.PlayerMainDataReq):
+                        db.conn.execute("INSERT OR REPLACE INTO private_locations(player_id,scene,channel) VALUES(?,?,?)",(s.player_id,s.scene_id,s.channel_id))
+                    key = (s.scene_id,s.channel_id) if s.logged_in and not s.dungeon[0] else None
+                    self._index_scene(s,key)
+                    self._drain_scene_events()
+            except BaseException:
+                s.commit_callbacks.clear()
+                self._index_scene(s,previous_key)
+                self._discard_pending()
+                scene_data._scene_action.clear()
+                scene_data._scene.clear()
+                scene_data._rec_list.clear()
+                raise
+            if s.commit_callbacks:
+                from private_request import flush_committed
+                flush_committed(s)
+            if msg_id==MsgId.PlayerSceneRecordReq and result is not None:
+                self._movement(s,result)
+            self._publish_pending()
 
-    def _movement(self,s,body):
-        req=pb.PlayerSceneRecordReq.FromString(body)
-        lead=s.scene_player.team.char1
-        rec=next((r for r in req.data.char_recorder_data_lst if r.char_id==lead.char_id),None)
-        if rec is None or not (rec.HasField("pos") or rec.HasField("rot")):return
-        if rec.HasField("pos"):lead.pos.CopyFrom(rec.pos)
-        if rec.HasField("rot"):lead.rot.CopyFrom(rec.rot)
-        s.pos[s.scene_id]=pb.Vector3.FromString(lead.pos.SerializeToString())
-        db.conn.execute("INSERT OR REPLACE INTO private_poses VALUES(?,?,?,?)",(
-            s.player_id,s.scene_id,lead.pos.SerializeToString(),lead.rot.SerializeToString()))
+    def _index_scene(self,s,key):
+        previous = s.scene_membership
+        if previous == key:
+            return
+        if previous is not None:
+            group = self.scene_members[previous]
+            group.remove(s)
+            if not group:
+                del self.scene_members[previous]
+        if key is not None:
+            self.scene_members.setdefault(key,set()).add(s)
+        s.scene_membership=key
+
+    def _discard_pending(self):
+        for peer in self.pending_publish:
+            peer.responses.clear()
+            peer.sequence=peer.response_sequence
+        self.pending_publish.clear()
+
+    def _publish_pending(self):
+        while self.pending_publish:
+            peer=self.pending_publish.pop()
+            if peer.running:
+                peer.publish()
+
+    def _movement(self,s,rec):
+        if not (rec.HasField("pos") or rec.HasField("rot")):
+            return
+        lead = s.dungeon_lead if s.dungeon[0] else s.scene_player.team.char1
+        if rec.HasField("pos"):
+            lead.pos.CopyFrom(rec.pos)
+        if rec.HasField("rot"):
+            lead.rot.CopyFrom(rec.rot)
+        pos,rot = lead.pos.SerializeToString(),lead.rot.SerializeToString()
+        if s.dungeon[0]:
+            self.pending_dungeon_poses[s.player_id]=(pos,rot,s.player_id,s.dungeon[0],s.dungeon_visit)
+        else:
+            if s.scene_id not in s.pos:
+                s.pos[s.scene_id]=pb.Vector3()
+            s.pos[s.scene_id].CopyFrom(lead.pos)
+            self.pending_poses[s.player_id]=(s.player_id,s.scene_id,pos,rot)
+
+    def _flush_poses(self,player_id=None):
+        if not self.pending_poses and not self.pending_dungeon_poses:
+            return
+        tables=(
+            (self.pending_poses,"INSERT OR REPLACE INTO private_poses VALUES(?,?,?,?)"),
+            (self.pending_dungeon_poses,"UPDATE private_dungeon_poses SET pos=?,rot=? WHERE player=? AND dungeon=? AND visit=?"),
+        )
+        with db.conn:
+            for pending,sql in tables:
+                if player_id is None and pending:
+                    db.conn.executemany(sql,pending.values())
+                elif player_id in pending:
+                    db.conn.execute(sql,pending[player_id])
+        for pending,_ in tables:
+            if player_id is None:
+                pending.clear()
+            else:
+                pending.pop(player_id,None)
+
+    def _broadcast_scene(self,key,msg_id,notice):
+        recipients=self.scene_members.get(key)
+        if not recipients:
+            return
+        data=realm_uids.outgoing(notice).SerializeToString()
+        for peer in recipients:
+            if peer.running:
+                peer.send(msg_id,data,0,is_bin=True)
 
     def _drain_scene_events(self):
         for sid,channels in scene_data._scene_action.items():
             for channel,events in channels.items():
                 for notice in events:
-                    for s in self.active.values():
-                        if s.logged_in and not s.dungeon[0] and (s.scene_id,s.channel_id)==(sid,channel):
-                            s.send(MsgId.ServerSceneSyncDataNotice,notice,0)
+                    self._broadcast_scene((sid,channel),MsgId.ServerSceneSyncDataNotice,notice)
         scene_data._scene_action.clear()
         for sid,ch in scene_data._rec_list:
-            changed=scene_data._scene[sid][ch]
+            channels=scene_data._scene[sid]
+            changed=channels.pop(ch)
+            if not channels:
+                del scene_data._scene[sid]
             notice=pb.PlayerSceneSyncDataNotice(status=pb.StatusCode_OK)
             for pid,record in changed.items():
                 item=notice.data.add();item.player_id=pid;item.data.add().CopyFrom(record)
-            for s in self.active.values():
-                if s.logged_in and not s.dungeon[0] and (s.scene_id,s.channel_id)==(sid,ch):
-                    s.send(MsgId.PlayerSceneSyncDataNotice,notice,0)
-            changed.clear()
+            self._broadcast_scene((sid,ch),MsgId.PlayerSceneSyncDataNotice,notice)
         scene_data._rec_list.clear()
+
+    def _reclaim_departed(self, pid):
+        if pid not in self.pending_reclaims:
+            return
+        from private_channels import reclaim
+        try:
+            with db.conn:
+                reclaim(pid,self.pending_reclaims[pid],notify_peers=True)
+        except BaseException:
+            self._discard_pending()
+            raise
+        del self.pending_reclaims[pid]
+        self._publish_pending()
 
     def _leave(self,s):
         with self.lock:
             s.running=False
+            previous=s.scene_membership
+            self._index_scene(s,None)
+            self.pending_publish.discard(s)
             if self.active.get(s.slot) is s:
                 self.active.pop(s.slot)
                 self.slot_available.notify_all()
             if s in scene_data._session_list:scene_data._session_list.remove(s)
+            try:
+                self._flush_poses(s.player_id)
+            except sqlite3.Error:
+                _log.exception("Could not checkpoint disconnected player's pose, will retry")
             if s.logged_in:
-                from private_channels import is_public, reclaim
-                if is_public(s.realm_rules,s.channel_id):
-                    with db.conn:reclaim(s.player_id,s.channel_id,s)
-                    for peer in self.active.values():
-                        if peer.running and peer.responses:peer.publish()
-            if s.logged_in and not s.dungeon[0] and not self.closing.is_set():
+                from private_channels import is_public
+                channel=previous[1] if previous is not None else s.channel_id
+                if is_public(s.realm_rules,channel):
+                    self.pending_reclaims[s.player_id]=channel
+                    try:
+                        self._reclaim_departed(s.player_id)
+                    except Exception:
+                        _log.exception("Could not reclaim disconnected player's furniture, will retry")
+            if previous is not None and not self.closing.is_set():
                 notice=pb.ServerSceneSyncDataNotice(status=pb.StatusCode_OK)
                 entry=notice.data.add(player_id=s.player_id)
                 entry.server_data.add(action_type=pb.SceneActionType_LEAVE)
-                for peer in self.active.values():
-                    if peer.logged_in and not peer.dungeon[0] and peer.scene_id==s.scene_id and peer.channel_id==s.channel_id:
-                        peer.send(MsgId.ServerSceneSyncDataNotice,notice,0)
-                        peer.publish()
+                self._broadcast_scene(previous,MsgId.ServerSceneSyncDataNotice,notice)
+            self._publish_pending()
 
     def stop(self):
         if self.listener is None:return
@@ -554,13 +690,22 @@ class LocalGameService:
             for sock in list(self.connections):
                 try:sock.shutdown(socket.SHUT_RDWR)
                 except OSError:pass
+                # Winsock select on a socket with a receive timeout wakes on close.
+                sock.close()
         self.listener.server_close()
         self.thread.join()
-        with self.lock:
-            db.conn.commit();db.conn.close();db.conn=None
-            db.db._executor.shutdown(wait=True,cancel_futures=True)
+        with self.lock, ExitStack() as cleanup:
+            cleanup.callback(_runtime_owner.release)
+            cleanup.callback(setattr,self,"listener",None)
+            cleanup.callback(setattr,self,"thread",None)
+            cleanup.callback(setattr,db,"conn",None)
+            cleanup.callback(db.conn.close)
+            cleanup.callback(db.db._executor.shutdown,wait=True,cancel_futures=True)
             scene_data._session_list.clear();scene_data._scene.clear()
             scene_data._scene_action.clear();scene_data._rec_list.clear()
-            self.listener=None
-        _runtime_owner.release()
-
+            self.scene_members.clear()
+            self.pending_publish.clear()
+            self._flush_poses()
+            for pid in tuple(self.pending_reclaims):
+                self._reclaim_departed(pid)
+            db.conn.commit()

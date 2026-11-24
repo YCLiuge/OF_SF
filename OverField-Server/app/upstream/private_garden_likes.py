@@ -1,5 +1,5 @@
 """Player-home likes, native daily budget and the profile fields visible in the visitor history."""
-from collections import OrderedDict
+from private_request import cache_after_commit
 from datetime import timedelta
 
 from network.msg_id import MsgId
@@ -54,10 +54,8 @@ def like(session, packet):
         rsp.status = pb.StatusCode_BAD_REQ
         return rsp
     receipts = getattr(session, "garden_like_receipts", None)
-    if receipts is None:
-        receipts = session.garden_like_receipts = OrderedDict()
     key = owner,packet
-    if packet and key in receipts:
+    if packet and receipts is not None and key in receipts:
         return pb.DoLikesRsp.FromString(receipts[key])
     day = day_key()
     left = remaining(session,day)
@@ -81,7 +79,5 @@ def like(session, packet):
     if notice:
         session.send(MsgId.QuestNotice,notice,0)
     if packet:
-        receipts[key] = rsp.SerializeToString()
-        if len(receipts)>64:
-            receipts.popitem(last=False)
+        cache_after_commit(session, "garden_like_receipts", key, rsp.SerializeToString())
     return rsp

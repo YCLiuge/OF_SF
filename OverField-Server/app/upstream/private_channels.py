@@ -115,7 +115,7 @@ def bag_adjust(pid,item_id,amount):
     return item
 
 
-def reclaim(pid,channel,player=None):
+def reclaim(pid,channel,player=None,*,notify_peers=False):
     rows=db.conn.execute("SELECT furniture_id,furniture_detail_blob FROM furnitures WHERE scene_id=? AND channel_id=? AND player_id=?",(HOME,channel,pid)).fetchall()
     if not rows:return
     bag=pb.PackNotice(status=pb.StatusCode_OK)
@@ -124,7 +124,7 @@ def reclaim(pid,channel,player=None):
         item_id=pb.FurnitureDetailsInfo.FromString(raw).furniture_item_id
         amounts[item_id]+=1
         db.del_furniture(HOME,channel,pid,fid)
-        if player:
+        if player or notify_peers:
             msg=pb.SceneGardenFurnitureRemoveNotice(status=pb.StatusCode_OK,furniture_id=fid,item_id=item_id)
             for peer in get_session():
                 if peer.scene_id==HOME and peer.channel_id==channel and not peer.dungeon[0]:

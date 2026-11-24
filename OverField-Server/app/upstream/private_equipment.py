@@ -1,5 +1,6 @@
 """Equipment operations on the authenticated player's persistent inventory."""
-from collections import Counter, OrderedDict
+from collections import Counter
+from private_request import cache_after_commit
 import random
 
 from network.msg_id import MsgId
@@ -206,16 +207,12 @@ OPERATIONS = {"LockEquip": lock, "WeaponStrength": lambda s, q, r: strengthen(s,
 def handle(session, name, data, packet_id):
     rsp = getattr(pb, name + "Rsp")()
     receipts = getattr(session, "equip_receipts", None)
-    if receipts is None:
-        receipts = session.equip_receipts = OrderedDict()
     key = (packet_id, name, data)
-    if packet_id and key in receipts:
+    if packet_id and receipts is not None and key in receipts:
         rsp.ParseFromString(receipts[key])
     else:
         req = getattr(pb, name + "Req").FromString(data)
         rsp.status = OPERATIONS[name](session, req, rsp)
         if packet_id and rsp.status == pb.StatusCode_OK:
-            receipts[key] = rsp.SerializeToString()
-            if len(receipts) > 64:
-                receipts.popitem(last=False)
+            cache_after_commit(session, "equip_receipts", key, rsp.SerializeToString())
     session.send(getattr(MsgId, name + "Rsp"), rsp, packet_id)

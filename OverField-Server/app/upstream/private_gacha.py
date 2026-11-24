@@ -1,16 +1,16 @@
 """Native recruiting. The game host commits currency, roster, results and history together."""
-from collections import OrderedDict
 import json
 import secrets
 
-from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from utils import db
 from utils.pb_create import make_item
 from private_dungeons import _table
 from private_first_quest import STEPS, saved
+from private_request import cache_after_commit
 import private_tutorial_recruit as tutorial
 import private_gacha_rewards as rewards
+import private_gameplay_transaction as gameplay
 from realm_gacha import SCHEMA, defaults
 
 
@@ -132,53 +132,66 @@ def pity_misses(pid, pool):
     return row[0] if row else recent_misses(pid, pool["pity"] - 1, 4)
 
 
-def extra(pid, item_id, amount, delta, notice):
-    raw = db.get_item_detail(pid, item_id)
-    stack = pb.ItemDetail.FromString(raw) if raw else make_item(item_id, 0, pid)
-    if stack.main_item.WhichOneof("item") != "base_item" or stack.main_item.base_item.num + amount > 0xffffffff:
-        raise ValueError("Invalid recruit bonus balance")
-    stack.main_item.base_item.num += amount
-    db.set_item_detail(pid, stack.SerializeToString(), item_id)
-    notice.items.add().CopyFrom(stack)
+def extra(balances, item_id, amount, delta):
+    item = balances.change(item_id, amount)
     reward = delta.extras.add()
-    reward.CopyFrom(stack.main_item)
+    reward.CopyFrom(item)
     reward.base_item.num = amount
 
 
-def duplicate_bonus(pid, prefix, quality, delta, notice):
+def duplicate_bonus(balances, prefix, quality, delta):
     rule = _table("GlobalConfig", "config", "key")[f"Gacha_{prefix}Quality{quality}_Reward"]
     for value in rule["values"]:
         item_id, amount = map(int, value.split(":"))
-        extra(pid, item_id, amount, delta, notice)
+        extra(balances, item_id, amount, delta)
 
 
-def owned_posters(pid):
-    # History preserves discovery if the original instance was later consumed.
-    posters = {item for (item,) in db.conn.execute("SELECT DISTINCT item_id FROM gacha_record WHERE player_id=?", (pid,))}
-    for raw in db.get_item_detail(pid, table="items_s"):
-        item = pb.ItemDetail.FromString(raw).main_item
-        if item.WhichOneof("item") == "poster":
-            posters.add(item.item_id)
-    return posters
+def known_poster(pid, template):
+    # All new item writes already feed the indexed ownership ledger, including non-draw grants.
+    lookup = "SELECT 1 FROM claimed_rewards WHERE player_id=? AND system='got_ids' AND key=?"
+    if db.conn.execute(lookup, (pid, str(template))).fetchone():
+        return True
+    migrated = db.conn.execute("INSERT OR IGNORE INTO claimed_rewards(player_id,system,key) VALUES(?,'migration','gacha_posters_v1')",
+                               (pid,)).rowcount
+    if migrated:
+        db.conn.execute("""INSERT OR IGNORE INTO claimed_rewards(player_id,system,key)
+            SELECT player_id,'got_ids',CAST(item_id AS TEXT) FROM gacha_record WHERE player_id=?""", (pid,))
+        rows = db.conn.execute("SELECT item_detail_blob FROM items_s WHERE player_id=?", (pid,))
+        for (raw,) in rows:
+            item = pb.ItemDetail.FromString(raw).main_item
+            if item.WhichOneof("item") == "poster":
+                db.conn.execute("INSERT OR IGNORE INTO claimed_rewards(player_id,system,key) VALUES(?,'got_ids',?)",
+                                (pid, str(item.item_id)))
+        return bool(db.conn.execute(lookup, (pid, str(template))).fetchone())
+    return False
 
 
-def award(pid, item_id, delta, notice, posters=None):
+def award(pid, item_id, delta, notice, *, balances=None, recruit=False):
+    # Activity rewards also use this routine outside recruitment.
+    if balances is None:
+        balances = gameplay.StackChanges(pid)
+        apply_award(pid, item_id, delta, notice, balances, recruit)
+        balances.flush(notice)
+    else:
+        apply_award(pid, item_id, delta, notice, balances, recruit)
+
+
+def apply_award(pid, item_id, delta, notice, balances, recruit):
     row = _table("Item", "item")[item_id]
     item = make_item(item_id, 1, pid)
     delta.CopyFrom(item)
     # Only a real random pull receives the appearance vouchers listed in string_gacha (PC 1.1.12).
-    recruit = posters is not None
     quality = row.get("quality", 0)
     if row["new_bag_item_tag"] == pb.EBagItemTag_Poster:
-        delta.main_item.is_new = not recruit or item_id not in posters
+        duplicate = recruit and known_poster(pid, item_id)
+        delta.main_item.is_new = not duplicate
         db.set_item_detail(pid, delta.SerializeToString(), instance_id=delta.main_item.poster.instance_id)
         notice.items.add().CopyFrom(delta)
         if recruit:
-            if item_id in posters:
-                duplicate_bonus(pid, "Poster_", quality, delta, notice)
-            posters.add(item_id)
+            if duplicate:
+                duplicate_bonus(balances, "Poster_", quality, delta)
             if quality in (3, 4):
-                extra(pid, 107, {3: 50, 4: 500}[quality], delta, notice)
+                extra(balances, 107, {3: 50, 4: 500}[quality], delta)
         return
     if row["new_bag_item_tag"] != pb.EBagItemTag_Card:
         raise ValueError("Unsupported recruit item type")
@@ -188,49 +201,42 @@ def award(pid, item_id, delta, notice, posters=None):
         delta.main_item.character.ParseFromString(owned[0])
         max_star = delta.main_item.character.star >= 5
         if not max_star:
-            extra(pid, config["repeat_item_i_d"], 3 if quality in (3, 4) else 1, delta, notice)
+            extra(balances, config["repeat_item_i_d"], 3 if quality in (3, 4) else 1, delta)
         if quality in (3, 4):
-            duplicate_bonus(pid, "Character_FullStar" if max_star else "Character_", quality, delta, notice)
+            duplicate_bonus(balances, "Character_FullStar" if max_star else "Character_", quality, delta)
             if recruit:
-                extra(pid, 107, {3: 500, 4: 1500}[quality], delta, notice)
+                extra(balances, 107, {3: 500, 4: 1500}[quality], delta)
         return
     outfit_ids = {config.get("hat_i_d"), config.get("hair_i_d"), config.get("cloth_i_d"),
                   *(config.get("orn_i_d") or [])} - {None, 0}
-    previous = {item: db.get_item_detail(pid, item) for item in outfit_ids}
+    missing = [template for template in outfit_ids if not db.get_item_detail(pid, template)]
     char = db.add_character(pid, item_id, delta.main_item.character)
     delta.main_item.is_new = True
     notice.items.add().CopyFrom(delta)
     notice.items.add().ParseFromString(db.get_item_detail(pid, instance_id=char.equipment_presets[0].weapon))
-    for outfit in outfit_ids:
-        if previous[outfit]:
-            db.set_item_detail(pid, previous[outfit], outfit)
-        else:
-            notice.items.add().ParseFromString(db.get_item_detail(pid, outfit))
+    for outfit in missing:
+        notice.items.add().ParseFromString(db.get_item_detail(pid, outfit))
     if recruit and quality in (3, 4):
-        extra(pid, 107, {3: 500, 4: 1500}[quality], delta, notice)
+        extra(balances, 107, {3: 500, 4: 1500}[quality], delta)
 
 
 def draw(session, req, rsp, packet_id):
     lesson = onboarding(session)
     cache = getattr(session, "gacha_receipts", None)
-    if cache is None:
-        cache = session.gacha_receipts = OrderedDict()
     request = (packet_id, req.gacha_id, req.is_single)
-    if packet_id and request in cache:
+    if packet_id and cache is not None and request in cache:
         prior_lesson, raw = cache[request]
         if not lesson or prior_lesson:
             rsp.ParseFromString(raw)
             return pb.StatusCode_OK
-    status = tutorial.draw(session, req, rsp) if lesson else regular_draw(session, req, rsp)
+    status = gameplay.run(session, req, rsp, tutorial.draw if lesson else regular_draw)
     if status == pb.StatusCode_OK and packet_id:
         rsp.status = status
-        cache[request] = (lesson, rsp.SerializeToString())
-        if len(cache) > 64:
-            cache.popitem(last=False)
+        cache_after_commit(session, "gacha_receipts", request, (lesson, rsp.SerializeToString()))
     return status
 
 
-def regular_draw(session, req, rsp):
+def regular_draw(session, req, rsp, pending):
     pools = active()
     pool_id = selected(session.player_id, pools) if req.gacha_id == CHOICE else req.gacha_id
     pool = pools.get(pool_id)
@@ -241,19 +247,11 @@ def regular_draw(session, req, rsp):
     key = "1" if req.is_single else "2"
     count = config["method" + key + "_count"]
     ticket_id, price = config["consume_item" + key + "_i_d"], config["consume_item" + key + "_num"]
-    raw = db.get_item_detail(pid, ticket_id)
-    ticket = pb.ItemDetail.FromString(raw) if raw else None
     if req.gacha_id == CHOICE and db.get_total_gacha_num(pid, CHOICE) + count > config["max_times"]:
         return pb.StatusCode_BAD_REQ
-    if not ticket or ticket.main_item.WhichOneof("item") != "base_item" or ticket.main_item.base_item.num < price:
-        return pb.StatusCode_ITEM_NOT_ENOUGH
-    notice = pb.PackNotice(status=pb.StatusCode_OK)
-    ticket.main_item.base_item.num -= price
-    db.set_item_detail(pid, ticket.SerializeToString(), ticket_id)
-    notice.items.add().CopyFrom(ticket)
+    pending.balances.change(ticket_id, -price)
     misses = pity_misses(pid, pool)
     reward_config = _table("Gacha", "info")[pool_id]
-    posters = owned_posters(pid)
     sr_limit = pool.get("sr_pity", 10) if pool_id == 2000 else 0
     since_sr = recent_misses(pid, sr_limit - 1, 3) if sr_limit else 0
     for _ in range(count):
@@ -264,11 +262,10 @@ def regular_draw(session, req, rsp):
                 item = secrets.choice(_table("Gacha", "reward_pool")[300]["items"])["item_i_d"]
             since_sr = 0 if explorer_at_least(item, 3) else since_sr + 1
         delta = rsp.items.add()
-        award(pid, item, delta, notice, posters)
+        award(pid, item, delta, pending.pack, balances=pending.balances, recruit=True)
         rewards.record(db, pid, req.gacha_id, delta)
     db.set_gacha_guarantee(pid, pool_id, misses)
     rsp.info.CopyFrom(choice_info(pid, pools) if req.gacha_id == CHOICE else info(pid, pool))
-    session.send(MsgId.PackNotice, notice, 0)
     return pb.StatusCode_OK
 
 
@@ -286,6 +283,10 @@ def history(session, req, rsp):
 
 
 def pick(session, req, rsp):
+    return gameplay.run(session, req, rsp, grant_pick)
+
+
+def grant_pick(session, req, rsp, pending):
     pool = active().get(req.gacha_id)
     if not pool or onboarding(session):
         return pb.StatusCode_BAD_REQ
@@ -299,10 +300,8 @@ def pick(session, req, rsp):
         return pb.StatusCode_REPEAT_GET_REWARD
     if current.gacha_times < config["optional_num"]:
         return pb.StatusCode_BAD_REQ
-    notice = pb.PackNotice(status=pb.StatusCode_OK)
-    award(pid, req.item_id, rsp.item.add(), notice)
+    award(pid, req.item_id, rsp.item.add(), pending.pack, balances=pending.balances)
     db.conn.execute("INSERT INTO private_gacha_picks VALUES(?,?,?)", (pid, req.gacha_id, req.item_id))
-    session.send(MsgId.PackNotice, notice, 0)
     return pb.StatusCode_OK
 
 

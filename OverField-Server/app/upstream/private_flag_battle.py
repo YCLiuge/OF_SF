@@ -1,5 +1,5 @@
 """Native overworld battle and scenic flags, with role-specific map state."""
-from collections import OrderedDict
+from private_request import cache_after_commit, set_after_commit
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from private_dungeons import _table
@@ -91,20 +91,18 @@ def update(session, req, rsp, packet_id):
     active = getattr(session,"active_flag",None)
     receipt = (packet_id,key,req.battle_state)
     receipts = getattr(session,"flag_receipts",None)
-    if receipts is None:
-        receipts = session.flag_receipts = OrderedDict()
-    if packet_id and receipt in receipts:
+    if packet_id and receipts is not None and receipt in receipts:
         rsp.ParseFromString(receipts[receipt])
         return pb.StatusCode_OK
     amount = int(dict(rows(pid,scene)).get(str(req.battle_id),0))
     if req.battle_state == pb.Start:
         if active not in (None,key):
             return pb.StatusCode_BAD_REQ
-        session.active_flag = key
+        set_after_commit(session, "active_flag", key)
     elif req.battle_state in (pb.Finish,pb.Fail,pb.Close,pb.Reset):
         if active!=key:
             return pb.StatusCode_BAD_REQ
-        session.active_flag = None
+        set_after_commit(session, "active_flag", None)
         if req.battle_state==pb.Finish:
             amount+=1
             db.conn.execute("INSERT OR REPLACE INTO player_kv(player_id,ns,k,v) VALUES(?,?,?,?)",
@@ -118,7 +116,5 @@ def update(session, req, rsp, packet_id):
     rsp.battle_data.state = req.battle_state
     rsp.battle_data.finish_times = amount
     if packet_id:
-        receipts[receipt] = rsp.SerializeToString()
-        if len(receipts)>128:
-            receipts.popitem(last=False)
+        cache_after_commit(session, "flag_receipts", receipt, rsp.SerializeToString(), limit=128)
     return pb.StatusCode_OK

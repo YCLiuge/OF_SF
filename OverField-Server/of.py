@@ -73,7 +73,9 @@ def request_stop(state, *, quiet=False):
 def serve(state):
     from game_dispatch import GameDispatch
     from local_game_service import LocalGameService
+    import realm_admin_http
     cfg = endpoint_config()
+    admin_cfg = realm_admin_http.configuration((cfg["http_port"], cfg["game_port"]))
     shutdown = threading.Event()
     def stop(signum, frame):
         shutdown.set()
@@ -113,13 +115,16 @@ def serve(state):
                 thread.start()
                 pending.write_text(run_id,encoding="ascii")
                 pending.replace(active)
-                print("Server ready: %s profile %s:%d, game TCP %s:%d, advertised %s, registration %s" % (
-                    "HTTPS" if tls else "HTTP", cfg["bind"], cfg["http_port"], cfg["bind"],
-                    cfg["game_port"], cfg["game_host"], registration), flush=True)
-                print("Data: " + str(state.resolve()),flush=True)
-                while not shutdown.wait(0.25) and not command.exists():
-                    if not thread.is_alive():
-                        raise RuntimeError("Profile listener exited unexpectedly.")
+                with realm_admin_http.listener(admin_cfg, state, request_stop) as admin_thread:
+                    print("Server ready: %s profile %s:%d, game TCP %s:%d, advertised %s, registration %s" % (
+                        "HTTPS" if tls else "HTTP", cfg["bind"], cfg["http_port"], cfg["bind"],
+                        cfg["game_port"], cfg["game_host"], registration), flush=True)
+                    print("Data: " + str(state.resolve()),flush=True)
+                    if admin_cfg:
+                        print(f"Owner API: http://127.0.0.1:{admin_cfg[0]}/admin/v1/openapi.json", flush=True)
+                    while not shutdown.wait(0.25) and not command.exists():
+                        if not thread.is_alive() or (admin_thread and not admin_thread.is_alive()):
+                            raise RuntimeError("HTTP listener exited unexpectedly.")
             finally:
                 if thread.is_alive():
                     http.shutdown()
@@ -178,11 +183,13 @@ def self_test():
     for key in list(env):
         if key.startswith(("OF_REMOTE_","OF_QUICKSDK_")):
             env.pop(key)
-    for script in ("test_realm_admin.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py",
+    for script in ("test_realm_admin.py", "test_realm_admin_http.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py",
                    "test_game_realm.py", "test_game_archive.py", "test_game_dungeon.py","test_dungeon_updates.py","test_native_appearance.py","test_native_activity_rewards.py",
                    "test_native_first_quest.py", "test_story_entry.py", "test_bottle_intro.py",
                    "test_native_mail.py", "test_native_manual.py", "test_native_recovery.py",
                    "test_native_story_objectives.py", "test_native_collection_queries.py", "test_native_character_skills.py", "test_native_closed_minigames.py",
+                   "test_native_gacha_atomicity.py", "test_native_movement_batch.py",
+                   "test_native_scene_travel.py",
                    "test_native_equipment_scene.py",
                    "test_native_life_skills.py",
                    "test_native_character_reward_tracks.py", "test_native_collection_rewards.py",

@@ -234,6 +234,8 @@ def buy(session,req,rsp):
             return pb.StatusCode_ITEM_NOT_ENOUGH
         purse.main_item.base_item.num-=price
         payments[currency]=purse
+    if not db.conn.in_transaction:
+        db.conn.execute("BEGIN")
     db.conn.execute("SAVEPOINT pc_shop_sale")
     try:
         for currency,purse in payments.items():

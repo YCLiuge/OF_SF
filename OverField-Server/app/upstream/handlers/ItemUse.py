@@ -1,4 +1,4 @@
-from private_request import cached_mutation
+from private_request import cached_mutation, set_after_commit
 from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
 
@@ -38,7 +38,7 @@ class Handler(PacketHandler):
             else:
                 rsp.status=use_potion(session,req,rsp) if potion else open_box(session,req,rsp)
                 if packet_id and rsp.status==StatusCode.StatusCode_OK:
-                    session.last_opened_gift=(key,rsp.SerializeToString())
+                    set_after_commit(session, "last_opened_gift", (key,rsp.SerializeToString()))
             session.send(MsgId.ItemUseRsp,rsp,packet_id)
             return
         rsp.status = StatusCode.StatusCode_OK

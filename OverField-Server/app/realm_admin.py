@@ -146,6 +146,10 @@ def read_request(path, implicit_empty=False):
             raise ValueError("Supply a JSON object on standard input or with --input")
     if len(raw) > MAX_REQUEST:
         raise ValueError("Input exceeds 64 KiB")
+    return decode_request(raw)
+
+
+def decode_request(raw):
     return json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique_keys)
 
 
@@ -240,23 +244,27 @@ def run(state, name, data, request_stop):
     raise AssertionError("Unimplemented management operation")
 
 
-def command(state, args, request_stop):
-    response = {"apiVersion": VERSION}
+def operation_spec(name):
+    if name not in OPERATIONS:
+        raise KeyError(name)
+    return OPERATIONS[name]
+
+
+def execute(state, name, data, request_stop, *, authorize=None):
+    spec = operation_spec(name)
+    validate(data, spec["inputSchema"])
+    if authorize:
+        authorize(name, spec, data)
+    return run(state, name, data, request_stop)
+
+
+def schema():
+    return {"operations": OPERATIONS, "maxInputBytes": MAX_REQUEST}
+
+
+def response_for(action):
     try:
-        if args.admin_command == "schema":
-            result = {"operations": OPERATIONS, "maxInputBytes": MAX_REQUEST}
-        elif args.admin_command == "status":
-            result = status(state)
-        else:
-            spec = OPERATIONS.get(args.operation)
-            if spec is None:
-                raise KeyError(args.operation)
-            implicit_empty = spec["readOnly"] and not spec["inputSchema"]["properties"]
-            data = read_request(args.input, implicit_empty)
-            validate(data, spec["inputSchema"])
-            result = run(state, args.operation, data, request_stop)
-        response.update(ok=True, result=result)
-        exit_code = 0
+        return {"apiVersion": VERSION, "ok": True, "result": action()}
     except (KeyError, ValueError, StateBusy, OSError, sqlite3.Error, BadZipFile, RecursionError) as error:
         if isinstance(error, StateBusy):
             code = "state_busy"
@@ -270,8 +278,20 @@ def command(state, args, request_stop):
             code = "storage_error"
         else:
             code = "invalid_request"
-        response.update(ok=False, error={"code": code, "message": str(error)})
-        exit_code = 1
+        return {"apiVersion": VERSION, "ok": False, "error": {"code": code, "message": str(error)}}
+
+
+def command(state, args, request_stop):
+    def action():
+        if args.admin_command == "schema":
+            return schema()
+        if args.admin_command == "status":
+            return status(state)
+        spec = operation_spec(args.operation)
+        implicit_empty = spec["readOnly"] and not spec["inputSchema"]["properties"]
+        return execute(state, args.operation, read_request(args.input, implicit_empty), request_stop)
+
+    response = response_for(action)
     sys.stdout.buffer.write((json.dumps(response, ensure_ascii=True, allow_nan=False) + "\n").encode("ascii"))
-    return exit_code
+    return 0 if response["ok"] else 1
 

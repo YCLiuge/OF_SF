@@ -15,8 +15,7 @@ class Handler(PacketHandler):
 
         if session.dungeon[0]:
             from private_dungeons import move_inside
-            move_inside(session, req.data)
-            return
+            return move_inside(session, req.data)
 
         up_recorder(
             session.scene_id,
@@ -25,4 +24,5 @@ class Handler(PacketHandler):
             req.data,
         )
 
-        # The private host applies the active character's explicitly present fields and commits them.
+        lead_id = session.scene_player.team.char1.char_id
+        return next((part for part in req.data.char_recorder_data_lst if part.char_id == lead_id), None)

@@ -1,5 +1,5 @@
 """Private per-character mailbox using the native MailState and five MailOperateType values."""
-from collections import OrderedDict
+from private_request import cache_after_commit
 import time
 
 from network.msg_id import MsgId
@@ -74,6 +74,8 @@ def attachment(pid, detail, receipt, pack):
 def claim(pid, mails, rsp):
     receipt = pb.ShopBuyRsp()
     pack = pb.PackNotice(status=pb.StatusCode_OK)
+    if not db.conn.in_transaction:
+        db.conn.execute("BEGIN")
     db.conn.execute("SAVEPOINT mail_attachments")
     try:
         for mail in mails:
@@ -117,10 +119,8 @@ def operate(session, req, packet_id):
         save(pid, mail, rsp)
     elif op == COLLECT:
         cache = getattr(session, "mail_collect_receipts", None)
-        if cache is None:
-            cache = session.mail_collect_receipts = OrderedDict()
         key = (packet_id, req.mail_id)
-        if packet_id and key in cache:
+        if packet_id and cache is not None and key in cache:
             rsp.ParseFromString(cache[key])
         else:
             limit = int(next(r for r in res["GlobalConfig"]["config"]["datas"]
@@ -131,9 +131,7 @@ def operate(session, req, packet_id):
                 mail.collect_status = rsp.collect_status = not mail.collect_status
                 save(pid, mail, rsp)
             if packet_id:
-                cache[key] = rsp.SerializeToString()
-                if len(cache) > 64:
-                    cache.popitem(last=False)
+                cache_after_commit(session, "mail_collect_receipts", key, rsp.SerializeToString())
     elif op in (CLAIM, CLAIM_ALL):
         candidates = [m for m in ([mail] if op == CLAIM else box.values())
                       if (m.items or m.reward) and m.mail_state != pb.MailState_CLAIMED]

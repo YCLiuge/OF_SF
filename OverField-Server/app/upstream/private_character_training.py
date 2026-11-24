@@ -1,5 +1,5 @@
 """PC role-bound skills, experience and level breaks. Called inside a realm transaction."""
-from collections import OrderedDict
+from private_request import cache_after_commit
 from fractions import Fraction
 
 from network.msg_id import MsgId
@@ -117,10 +117,8 @@ def handle(session, name, data, packet_id):
     rsp = getattr(pb, name + "Rsp")(char_id=req.char_id)
     response_id = getattr(MsgId, name + "Rsp")
     receipts = getattr(session, "training_receipts", None)
-    if receipts is None:
-        receipts = session.training_receipts = OrderedDict()
     key = (packet_id, name, data)
-    if packet_id and key in receipts:
+    if packet_id and receipts is not None and key in receipts:
         rsp.ParseFromString(receipts[key])
         session.send(response_id, rsp, packet_id)
         return
@@ -151,6 +149,4 @@ def handle(session, name, data, packet_id):
         from private_newcomer import record
         record(session, 134)
     if packet_id:
-        receipts[key] = rsp.SerializeToString()
-        if len(receipts) > 64:
-            receipts.popitem(last=False)
+        cache_after_commit(session, "training_receipts", key, rsp.SerializeToString())

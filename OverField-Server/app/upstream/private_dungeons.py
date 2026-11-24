@@ -182,6 +182,9 @@ def enter(session, req, rsp, restart=False):
     else:
         db.conn.execute("INSERT OR REPLACE INTO private_dungeon_poses VALUES(?,?,?,?,?)",
                         (pid,did,data.enter_times,lead.pos.SerializeToString(),lead.rot.SerializeToString()))
+    session.dungeon_visit = data.enter_times
+    session.dungeon_lead = type(lead)()
+    session.dungeon_lead.CopyFrom(lead)
     opened = {idx for kind, idx, _ in facts(pid,did) if kind=="box"}
     for point in scene(did).get("CollectionTreasureInfos", ()):
         idx = point.get("Index", 0)
@@ -253,12 +256,7 @@ def coin(session, req, rsp):
         chart = _table("PrivateDungeonMap", "dungeons", "id").get(did, {})
         star = next((s for s in chart.get("coins", ()) if s["index"] == idx), None)
         if star:
-            raw = db.conn.execute(
-                "SELECT pos FROM private_dungeon_poses WHERE player=? AND dungeon=? AND visit=?",
-                (pid, did, data.enter_times)).fetchone()
-            if not raw:
-                return pb.StatusCode_BAD_REQ
-            pose = pb.Vector3.FromString(raw[0])
+            pose = session.dungeon_lead.pos
             if math.hypot(pose.x / 100-star["x"], pose.z / 100-star["z"]) > star["radius"]:
                 return pb.StatusCode_BAD_REQ
         grant(session,{106:1},rsp.rewards)
@@ -363,17 +361,11 @@ def claim(session, req, rsp):
 
 
 def move_inside(session, record):
-    pid, did = session.player_id, session.dungeon[0]
-    data = load(pid, did)
-    lead = next((item for item in record.char_recorder_data_lst if item.char_id == data.char1), None)
+    lead = next((item for item in record.char_recorder_data_lst
+                 if item.char_id == session.dungeon_lead.char_id), None)
     if lead is None:
         return
-    if lead.HasField("pos"):
-        db.conn.execute("UPDATE private_dungeon_poses SET pos=? WHERE player=? AND dungeon=? AND visit=?",
-                        (lead.pos.SerializeToString(), pid, did, data.enter_times))
-    if lead.HasField("rot"):
-        db.conn.execute("UPDATE private_dungeon_poses SET rot=? WHERE player=? AND dungeon=? AND visit=?",
-                        (lead.rot.SerializeToString(), pid, did, data.enter_times))
     notice = pb.PlayerSceneSyncDataNotice(status=pb.StatusCode_OK)
-    notice.data.add(player_id=pid).data.add().CopyFrom(record)
+    notice.data.add(player_id=session.player_id).data.add().CopyFrom(record)
     session.send(MsgId.PlayerSceneSyncDataNotice, notice, 0)
+    return lead
