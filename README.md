@@ -35,6 +35,8 @@ OF_SF 提供国服 TapTap PC 1.1.12 的 Windows 玩家补丁，以及可迁移�
 | 生活互动 | 钓鱼、采集植物和捉虫。鱼种、工具、掉落及进度的核对范围见[生活互动](OverField-Server/docs/生活互动.md)。 |
 | 服主管理 | 多条图文公告、版本附件、兑换码、游戏内 GM 授权、本机 CLI 与 HTTP 管理接口。[公告与版本](OverField-Server/docs/服主公告与版本发布.md) · [游戏内 GM](OverField-Server/docs/游戏内管理.md) · [管理接口](OverField-Server/docs/本机管理接口.md) |
 
+公网测试账号已核对采集、捉虫和钓鱼结算，退出重登后背包、工具耐久和图鉴与逐次结算一致。
+
 已核对 303 种客户端请求与响应编号。仍有 11 种请求待还原，另有 4 种按区服策略关闭。部分扫荡掉落采用社区规则。[逐项验证结果](OverField-Server/docs/客户端请求对照.md) · [玩法缺口与上游对照](OverField-Server/docs/上游对照.md)
 
 ## 开发与许可

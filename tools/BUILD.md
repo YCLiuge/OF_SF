@@ -41,6 +41,18 @@ py -3 tools/test_compact_player.py
 py -3 tools/test_player_patch.py --archive dist/OF_SF-PlayerPatch-1.1.12-Windows-x64.zip
 ```
 
+## 生成预填区服的朋友包
+
+从上一步校验通过的通用 ZIP 生成。把示例地址和公开 CA 换成自己区服的值。朋友包可重新解压到任意目录，首次运行从随包预设读取地址和证书；已有个人设置优先。
+
+```powershell
+$baseZip = "dist/OF_SF-PlayerPatch-1.1.12-Windows-x64.zip"
+$baseHash = ((Get-Content -LiteralPath "$baseZip.sha256" -Raw).Trim() -split '\s+')[0]
+$friendsZip = "dist/OF_SF-Friends-1.1.12-Windows-x64.zip"
+py -3 tools/package_friends_patch.py --source $baseZip --sha256 $baseHash --endpoint https://realm.example:18443 --ca realm-ca.pem --output $friendsZip
+py -3 tools/test_friends_patch.py --source $baseZip --friends $friendsZip --check-connection
+```
+
 ## 复测频道移动
 
 在已导入运行依赖和资源的源码目录执行下列命令。工具创建临时区服和四个角色，在两个频道同时发送 320 次移动。它逐帧核对 640 次送达、跨频道隔离和停服后四个角色的位置，并统计 SQLite 写入次数。
