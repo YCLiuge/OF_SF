@@ -51,9 +51,10 @@ def badges(session, req, rsp):
 
 
 def scene_progress(session,req,rsp):
+    from private_map_progress import points
     for row in table("Scene","scene_progress"):
         scene=row["i_d"]
-        count=int(value(session.player_id,"ach",f"exp:{scene}",0))
+        count=points(session.player_id,scene)
         if count>0:
             rsp.scene_process_list.add(scene_id=scene,process=count)
     return pb.StatusCode_OK

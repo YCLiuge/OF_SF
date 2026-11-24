@@ -97,7 +97,7 @@ class Handler(PacketHandler):
 
         session.send(MsgId.PackNotice, rsp1, 0)
         session.send(MsgId.CookingFoodRsp, rsp, packet_id)
-        if not Config.SKIP_QUESTS and session.quests.get(100086) != None:
+        if result.is_success and not Config.SKIP_QUESTS and 100086 in session.quests:
             rsp1 = make_QuestNotice(session, [11000861])
             if rsp1:
                 session.send(MsgId.QuestNotice, rsp1, 0)

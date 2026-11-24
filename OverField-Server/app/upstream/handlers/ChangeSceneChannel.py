@@ -38,6 +38,10 @@ class Handler(PacketHandler):
         sd.action_type = SceneActionType.SceneActionType_LEAVE
         scene_data.up_scene_action(session.scene_id, session.channel_id, notice)
 
+        from private_bottle_intro import SCENE, PLAZA, departed
+        if session.scene_id == SCENE and req.scene_id == PLAZA:
+            departed(session)
+        previous_scene = session.scene_id
         change(session,req.scene_id,channel)
 
         rsp = ChangeSceneChannelRsp()
@@ -57,6 +61,9 @@ class Handler(PacketHandler):
         rsp.CopyFrom(make_SceneDataNotice(session))
         session.send(MsgId.SceneDataNotice, rsp, 0)
 
+        from private_story_entry import scene_entered
+        scene_entered(session, req.scene_id)
+
         from private_chat import nearby_history
         nearby_history(session)
 
@@ -74,4 +81,5 @@ class Handler(PacketHandler):
         sd.player.CopyFrom(session.scene_player)
         scene_data.up_scene_action(session.scene_id, session.channel_id, notice)
 
-        make_Achieve(session, session.scene_id)
+        if previous_scene != session.scene_id:
+            make_Achieve(session, session.scene_id)

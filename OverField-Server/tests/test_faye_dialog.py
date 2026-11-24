@@ -6,7 +6,7 @@ import sqlite3
 from tempfile import TemporaryDirectory
 from local_game_service import LocalGameService,pb
 from local_identity import LocalIdentity
-from test_game_realm import join,login
+from test_game_realm import join_after_intro,login
 from test_observed_initialization import call
 
 
@@ -16,7 +16,7 @@ def run(root,resources):
     game=LocalGameService(ids,root,resources,port=0)
     def enter(profile):
         s,_,pid=login(game.port,ids.issue_ticket(*profile))
-        main,_=join(s)
+        main,_=join_after_intro(s)
         return s,pid,main
     def files(pid):
         with closing(sqlite3.connect(root/"game.sqlite")) as db:

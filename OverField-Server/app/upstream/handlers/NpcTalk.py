@@ -2,7 +2,6 @@ from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
 
 from proto.net_pb2 import NpcTalkReq, NpcTalkRsp, StatusCode
-from utils.res_loader import res
 from utils.pb_create import make_QuestNotice
 
 
@@ -28,16 +27,22 @@ class Handler(PacketHandler):
                 return
             return talk(session, req.id, packet_id)
 
+        from private_story_dialogues import talk as story_dialogue
         rsp = NpcTalkRsp()
+        if story_dialogue(session, req, rsp):
+            session.send(MsgId.NpcTalkRsp, rsp, packet_id)
+            return
         rsp.status = StatusCode.StatusCode_OK
-        conds = []
+        from private_dungeons import _table
+        goals = _table("Achieve", "achieve")
         if req.talk_type == NpcTalkReq.NpcTalkType_Mechanism:
-            for i in res["Achieve"]["achieve"]["datas"]:
-                if req.id in i.get("param", []):
-                    conds.append(i["i_d"])
+            conds = [key for key, goal in goals.items() if goal.get("new_achieve_condition") == 40
+                     and goal.get("param", [])[:1] == [req.id]]
+        elif req.talk_type == NpcTalkReq.NpcTalkType_Npc and goals.get(req.id, {}).get("new_achieve_condition") == 37:
+            conds = [req.id]
         else:
-            conds.append(req.id)
-        rsp1 = make_QuestNotice(session, [c for c in conds if c not in CONDITIONS])
+            conds = []
+        rsp1 = make_QuestNotice(session, conds)
         if rsp1:
             session.send(MsgId.QuestNotice, rsp1, 0)
         session.send(MsgId.NpcTalkRsp, rsp, packet_id)

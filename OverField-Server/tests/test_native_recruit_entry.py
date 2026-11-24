@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from local_game_service import LocalGameService, pb
 from local_identity import LocalIdentity
-from test_game_realm import join, login
+from test_game_realm import join_after_intro, login
 from test_native_gacha import call
 
 
@@ -20,7 +20,7 @@ def run(root, resources):
     try:
         user, _, _ = login(host.port, owner.issue_ticket(*profile))
         with user:
-            join(user)
+            join_after_intro(user)
             accepted = call(user,"AcceptQuest",9,quest_id=1000001,quest_type=pb.EQuestType_MainQuest)
             assert accepted.quest.quest_id == 100011
             banners = call(user,"GachaList",10)

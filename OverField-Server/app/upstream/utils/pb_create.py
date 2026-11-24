@@ -743,61 +743,65 @@ def make_Quest(player_id, quest_id, q=None):
 
 
 def make_QuestNotice(session, conds, qn=None):
-    player_id = session.player_id
-    if qn == None:
-        qn = QuestNotice()
-    for i in res["Quest"]["condition_set_group"]["datas"]:
-        for i2 in i["quest_condition_set"]:
-            for cond in conds:
-                if cond in i2["achieve_condition_i_d"]:
-                    qn.status = StatusCode.StatusCode_OK
-                    tmp = qn.quests.add()
-                    tmp.ParseFromString(db.get_quest(player_id, i["i_d"]))
-                    sf_cond = True
-                    for i3 in tmp.conditions:
-                        if i3.condition_id == cond:
-                            i3.status = QuestStatus.QuestStatus_Finish
-                        if i3.status != QuestStatus.QuestStatus_Finish:
-                            sf_cond = False
-                    if sf_cond:
-                        tmp.status = QuestStatus.QuestStatus_Finish
-                        session.quests.pop(tmp.quest_id, None)
-                        # print(tmp.quest_id)
-                        # for s in session.quests.keys():
-                        #     print(s)
-                        # 检查任务组，如果不是最后一个就继续推进
-                        for i4, quest in enumerate(res["Quest"]["quest"]["datas"]):
-                            if quest["i_d"] == i["i_d"]:
-                                tmp1 = res["Quest"]["quest"]["datas"][i4 + 1]
-                                if tmp1["name"] != quest["name"]:
-                                    break
-                                else:
-                                    q = qn.quests.add()
-                                    make_Quest(player_id, tmp1["i_d"], q)
-                                    db.set_quest(
-                                        player_id,
-                                        q.quest_id,
-                                        q.SerializeToString(),
-                                    )
-                                    session.quests[q.quest_id] = q
-                                    break
-                    db.set_quest(
-                        player_id,
-                        tmp.quest_id,
-                        tmp.SerializeToString(),
-                    )
-                    return qn
+    """Apply one native event to the earliest unfinished condition group of each active objective."""
+    from private_dungeons import _table
+    from private_first_quest import save, saved
+    hits = set(conds)
+    if not hits:
+        return
+    notice = qn if qn is not None else QuestNotice()
+    quests = _table("Quest", "quest")
+    groups = _table("Quest", "condition_set_group")
+    achieves = _table("Achieve", "achieve")
+    # Snapshot the candidates. A quest unlocked by this event needs its own later interaction.
+    candidates = []
+    for row in quests.values():
+        phases = groups.get(row.get("condition_set_group_i_d"), {}).get("quest_condition_set", ())
+        if any(hits.intersection(phase["achieve_condition_i_d"]) for phase in phases):
+            current = saved(session.player_id, row["i_d"])
+            if current and current.status == QuestStatus.QuestStatus_InProgress:
+                candidates.append((row, phases, current))
+    for row, phases, current in candidates:
+        conditions = {c.condition_id: c for c in current.conditions}
+        pending = next((phase["achieve_condition_i_d"] for phase in phases
+                        if any(key in conditions and conditions[key].status != QuestStatus.QuestStatus_Finish
+                               for key in phase["achieve_condition_i_d"])), ())
+        matched = [conditions[key] for key in pending if key in hits and key in conditions
+                   and conditions[key].status == QuestStatus.QuestStatus_InProgress]
+        if not matched:
+            continue
+        for condition in matched:
+            target = achieves.get(condition.condition_id, {}).get("count_param", 1)
+            condition.progress = min(condition.progress + 1, target)
+            if condition.progress == target:
+                condition.status = QuestStatus.QuestStatus_Finish
+        finished = all(c.status == QuestStatus.QuestStatus_Finish for c in current.conditions)
+        if finished:
+            current.status = QuestStatus.QuestStatus_Finish
+            current.complete_count = max(1, current.complete_count)
+        save(session, current)
+        notice.quests.add().CopyFrom(current)
+        if finished:
+            steps = [key for key, q in quests.items() if q.get("quest_group") == row["quest_group"]]
+            index = steps.index(current.quest_id) + 1
+            if index < len(steps) and saved(session.player_id, steps[index]) is None:
+                following = make_Quest(session.player_id, steps[index])
+                save(session, following)
+                notice.quests.add().CopyFrom(following)
+    if notice.quests:
+        notice.status = StatusCode.StatusCode_OK
+        return notice
 
 
-def make_Achieve(session, params=None):
-    if not Config.SKIP_QUESTS:
-        cid = {}
-        for i, q in session.quests.items():
-            cid[q.conditions[0].condition_id] = i
-        for i in res["Achieve"]["achieve"]["datas"]:
-            if i.get("i_d", 0) in cid.keys():
-                from private_story_entry import CONDITIONS as ENTRY_CONDITIONS
-                if i["i_d"] not in ENTRY_CONDITIONS and params in i["param"]:
-                    rsp1 = make_QuestNotice(session, [i["i_d"]])
-                    if rsp1:
-                        session.send(MsgId.QuestNotice, rsp1, 0)
+def make_Achieve(session, scene):
+    """Only an actual scene entry can satisfy a type-39 story condition."""
+    if Config.SKIP_QUESTS:
+        return
+    from private_story_entry import CONDITIONS as entry_conditions
+    from private_dungeons import _table
+    goals = [key for key, row in _table("Achieve","achieve").items()
+             if row.get("new_achieve_condition") == 39 and row.get("param") == [scene]
+             and key not in entry_conditions]
+    notice = make_QuestNotice(session, goals)
+    if notice:
+        session.send(MsgId.QuestNotice, notice, 0)

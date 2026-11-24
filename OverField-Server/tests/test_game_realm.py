@@ -46,6 +46,19 @@ def join(c):
     return main,scene
 
 
+def join_after_intro(client):
+    """Enter the plaza through the native scene switch for gameplay fixtures that start after the guide."""
+    main, scene = join(client)
+    if scene.data.scene_id == 100:
+        request = pb.ChangeSceneChannelReq(scene_id=9999)
+        client.sendall(encode(MsgId.ChangeSceneChannelReq, request.SerializeToString(), 9001))
+        reply = next_msg(client, MsgId.ChangeSceneChannelRsp, pb.ChangeSceneChannelRsp)
+        assert reply.status == pb.StatusCode_OK and reply.scene_id == 9999
+        scene = next_msg(client, MsgId.SceneDataNotice, pb.SceneDataNotice)
+        assert scene.data.scene_id == 9999
+    return main, scene
+
+
 def run(root,res):
     identity=LocalIdentity(root/"identity.sqlite3")
     slot,key=identity.create_profile("私服队长")
@@ -68,17 +81,17 @@ def run(root,res):
             else:raise AssertionError("invalid snappy accepted")
         ticket=identity.issue_ticket(slot,key)
         c,info,pid=login(service.port,ticket)
-        assert info.player_name=="私服队长" and info.scene_id==9999
+        assert info.player_name=="私服队长" and info.scene_id==100
         assert login(service.port,ticket) is None
         with c:
-            main,scene=join(c)
+            main,scene=join_after_intro(c)
             assert scene.data.players[0].team.char1.weapon_id==1101104
             assert len(scene.data.players)==1 and scene.data.players[0].team.char1.pos.x==2415
             # A peer sees movement immediately without sending a poll. It has its own private player.
             peer_slot,peer_key=identity.create_profile("第二队长")
             peer,peer_info,peer_pid=login(service.port,identity.issue_ticket(peer_slot,peer_key))
             assert peer_pid!=pid
-            _,joined=join(peer)
+            _,joined=join_after_intro(peer)
             assert {p.player_id for p in joined.data.players}=={pid,peer_pid}
             c.sendall(encode(MsgId.PlayerPingReq,pb.PlayerPingReq(client_time_ms=12345).SerializeToString(),4))
             assert next_msg(c,MsgId.PlayerPingRsp,pb.PlayerPingRsp).client_time_ms==12345
@@ -116,7 +129,7 @@ def run(root,res):
         c,info,again=login(service.port,identity.issue_ticket(slot,key))
         with c:
             assert again==pid and info.player_name=="私服队长"
-            main,scene=join(c); actor=scene.data.players[0].team.char1
+            main,scene=join_after_intro(c); actor=scene.data.players[0].team.char1
             assert (actor.pos.x,actor.pos.y,actor.pos.z,actor.rot.y)==(0,502,-741,8800)
     finally:service.stop()
     with closing(sqlite3.connect(root/"game.sqlite")) as db, db:
@@ -125,9 +138,9 @@ def run(root,res):
     try:
         c,info,again=login(service.port,identity.issue_ticket(slot,key))
         with c:
-            assert again==pid and info.player_name=="已有名字" and join(c)[0].player_name=="已有名字"
+            assert again==pid and info.player_name=="已有名字" and join_after_intro(c)[0].player_name=="已有名字"
     finally:service.stop()
-    print("PASS: native private ticket/name/login/main-data at home 9999, ping, pose, sit, restart; blank fixed, existing name preserved.")
+    print("PASS: native private ticket/name/login/main-data at guide 100, plaza 9999, ping, pose, sit, restart; blank fixed, existing name preserved.")
 
 
 if __name__=="__main__":

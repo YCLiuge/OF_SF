@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from local_game_service import LocalGameService, MsgId, pb
 from local_game_wire import encode, receive
 from local_identity import LocalIdentity
-from test_game_realm import login, join
+from test_game_realm import login, join_after_intro
 
 
 def run(root,resources):
@@ -15,7 +15,7 @@ def run(root,resources):
     game=LocalGameService(ids,root,resources,port=0)
     def open_world(profile):
         c,_,pid=login(game.port,ids.issue_ticket(*profile))
-        _,scene=join(c)
+        _,scene=join_after_intro(c)
         seats=[(s.chair_id,s.seat_id,s.player_id) for s in scene.data.chair_info_list]
         assert scene.data.scene_id==9999
         return c,pid,seats

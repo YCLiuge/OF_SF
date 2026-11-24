@@ -108,7 +108,7 @@ def run(resources,ssh_config=None,ssh_port=None,http_port=None,game_port=None):
                         info=next_msg(s,MsgId.PlayerLoginRsp,pb.PlayerLoginRsp)
                         assert info.player_name=="异地私服角色"
                         main,scene=join(s)
-                        assert main.player_name==info.player_name and scene.data.scene_id==9999
+                        assert main.player_name==info.player_name and scene.data.scene_id==100
                         s.sendall(encode(MsgId.PlayerPingReq,pb.PlayerPingReq(client_time_ms=193).SerializeToString(),5))
                         assert next_msg(s,MsgId.PlayerPingRsp,pb.PlayerPingRsp).client_time_ms==193
                         from test_observed_initialization import call

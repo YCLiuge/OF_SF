@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from local_game_service import LocalGameService, MsgId, pb
 from local_game_wire import encode, receive
 from local_identity import LocalIdentity
-from test_game_realm import join, login, next_msg
+from test_game_realm import join_after_intro, login, next_msg
 
 
 def run(root, resources):
@@ -19,7 +19,7 @@ def run(root, resources):
 
     def connect(profile):
         sock, _, player_id = login(game.port, identity.issue_ticket(*profile))
-        main, _ = join(sock)
+        main, _ = join_after_intro(sock)
         states = {r.quest_id:r.status for r in main.quest_detail.quests}
         return sock, player_id, states
 
@@ -70,6 +70,8 @@ def run(root, resources):
         with c:
             assert pid==same and progress[100011]==3 and progress[100012]==1
             assert accept(c).quest_id==100012
+            assert call(c,"Tutorial",tutorial_id=12,tutorial_name="菲对话结束")[0].status==pb.StatusCode_OK
+            assert call(c,"Tutorial",tutorial_id=11,tutorial_name="菲对话开始")[0].status==pb.StatusCode_OK
             assert call(c,"NpcTalk",id=11000121)[0].status==pb.StatusCode_BAD_REQ
             move(c,2570,-2187)
             before = {k:owned(k,pid) for k in (104,100000007)}
@@ -126,16 +128,31 @@ def run(root, resources):
             hist=call(c,"GachaRecord",gacha_id=2000,page=1)[0]
             assert hist.total_page==1 and [r.item_id for r in hist.records]==[102001]
             assert not call(c,"GachaRecord",gacha_id=2000,page=2)[0].records
+            pre_claim={k:owned(k,pid) for k in (1,101,102)}
+            assert call(c,"Tutorial",tutorial_id=23,tutorial_name="引导任务奖励领取")[0].status==pb.StatusCode_OK
+            assert {k:owned(k,pid) for k in pre_claim}==pre_claim
             claimed,_=call(c,"ClaimQuestReward",quest_id=1000001,quest_type=pb.EQuestType_MainQuest)
             assert claimed.status==pb.StatusCode_OK and claimed.quest.quest_id==100013 and claimed.quest.complete_count==1
             obtained={i.main_item.item_id:i.main_item.base_item.num for i in claimed.items}
             assert obtained[1]==300 and obtained[101]==300 and obtained[102]==50, obtained
             post_claim={k:owned(k,pid) for k in obtained}
+            assert {k:post_claim[k]-pre_claim[k] for k in pre_claim}=={1:300,101:300,102:50}
+            # Actual original guide reports around the buttons on the chapter reward page.
+            reports = [(13,"梓询问招募情况开始"), (14,"梓询问招募情况结束"),
+                       (15,"提交招募申请"), (16,"提交招募申请对话结束"),
+                       (17,"引导招募icon"), (18,"引导招募单抽"), (19,"诗对话开始"), (20,"诗对话结束"),
+                       (21,"点击引导剧情"), (22,"点击引导剧情序章"),
+                       (23,"引导任务奖励领取"), (24,"引导接受任务")]
+            for phase,label in reports:
+                assert call(c,"Tutorial",tutorial_id=phase,tutorial_name=label)[0].status==pb.StatusCode_OK
+            assert call(c,"Tutorial",tutorial_id=23,tutorial_name="unknown")[0].status==pb.StatusCode_BAD_REQ
+            assert call(c,"Tutorial",tutorial_id=25)[0].status==pb.StatusCode_BAD_REQ
             assert call(c,"ClaimQuestReward",quest_id=1000001,quest_type=pb.EQuestType_MainQuest)[0].status==pb.StatusCode_REPEAT_GET_REWARD
             assert {k:owned(k,pid) for k in obtained}==post_claim
         other, _, states = connect(two)
         with other:
             assert not any(k in states for k in (100011,100012,100013))
+            assert call(other,"Tutorial",tutorial_id=23)[0].status==pb.StatusCode_BAD_REQ
             assert call(other,"UpdateTeam",char1=102001)[0].status==pb.StatusCode_CharNotExist
             assert not call(other,"GachaRecord",gacha_id=2000,page=1)[0].records
             assert call(other,"ClaimQuestReward",quest_id=1000001,quest_type=pb.EQuestType_MainQuest)[0].status==pb.StatusCode_BAD_REQ
@@ -144,7 +161,13 @@ def run(root, resources):
         game.start()
         c, _, same = login(game.port,identity.issue_ticket(*one))
         with c:
-            main,_=join(c)
+            main,_=join_after_intro(c)
+            for phase,label in reports:
+                assert call(c,"Tutorial",tutorial_id=phase,tutorial_name=label)[0].status==pb.StatusCode_OK
+            with closing(sqlite3.connect(root/"game.sqlite")) as ledger:
+                recorded = ledger.execute("SELECT k FROM player_kv WHERE player_id=? AND ns='tutorial'",(pid,))
+                assert {str(phase) for phase,_ in reports} <= {key for key, in recorded}
+            assert {k:owned(k,pid) for k in obtained}==post_claim
             assert pid==same and (main.team.char1,main.team.char2,main.team.char3)==(102001,0,0)
             assert {q.quest_id:q.status for q in main.quest_detail.quests if q.quest_id in (100011,100012,100013)}=={100011:3,100012:3,100013:3}
             chapter=next(ch for ch in main.quest_detail.chapters if ch.chapter_id==10000)

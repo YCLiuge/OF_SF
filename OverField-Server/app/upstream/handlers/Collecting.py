@@ -22,6 +22,15 @@ class Handler(PacketHandler):
 
         rsp = CollectingRsp()
         rsp.status = StatusCode.StatusCode_OK
+        from private_map_progress import collectible, collected, rebuild
+        from private_dungeons import _table
+        config = _table("CollectionItem","collection_item").get(req.item_id)
+        locations = collectible(req.item_id)
+        if not config or (locations and (session.dungeon[0] or session.scene_id not in locations)):
+            rsp.status = StatusCode.StatusCode_BAD_REQ
+            session.send(MsgId.CollectingRsp, rsp, packet_id)
+            return
+        rebuild(session.player_id)
         collection = rsp.collections.add()
         item = db.get_collection(session.player_id, req.item_id)
         if item:
@@ -30,16 +39,14 @@ class Handler(PacketHandler):
             return
         collection.item_map[req.item_id].item_id = req.item_id
         collection.item_map[req.item_id].status = RewardStatus.Reward
-        for collection_t in res["CollectionItem"]["collection_item"]["datas"]:
-            if collection_t["i_d"] == req.item_id:
-                collection.type = collection_t["new_collection_type"]
-                break
+        collection.type = config.get("new_collection_type", 0)
         db.set_collection(
             session.player_id,
             req.item_id,
             collection.type,
             collection.item_map[req.item_id].SerializeToString(),
         )
+        collected(session, req.item_id, collection.type)
         rsp1 = PackNotice()
         rsp1.status = StatusCode.StatusCode_OK
         for item_t in res["Item"]["item"]["datas"]:

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from local_game_service import LocalGameService, pb
 from local_identity import LocalIdentity
-from test_game_realm import login, join
+from test_game_realm import login, join_after_intro
 from test_observed_initialization import call
 
 
@@ -24,7 +24,7 @@ def run(root, resources):
         game = LocalGameService(ident,root,resources,port=0)
     def connect(i):
         sock, _, pid = login(game.port,ident.issue_ticket(*users[i]))
-        main, scene = join(sock)
+        main, scene = join_after_intro(sock)
         return sock, pid, main, scene.data
     def balance(pid, template):
         with closing(sqlite3.connect(root/"game.sqlite")) as conn:

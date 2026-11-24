@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from local_game_service import LocalGameService,pb
 from local_identity import LocalIdentity
-from test_game_realm import join,login
+from test_game_realm import join_after_intro,login
 from test_observed_initialization import call
 
 
@@ -21,7 +21,7 @@ def run(root,resources):
         host=LocalGameService(ident,root,resources,port=0)
     def connect(i):
         sock,_,pid=login(host.port,ident.issue_ticket(*users[i]))
-        profile,_=join(sock)
+        profile,_=join_after_intro(sock)
         return sock,pid,profile
     def count(player,template):
         with closing(sqlite3.connect(root/"game.sqlite")) as dbc:

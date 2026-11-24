@@ -363,6 +363,10 @@ class LocalGameService:
             self.entitlements = catalog()
             migrate(db.conn,self.entitlements)
             self.scene_ids={r["ID"] for r in res_loader.res["ScenesConfigAsset"]["Scenes"] if r.get("Born")}
+            self.initial_scene = int(next(row["values"][0] for row in res_loader.res["GlobalConfig"]["config"]["datas"]
+                                          if row["key"] == "Player_Initial_Scenario_ID"))
+            if self.initial_scene not in self.scene_ids:
+                raise ValueError("Initial scene lacks an authored player spawn")
             for f in sorted((UPSTREAM/"handlers").glob("*.py")):
                 if f.stem.startswith('_'):continue
                 handler=importlib.import_module("handlers."+f.stem).Handler()
@@ -402,6 +406,9 @@ class LocalGameService:
                 account=db.conn.execute("SELECT player_name FROM players WHERE player_id=?",(pid,)).fetchone()
                 if account is None:
                     db.init_player(pid)
+                    db.conn.execute("INSERT INTO player_kv(player_id,ns,k,v) VALUES(?,'profile','bottle_intro','active')",(pid,))
+                    db.conn.execute("INSERT OR IGNORE INTO private_locations(player_id,scene,channel) VALUES(?,?,?)",
+                                    (pid,self.initial_scene,self.realm_rules.public_min))
                 from private_entitlements import grant
                 grant(db.conn,pid,self.entitlements)
                 named = db.conn.execute("SELECT p.nickname FROM authority.profiles p WHERE slot=? AND (EXISTS(SELECT 1 FROM authority.realm_accounts a WHERE a.slot=p.slot) OR EXISTS(SELECT 1 FROM authority.realm_named_profiles n WHERE n.slot=p.slot))",(slot,)).fetchone()

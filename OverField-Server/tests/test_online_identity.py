@@ -37,7 +37,7 @@ def attempt(port, uid, token, *, expect=False):
         h,b=receive(c);assert h.msg_id==MsgId.PlayerLoginRsp
         login=pb.PlayerLoginRsp.FromString(b);assert login.status==pb.StatusCode_OK
         main,scene=join(c)
-        assert login.player_name==main.player_name and main.scene_id==scene.data.scene_id==9999
+        assert login.player_name==main.player_name and main.scene_id==scene.data.scene_id==100
         return response.user_id,login.player_name
 
 def tls_contract():

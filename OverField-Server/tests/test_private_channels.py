@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 
 from local_game_service import LocalGameService, MsgId, pb
 from local_identity import LocalIdentity
-from test_game_realm import login, join, next_msg
+from test_game_realm import login, join_after_intro, next_msg
 from test_observed_initialization import call
 
 
@@ -20,7 +20,7 @@ def run(root,resources):
     t=templates[0]
     def connect(n):
         sock,auth,pid=login(game.port,ident.issue_ticket(*profiles[n]))
-        main,scene=join(sock)
+        main,scene=join_after_intro(sock)
         assert main.channel_label==main.channel_id==scene.data.channel_label==scene.data.channel_id
         return sock,pid,scene.data
     def switch(sock,ch,scene=9999,**extra):

@@ -10,7 +10,7 @@ import time
 
 from local_game_service import LocalGameService, pb
 from local_identity import LocalIdentity
-from test_game_realm import join,login
+from test_game_realm import join_after_intro,login
 from test_observed_initialization import call
 
 
@@ -20,7 +20,7 @@ def run(root,resources):
     game=LocalGameService(ident,root,resources,port=0)
     def connect(index):
         sock,_,pid=login(game.port,ident.issue_ticket(*users[index]))
-        join(sock)
+        join_after_intro(sock)
         return sock,pid
     game.start()
     try:

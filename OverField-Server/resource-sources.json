@@ -338,6 +338,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Story.json"
     },
+    "resources/data/StoryMapPoints.json": {
+      "sha256": "030c8dc73dfc5a9d7cd7b9480cbaeb4c05fda4639756b5e5db45c7bd72e8a1a3",
+      "bytes": 34358,
+      "source": "TapTap PC 1.1.12",
+      "detail": "MiniMap.scene_mini_map native prefabs unique TabID/marker type, checked against Scene.scene_progress, CollectionItem and Area; bundle hashes 1=847e903f0dc9bdbb56819925500dfbdc, 2=432d984e85808e37044753cf4fd9c08c, 3=e890ce7966b9b338c9d8e979ddcbf621, 4=1cd3cb7f70bd7647475af06c3abc1183, 5=ca4418d64658f744d9a430c35059ff27, 100=1b645ff2e935ff013a651a9f9b1341c9, 1001=bd51d1fd254601bb71d5e573995aa64d, 1002=879344eb0821b2ec24d3d8ace620bf6f, 1003=6941b6788ef8d70a4a301b70ffcc2974"
+    },
     "resources/data/TeamGameplay.json": {
       "sha256": "35088aa8d83dac128485b57e2d6fdc8dcfb8e728450bead27208df83163b7639",
       "bytes": 5717,

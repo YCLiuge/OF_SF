@@ -13,6 +13,10 @@ JOURNAL=100000021
 def start(session,req,rsp):
     if session.scene_id!=9999 or session.dungeon[0] or req.num!=1:
         return pb.StatusCode_BAD_REQ
+    return grant_starter(session,rsp.items)
+
+
+def grant_starter(session, items):
     player=session.player_id
     params={r["key"]:int(r["values"][0]) for r in res["GlobalConfig"]["config"]["datas"]
             if r.get("key") in ("InitialQuest","InitialReward")}
@@ -33,7 +37,7 @@ def start(session,req,rsp):
             if target>owned:
                 missing[item]=target-owned
         if missing:
-            grant(session,missing,rsp.items)
+            grant(session,missing,items)
     if not claimed:
         db.conn.execute("INSERT INTO claimed_rewards(player_id,system,key) VALUES(?,'story_start','1003')",(player,))
     # The client issues AcceptQuest for this step in the same frame as 1003.

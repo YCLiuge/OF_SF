@@ -39,7 +39,7 @@ def run(root, resources):
 
     def enter(profile):
         client, player, _ = login(server.port, ident.issue_ticket(*profile))
-        assert player.scene_id == 9999
+        assert player.scene_id == 100
         join(client)
         return client
 
