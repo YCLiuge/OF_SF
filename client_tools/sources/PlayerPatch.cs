@@ -22,6 +22,9 @@ namespace OfSfPlayer {
         readonly TableLayoutPanel grid = new TableLayoutPanel { Dock=DockStyle.Fill, ColumnCount=3, RowCount=12, Padding=new Padding(16) };
         readonly List<Data> entries = new List<Data>();
         bool busy;
+        Data signedIn;
+        string signedAddress,signedCA,signedUser;
+        DateTime loginUntil,importUntil;
         static TextBox Box(){return new TextBox { Dock=DockStyle.Fill };}
         static string Get(Data doc,string name){object v;return doc!=null && doc.TryGetValue(name,out v) && v!=null?Convert.ToString(v):"";}
         static Label Label(string label){return new Label {Text=label, Dock=DockStyle.Fill, TextAlign=ContentAlignment.MiddleLeft};}
@@ -60,6 +63,7 @@ namespace OfSfPlayer {
             register.CheckedChanged+=delegate{nickname.Enabled=register.Checked;};
             var buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=false};
             Add(buttons,picker?"应用并重启":"进入游戏",delegate{Run("play");});
+            Add(buttons,"导入角色进度",delegate{Run("import");});
             Add(buttons,"保存地址",delegate{Run("save");});Add(buttons,"测试连接",delegate{Run("test");});
             Add(buttons,"清除补丁数据",delegate{Run("uninstall");});Span(buttons,9);
             Span(Label("填写服主提供的 https://域名:端口。工作位置可留空，若跨盘请选择与原游戏同卷的文件夹。"),10);Span(output,11);
@@ -139,19 +143,41 @@ namespace OfSfPlayer {
                     if(Get(doc,"ok")!="True")throw new IOException(Error(doc));
                     Line("TLS 证书和区服账号接口验证通过。");return;
                 }
-                if(account.Text=="" || password.Text=="")throw new IOException("请填写本区服单独使用的账号和密码。");
-                Line("正在检查本机游戏文件。首次准备可能需要几分钟。");
-                await Execute("player_patch.py","prepare",conf,false);
-                Line("正在登录所选区服。");
-                var form=new Data{{"action",register.Checked?"register":"login"},{"server",conf},{"username",account.Text},{"password",password.Text},{"nickname",nickname.Text}};
-                string session;
-                try{session=await Execute("private_account_api.py","",form,true);}
-                finally{form.Clear();password.Clear();}
-                var receipt=new JavaScriptSerializer().Deserialize<Data>(session);
-                if(Get(receipt,"ok")!="True")throw new IOException(Error(receipt));
-                register.Checked=false;
-                conf["account"]=new Data{{"slot",Get(receipt,"slot")},{"ticket",Get(receipt,"ticket")}};
-                receipt.Clear();
+                bool importing=action=="import";
+                bool same=signedIn!=null && signedUser==account.Text && signedAddress==servers.Text.Trim() && signedCA==cert.Text.Trim();
+                bool valid=same && DateTime.UtcNow<(importing?importUntil:loginUntil) && password.Text=="" && !register.Checked;
+                if(!valid && (account.Text=="" || password.Text==""))throw new IOException("请填写本区服单独使用的账号和密码。");
+                if(!importing){
+                    Line("正在检查本机游戏文件。首次准备可能需要几分钟。");
+                    await Execute("player_patch.py","prepare",conf,false);
+                }
+                if(!valid){
+                    if(signedIn!=null)signedIn.Clear();signedIn=null;
+                    Line("正在登录所选区服。");
+                    var form=new Data{{"action",register.Checked?"register":"login"},{"server",conf},{"username",account.Text},{"password",password.Text},{"nickname",nickname.Text}};
+                    string session;
+                    try{session=await Execute("private_account_api.py","",form,true);}
+                    finally{form.Clear();password.Clear();}
+                    var receipt=new JavaScriptSerializer().Deserialize<Data>(session);
+                    if(Get(receipt,"ok")!="True")throw new IOException(Error(receipt));
+                    signedIn=receipt;signedUser=account.Text;signedAddress=servers.Text.Trim();signedCA=cert.Text.Trim();
+                    int ttl;Int32.TryParse(Get(receipt,"expires_in"),out ttl);loginUntil=DateTime.UtcNow.AddSeconds(Math.Max(0,Math.Min(ttl,86400)));
+                    Int32.TryParse(Get(receipt,"import_expires_in"),out ttl);importUntil=DateTime.UtcNow.AddSeconds(Math.Max(0,Math.Min(ttl,900)));
+                    register.Checked=false;
+                }
+                if(importing){
+                    var token=Get(signedIn,"import_ticket");
+                    if(token=="")throw new IOException("所选区服尚未提供角色进度导入。");
+                    using(var dialog=new OfSfImport.ImportWindow(signedAddress,Get(signedIn,"nickname"),token,
+                        async (operation,values)=>{
+                            var message=new Data(values){{"action",operation},{"server",conf}};
+                            string response=await Execute("private_account_api.py","",message,true);
+                            return new JavaScriptSerializer().Deserialize<Data>(response);
+                        }))dialog.ShowDialog(this);
+                    return;
+                }
+                conf["account"]=new Data{{"slot",Get(signedIn,"slot")},{"ticket",Get(signedIn,"ticket")}};
+                signedIn.Clear();signedIn=null;
                 await Execute("player_patch.py",picker?"relaunch":"launch",conf,false);
                 busy=false;Close();
             }catch(Exception error){Line(error.Message);}
@@ -170,7 +196,7 @@ namespace OfSfPlayer {
             using(var page=new PlayerWindow(Array.IndexOf(args,"--realm-picker")>=0)){
                 if(Array.IndexOf(args,"--check-ui")>=0){
                     var windowHandle=page.Handle;
-                    Environment.ExitCode=page.ValidControls()?0:2;
+                    Environment.ExitCode=(page.ValidControls() && OfSfImport.ImportWindow.CheckLayout())?0:2;
                     return;
                 }
                 Application.Run(page);

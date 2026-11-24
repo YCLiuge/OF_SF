@@ -4,6 +4,7 @@ import contextlib
 import http.client
 import hashlib
 import tempfile
+import zipfile
 import ipaddress
 import json
 import os
@@ -26,6 +27,56 @@ PRIVATE_REALM="overfield-local-v1"
 OPERATIONS={"register":"/local/v1/accounts/register","login":"/local/v1/accounts/login",
             "bind":"/local/v1/accounts/bind","maintenance":"/private/maintenance",
             "gifts":"/private/gifts","claim-gift":"/local/v1/accounts/claim-gift"}
+
+
+IMPORT_OPS = ("import-preview","import-apply","import-undo")
+OPERATIONS.update({key:"/local/v1/accounts/"+key for key in IMPORT_OPS})
+IMPORT_TICKET = re.compile(r"ofi_[A-Za-z0-9_-]{43}",re.ASCII)
+PREVIEW_ID = re.compile(r"ofv_[a-f0-9]{32}",re.ASCII)
+
+
+def import_receipt(doc):
+    ticket, ttl = doc.get("import_ticket"), doc.get("import_expires_in")
+    if not isinstance(ticket,str) or not IMPORT_TICKET.fullmatch(ticket) or type(ttl) is not int or not 0<ttl<=900:
+        raise ValueError("私服导入会话格式无效。")
+    return {"import_ticket":ticket,"import_expires_in":ttl}
+
+
+def import_backup(action, inp, config):
+    ticket=inp.get("import_ticket")
+    if not isinstance(ticket,str) or not IMPORT_TICKET.fullmatch(ticket):
+        return {"ok":False,"code":"import_login_required"}
+    form={"import_ticket":ticket}
+    if action=="import-preview":
+        from save_import_data import BackupFormatError,project_file
+        try:
+            form["data"]=project_file(Path(inp["path"]))
+        except BackupFormatError as err:
+            return {"ok":False,"code":"invalid_backup","message":str(err)}
+        except (OSError,KeyError,ValueError,TypeError,RuntimeError,zipfile.BadZipFile):
+            return {"ok":False,"code":"invalid_backup","message":"无法读取全进度备份。请选择结果 ZIP、snapshot.json 或结果目录。"}
+    elif action=="import-apply":
+        preview=inp.get("preview_id")
+        if not isinstance(preview,str) or not PREVIEW_ID.fullmatch(preview):
+            return {"ok":False,"code":"invalid_preview"}
+        form["preview_id"]=preview
+    if len(json.dumps(form,ensure_ascii=False,separators=(",",":")).encode("utf8"))>2*1024*1024:
+        return {"ok":False,"code":"backup_too_large","message":"备份中的可导入数据超过区服单次上限。"}
+    status,doc=request(config,"POST",OPERATIONS[action],form,max_bytes=32768)
+    if status!=200 or doc.get("ok") is not True:
+        return refusal(status,doc)
+    counts=doc.get("counts")
+    if (not isinstance(counts,dict) or len(counts)>100 or
+        any(not isinstance(k,str) or not 1<=len(k)<=72 or type(v) is not int or not 0<=v<=2**31 for k,v in counts.items())):
+        raise ValueError("私服导入统计格式无效。")
+    result={"ok":True,"counts":counts}
+    if action=="import-preview":
+        eligible, preview, warnings=doc.get("eligible"),doc.get("preview_id"),doc.get("warnings",[])
+        if (type(eligible) is not bool or eligible and (not isinstance(preview,str) or not PREVIEW_ID.fullmatch(preview)) or
+            not isinstance(warnings,list) or len(warnings)>48 or any(not isinstance(w,str) or len(w)>400 for w in warnings)):
+            raise ValueError("私服导入预览格式无效。")
+        result.update(eligible=eligible,preview_id=preview if eligible else "",warnings=warnings)
+    return result
 
 
 def gift_token(value):
@@ -169,6 +220,8 @@ def handle(inp):
         status,server=request(config,"GET","/local/v1/region")
     if status!=200 or server.get("realm")!=PRIVATE_REALM:
         raise ValueError("所选地址未提供兼容的私服账号服务。")
+    if action in IMPORT_OPS:
+        return import_backup(action,inp,config)
     if action=="gifts":
         code,doc=request(config,"GET",OPERATIONS[action],max_bytes=524288)
         if code!=200:return refusal(code,doc)
@@ -216,7 +269,8 @@ def handle(inp):
     # Only the launching WinForms process gets this receipt over anonymous pipes.
     # The private server, not the channel SDK, may attach it to the exact game PID.
     return {"ok":True,"nickname":doc["nickname"],"slot":doc["slot"],"ticket":doc["ticket"],
-            "expires_in":doc.get("expires_in",0),**(gift_receipt(doc) if "gift_ticket" in doc else {})}
+            "expires_in":doc.get("expires_in",0),**(gift_receipt(doc) if "gift_ticket" in doc else {}),
+            **(import_receipt(doc) if "import_ticket" in doc else {})}
 
 
 if __name__=="__main__":

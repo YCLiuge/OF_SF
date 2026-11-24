@@ -19,7 +19,9 @@ from proto import net_pb2 as pb
 
 
 GET = {"/local/v1/region", "/private/plaza", "/private/gifts", "/private/maintenance"}
-POST = {"/local/v1/accounts/"+action for action in ("register", "login", "bind", "launch", "claim-gift")}
+IMPORT_PREVIEW = "/local/v1/accounts/import-preview"
+POST = {"/local/v1/accounts/"+action for action in ("register", "login", "bind", "launch", "claim-gift",
+                                                   "import-preview", "import-apply", "import-undo")}
 ATTACHMENT = re.compile(r"/private/(?:releases|notice-images)/[0-9a-f]{64}\Z")
 
 
@@ -31,6 +33,7 @@ class Gate:
         self.limit = limit
         self.connected = 0
         self.attempts = {}
+        self.preview_uploads = 0
 
     def admit_account(self, address):
         now = monotonic()
@@ -68,14 +71,27 @@ class Gate:
         if headers.keys() & {"transfer-encoding", "upgrade", "expect", "authorization", "proxy-authorization", "cookie"}:
             raise ValueError()
         length = headers.get("content-length", "0")
-        if not re.fullmatch(r"[0-9]{1,4}", length) or int(length) > 2048:
+        preview = method == "POST" and path == IMPORT_PREVIEW
+        maximum = 2 * 1024 * 1024 if preview else 2048
+        if not re.fullmatch(r"[0-9]{1,7}", length) or int(length) > maximum:
             return await reject(writer, 413)
         if method in ("GET","HEAD") and int(length) or method == "POST" and (
                 not int(length) or headers.get("content-type", "").partition(";")[0].lower() != "application/json"):
             raise ValueError()
         if method == "POST" and not self.admit_account(address):
             return await reject(writer, 429)
-        body = await asyncio.wait_for(reader.readexactly(int(length)), 8)
+        if preview and self.preview_uploads >= 4:
+            return await reject(writer, 429)
+        if preview:
+            self.preview_uploads += 1
+        try:
+            body = await asyncio.wait_for(reader.readexactly(int(length)), 30 if preview else 8)
+            await self.forward_account(writer,address,method,path,body)
+        finally:
+            if preview:
+                self.preview_uploads -= 1
+
+    async def forward_account(self, writer, address, method, path, body):
         backend, upstream = await loopback(self.http_port)
         try:
             head = (f"{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{self.http_port}\r\n"
@@ -84,7 +100,8 @@ class Gate:
                 attestation = player_gateway_peer.sign(self.peer_key, address, path, body)
                 head += f"{player_gateway_peer.HEADER}: {attestation}\r\n"
                 head += f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n"
-            upstream.write((head+"\r\n").encode("ascii")+body)
+            upstream.write((head+"\r\n").encode("ascii"))
+            upstream.write(body)
             await upstream.drain()
             await transfer(backend, writer, 45)
         finally:

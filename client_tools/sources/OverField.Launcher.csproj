@@ -19,6 +19,6 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="PrivateLauncher.cs;PrivateService.cs;GiftWindow.cs;LauncherJson.cs" />
+    <Compile Include="PrivateLauncher.cs;PrivateService.cs;GiftWindow.cs;LauncherJson.cs;ImportWindow.cs" />
   </ItemGroup>
 </Project>

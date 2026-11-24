@@ -15,10 +15,13 @@ from local_identity import SLOT, PROFILE_KEY, _digest, _name
 from profile_issuance import authorizes_game_key
 
 PREFIX = "/local/v1/accounts/"
-ROUTES = {PREFIX+k for k in ("register","login","bind","launch","claim-gift")}
+ROUTES = {PREFIX+k for k in ("register","login","bind","launch","claim-gift","import-preview","import-apply","import-undo")}
 USER = re.compile(r"[A-Za-z0-9_.-]{3,40}\Z", re.ASCII)
 N, R, P = 32768, 8, 1
 SALT_SIZE = 16
+
+
+IMPORT_ROUTES = {PREFIX+k for k in ("import-preview","import-apply","import-undo")}
 
 
 class AccountError(ValueError):
@@ -158,6 +161,8 @@ class AccountService:
     def __init__(self,identity):
         from private_gift_service import GiftService
         self.gifts=GiftService()
+        from save_import_service import ImportService
+        self.imports=ImportService()
         initialize(identity)
         self.identity=identity
         from player_gateway_peer import prepare
@@ -197,9 +202,13 @@ class AccountService:
                 return reserve_native(self.identity,body)
             if path==PREFIX+"claim-gift":
                 return self.gifts.claim(body)
+            if path in IMPORT_ROUTES:
+                return self.imports.request(path.removeprefix(PREFIX),body)
             result=login(self.identity,body) if path==PREFIX+"login" else register(self.identity,body,path==PREFIX+"bind")
             if self.gifts.game is not None:
                 result.update(self.gifts.issue(result["slot"]))
+            if self.imports.game is not None:
+                result.update(self.imports.issue(result["slot"]))
             return result
         finally:
             self.workers.release()

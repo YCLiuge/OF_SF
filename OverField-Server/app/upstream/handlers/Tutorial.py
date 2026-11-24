@@ -23,10 +23,10 @@ STAR_EVENTS = {100 + index: f"收集星星{number}" for index, number in enumera
 STAR_EVENTS.update({126: "击败boss后_星星1", 144: "击败boss后_星星19", 145: "击败boss后_星星20"})
 
 
-def record_star(session, phase, label):
-    if label != STAR_EVENTS[phase]:
-        return pb.StatusCode_BAD_REQ
-    # These client observations do not issue items or trigger any quest.
+def record_star(session, phase):
+    # SceneGuide hides the collected object locally. Only its numeric telemetry ID is
+    # durable; the display label is optional in the protocol and identifies no asset.
+    # Multiple staircase stars share ID 125 and may report it again after reconnect.
     db.conn.execute("INSERT OR IGNORE INTO player_kv(player_id,ns,k,v) VALUES(?,'tutorial_stars',?,1)",
                     (session.player_id, str(phase)))
     return pb.StatusCode_OK
@@ -35,7 +35,7 @@ def record_star(session, phase, label):
 def record(session, req):
     phase = req.tutorial_id
     if phase in STAR_EVENTS:
-        return record_star(session, phase, req.tutorial_name)
+        return record_star(session, phase)
     if phase not in EVENTS or (req.tutorial_name and req.tutorial_name != EVENTS[phase]):
         return pb.StatusCode_BAD_REQ
     pid = session.player_id

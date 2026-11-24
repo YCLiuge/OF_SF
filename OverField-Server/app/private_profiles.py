@@ -130,11 +130,11 @@ class ProfileHandler(BaseHTTPRequestHandler):
             self._reply(403, {"error": "new profile registration is closed"})
             return
         lengths = self.headers.get_all("Content-Length") or []
-        if self.headers.get("Transfer-Encoding") is not None or len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,5}", lengths[0]):
+        if self.headers.get("Transfer-Encoding") is not None or len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,7}", lengths[0]):
             self._reply(400, {"error": "expected fixed-length JSON body"})
             return
         length = int(lengths[0])
-        if length > 2048:
+        if length > (2*1024*1024 if self.path == "/local/v1/accounts/import-preview" else 2048):
             self._reply(413, {"error": "body too large"})
             return
         if self.headers.get_content_type() != "application/json":
@@ -167,7 +167,7 @@ class ProfileHandler(BaseHTTPRequestHandler):
                 result = self.server.accounts.request(self.path,body,self.client_address[0],self.server.server_address[0],
                                                       self.server.tls_context is not None,self.server.account_registration,
                                                       gateway_source=source)
-                self._reply(200 if self.path.endswith(("/login","/launch","/claim-gift")) else 201,result)
+                self._reply(200 if self.path.endswith(("/login","/launch","/claim-gift","/import-preview","/import-apply","/import-undo")) else 201,result)
                 return
             if self.path == "/local/v1/profiles":
                 if set(body) - {"nickname"} or ("nickname" in body and not isinstance(body["nickname"], str)):

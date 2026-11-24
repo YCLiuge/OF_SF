@@ -98,6 +98,7 @@ def serve(state):
             default_origin = f"{scheme}://{cfg['game_host']}:{cfg['http_port']}"
             http.stages = game.stages
             http.accounts.gifts.game = game
+            http.accounts.imports.game = game
             http.native_accounts = game.native_accounts
             http.game_dispatch = GameDispatch(os.getenv("OF_DISPATCH_URL") or default_origin,
                                                cfg["game_host"], cfg["game_port"],
@@ -188,6 +189,7 @@ def self_test():
                    "test_native_first_quest.py", "test_story_entry.py", "test_bottle_intro.py",
                    "test_native_mail.py", "test_native_manual.py", "test_native_recovery.py",
                    "test_native_story_objectives.py", "test_native_collection_queries.py", "test_native_character_skills.py", "test_native_closed_minigames.py",
+                   "test_native_save_import.py",
                    "test_native_archive_editions.py", "test_native_blessing_calendar.py",
                    "test_native_local_gm.py", "test_native_player_gateway.py",
                    "test_native_season_reopening.py", "test_native_treasure_dig.py",

@@ -29,7 +29,8 @@ def build(repo, output, *, compiler=None):
         exe=temp/TITLE
         subprocess.run([str(compiler),"/nologo","/utf8output","/target:winexe","/platform:x64","/optimize+",
                         "/out:"+str(exe),"/r:System.Windows.Forms.dll","/r:System.Drawing.dll",
-                        "/r:System.Web.Extensions.dll",str(repo/"client_tools/sources/PlayerPatch.cs")],check=True)
+                        "/r:System.Web.Extensions.dll",str(repo/"client_tools/sources/PlayerPatch.cs"),
+                        str(repo/"client_tools/sources/ImportWindow.cs")],check=True)
         entries={TITLE:(exe,None),"玩家说明.md":(repo/"client_tools/PLAYER_PATCH.md",None)}
         entries.update({"client_tools/"+n:(repo/"client_tools"/n,None) for n in CLIENT})
         entries[TEMPLATE]=(repo/TEMPLATE,TEMPLATE_SHA256)

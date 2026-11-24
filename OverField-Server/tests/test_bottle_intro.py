@@ -55,12 +55,18 @@ def run(root, resources):
                 assert call(sock,"AcceptQuest",75,quest_type=pb.EQuestType_MainQuest,quest_id=1000001).status == pb.StatusCode_BAD_REQ
                 assert phase(sock,1,"操作指引") == pb.StatusCode_OK
                 assert phase(sock,1,"wrong") == pb.StatusCode_BAD_REQ
+                # Minimal protobuf for TutorialReq 1589: field 1 = 100, no optional label.
+                sock.sendall(encode(MsgId.TutorialReq, b"\x08\x64", 140))
+                assert next_msg(sock,MsgId.TutorialRsp,pb.TutorialRsp).status == pb.StatusCode_OK
                 stars = [1,2,3,4,9,10,12,13,18,19,20,21,23,24,25,26,27,28,29,30,31,32,33,38,39,45]
                 for i, n in enumerate(stars, start=100):
                     assert phase(sock,i,f"收集星星{n}") == pb.StatusCode_OK
                 for i,n in ((126,1),(144,19),(145,20)):
                     assert phase(sock,i,f"击败boss后_星星{n}") == pb.StatusCode_OK
-                assert phase(sock,100,"收集星星2") == pb.StatusCode_BAD_REQ
+                # The requested numeric point remains authoritative when the text differs.
+                assert phase(sock,100,"收集星星2") == pb.StatusCode_OK
+                for _ in range(17):
+                    assert phase(sock,125,"收集星星45") == pb.StatusCode_OK
                 assert phase(sock,127,"击败boss后_星星2") == pb.StatusCode_BAD_REQ
                 assert not db_value(pid,100000021)
                 assert call(sock,"AreaUnlock",18,area_id=1001).status == pb.StatusCode_BAD_REQ
@@ -138,13 +144,17 @@ def run(root, resources):
                     if role == pid:
                         assert phase(sock,9)==pb.StatusCode_OK and db_value(pid,100000021)==1
                         assert phase(sock,145,"击败boss后_星星20") == pb.StatusCode_OK
+                        assert phase(sock,125) == pb.StatusCode_OK
+                        with closing(sqlite3.connect(root / "game.sqlite")) as db:
+                            records = db.execute("SELECT k,v FROM player_kv WHERE player_id=? AND ns='tutorial_stars'",(pid,)).fetchall()
+                            assert len(records) == 29 and all(int(value)==1 for _,value in records)
                     else:
                         # Imported aggregate-only receipt must not authorize another starter award.
                         assert phase(sock,9)==pb.StatusCode_OK and not db_value(peer_id,100000021)
                         assert phase(sock,4,"收集水晶1") == pb.StatusCode_BAD_REQ
     finally:
         game.stop()
-    print("PASS native onboarding name/scene 100, authored spawn, door, two crystals/chests, progress/relogin, windmill 9, transfer 9999, single reward/quest and unchanged old roles.")
+    print("PASS native scene 100, 29 star IDs, optional text, duplicate staircase reports/relogin, crystals/chests, windmill, plaza transfer, single reward/quest and unchanged old roles.")
 
 
 if __name__ == "__main__":

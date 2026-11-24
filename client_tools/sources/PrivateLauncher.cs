@@ -94,7 +94,7 @@ namespace OverField.PrivateLauncher {
             };
             SetupButton(play,picker?"应用并重启":"进入游戏",true);
             SetupButton(save,"保存地址",false);
-            SetupButton(accounts,"私服账号",false);SetupButton(bulletins,"区服公告",false);
+            SetupButton(accounts,"账号与存档",false);SetupButton(bulletins,"区服公告",false);
             actions.Controls.Add(play);actions.Controls.Add(save);actions.Controls.Add(accounts);actions.Controls.Add(bulletins);
             SetupButton(gifts,"私服礼包",false);actions.Controls.Add(gifts);
             gifts.Click+=delegate {
@@ -137,7 +137,7 @@ namespace OverField.PrivateLauncher {
             ReadSettings(settings || picker);
             ReloadBook(true);
             if (mode.SelectedIndex==1 || picker)automatic=false;
-            if(picker)status.Text="保存地址可供以后使用。应用并重启将返回原版游戏选服。";
+            if(picker)status.Text="保存地址可供以后使用。应用并重启将使用所选区服进入游戏。";
             servers.SelectedIndexChanged+=delegate {
                 if(refreshing || busy)return;
                 var selected=servers.SelectedItem as Choice;
@@ -329,18 +329,32 @@ namespace OverField.PrivateLauncher {
         private string SelectedKey(){return new LauncherJson().Serialize(SelectedService());}
         private void ForgetAccount(){
             if(privateSession!=null)privateSession.Clear();
-            privateSession=null;sessionServer=null;accounts.Text="私服账号";
+            privateSession=null;sessionServer=null;accounts.Text="账号与存档";
         }
         private void OpenAccount(){
-            if(privateSession!=null || accountPreferred){
-                var choices=new ContextMenuStrip();
-                choices.Items.Add(privateSession==null?"登录私服账号":"切换私服账号",null,delegate{LoginAccount();});
+            var choices=new ContextMenuStrip();
+            choices.Items.Add(privateSession==null?"登录或注册私服账号":"切换私服账号",null,delegate{LoginAccount();});
+            choices.Items.Add("导入角色进度…",null,delegate{OpenImport();});
+            if(privateSession!=null || accountPreferred)
                 choices.Items.Add("改用原有角色",null,delegate{
                     ForgetAccount();accountPreferred=false;status.Text="已选择原有角色。点击「进入游戏」应用。";
                 });
-                choices.Show(accounts,0,accounts.Height);return;
+            choices.Closed+=delegate{choices.Dispose();};
+            choices.Show(accounts,0,accounts.Height);
+        }
+        private void OpenImport(){
+            var target=SelectedService();
+            if(privateSession==null || sessionServer!=SelectedKey() || !ImportCurrent()){
+                ForgetAccount();LoginAccount();if(privateSession==null)return;
             }
-            LoginAccount();
+            var token=PrivateService.Text(privateSession,"import_ticket");
+            if(String.IsNullOrEmpty(token)){status.Text="所选区服尚未提供角色进度导入。";return;}
+            using(var form=new OfSfImport.ImportWindow(PrivateService.ServerName(target),PrivateService.Text(privateSession,"nickname"),
+                token,(operation,values)=>PrivateService.Request(home,target,operation,values)))form.ShowDialog(this);
+        }
+        private bool ImportCurrent(){
+            long end;
+            return Int64.TryParse(PrivateService.Text(privateSession,"import_until_ticks"),out end) && DateTime.UtcNow.Ticks<end;
         }
         private void LoginAccount(IWin32Window owner=null){
             using(var form=new PrivateAccountWindow(home,SelectedService(),profile.Text)){
@@ -348,9 +362,11 @@ namespace OverField.PrivateLauncher {
                 ForgetAccount();privateSession=form.Session;accountPreferred=true;sessionServer=SelectedKey();
                 if(Int32.TryParse(PrivateService.Text(privateSession,"gift_expires_in"),out int giftTime))
                     privateSession["gift_until_ticks"]=DateTime.UtcNow.AddSeconds(Math.Clamp(giftTime,0,3600)).Ticks;
+                if(Int32.TryParse(PrivateService.Text(privateSession,"import_expires_in"),out int importTime))
+                    privateSession["import_until_ticks"]=DateTime.UtcNow.AddSeconds(Math.Clamp(importTime,0,900)).Ticks;
                 int seconds;Int32.TryParse(PrivateService.Text(privateSession,"expires_in"),out seconds);
                 sessionUntil=DateTime.UtcNow.AddSeconds(Math.Max(0,Math.Min(86400,seconds)));
-                var display=PrivateService.Text(privateSession,"nickname");accounts.Text="私服账号 ✓";if(String.IsNullOrEmpty(display))display="首次进入时起名";
+                var display=PrivateService.Text(privateSession,"nickname");accounts.Text="账号与存档 ✓";if(String.IsNullOrEmpty(display))display="首次进入时起名";
                 status.Text=mode.SelectedIndex!=1?"已登录私服角色「"+display+"」。进入游戏时仍需本机渠道验证。"
                     :"已登录所选私服角色「"+display+"」。切换到本机自动或 SSH 区服模式可进入原版游戏。";
             }
@@ -385,7 +401,7 @@ namespace OverField.PrivateLauncher {
                     !String.Equals(Path.GetExtension(document),".json",StringComparison.OrdinalIgnoreCase)))
                     throw new ArgumentException("请选择此远端私服导出的 JSON 个人档案。");
                 if(!privatePlay && document.Length==0 && (verb=="launch" || verb=="relaunch"))
-                    throw new ArgumentException("请先点「私服账号」登录该远端区服，或选择服主导出的个人档案。");
+                    throw new ArgumentException("请先点「账号与存档」登录该远端区服，或选择服主导出的个人档案。");
                 args.Add("--remote-ssh");args.Add(target);
                 if(!privatePlay && document.Length!=0){args.Add("--remote-profile");args.Add(Path.GetFullPath(document));}
                 if(port.Length!=0) {
@@ -422,7 +438,7 @@ namespace OverField.PrivateLauncher {
                     throw new ArgumentException("请输入本机回环网关根地址，例如 http://127.0.0.1:18881。");
                 if(launch && accountPreferred && privateSession==null){
                     LoginAccount();
-                    if(privateSession==null){status.Text="请登录私服账号，或在「私服账号」菜单选择「改用原有角色」。";return;}
+                    if(privateSession==null){status.Text="请登录私服账号，或在「账号与存档」菜单选择「改用原有角色」。";return;}
                 }
                 bool privatePlay=launch && privateSession!=null;
                 if(privatePlay && (sessionServer!=SelectedKey() || DateTime.UtcNow>=sessionUntil)){
@@ -488,6 +504,13 @@ namespace OverField.PrivateLauncher {
             bool settings=Array.Exists(args,a=>String.Equals(a,"--settings",StringComparison.OrdinalIgnoreCase));
             string home=Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
             bool picker=Array.Exists(args,a=>String.Equals(a,"--realm-picker",StringComparison.OrdinalIgnoreCase));
+            if(Array.IndexOf(args,"--check-ui")>=0){
+                using(var window=new LaunchWindow(home,true,picker)){
+                    var handle=window.Handle;
+                    Environment.ExitCode=(window.IsHandleCreated && OfSfImport.ImportWindow.CheckLayout())?0:2;
+                }
+                return;
+            }
             Application.Run(new LaunchWindow(home,settings,picker));
         }
     }

@@ -47,6 +47,9 @@ def inside(root, temp):
     from network.msg_id import MsgId
     from proto import net_pb2 as pb
     from remote_password import RemotePassword
+    sys.path.insert(0,str(Path(__file__).resolve().parent))
+    from test_player_save_import import privacy,over_tls
+    archive=privacy(accounts,temp/"backup-fixture")
 
     if os.name=="nt":
         assert subprocess.run([str(root/patch.EXE),"--check-ui"],check=False,timeout=12).returncode==0
@@ -144,6 +147,7 @@ def inside(root, temp):
             from test_player_remote_features import run as features
             signed=private("login",**who)
             features(remote,remote.reserve(signed["slot"],signed["ticket"]),state,config,accounts)
+            over_tls(accounts,private,config,archive,who,state)
             assert accounts.request(config,"GET","/private/maintenance")[0]==200
         finally:
             gate.terminate();gate.wait(10)
@@ -151,7 +155,7 @@ def inside(root, temp):
         if backend.poll() is None:
             subprocess.run(command+["stop"],**quiet,check=True)
             backend.wait(12)
-    print("PASS packaged WinForms launcher and in-game picker, cross-folder staging, guarded uninstall and retained original, TLS trust/hostname, registration/login/one-use ticket, gifts/plaza, UID 1000001, GM chat/announcement, nickname, photo upload/search and stripped image metadata over the game TLS channel.")
+    print("PASS packaged WinForms launcher and in-game picker, cross-folder staging, guarded uninstall and retained original, TLS trust/hostname, registration/login/one-use ticket, gifts/plaza, UID 1000001, GM chat/announcement, nickname, photo upload/search and stripped image metadata, player-owned import preview/apply/undo over TLS.")
 
 
 def verify(archive):

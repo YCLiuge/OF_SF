@@ -141,6 +141,14 @@ class _TCP(socketserver.ThreadingTCPServer):
         super().service_actions()
         # The accept loop also ticks while every player is idle.
         now = time.monotonic()
+        if now>=self.owner.next_import_cleanup:
+            self.owner.next_import_cleanup=now+60
+            from save_import_service import cleanup_expired
+            with self.owner.lock:
+                try:
+                    with db.conn:cleanup_expired(db.conn)
+                except sqlite3.Error:
+                    _log.exception("Could not prune expired import tickets and previews")
         if self.owner.gomoku.due():
             with self.owner.lock:
                 try:
@@ -454,6 +462,10 @@ class LocalGameService:
                 realm_uids.initialize(db.conn,self.realm_rules.uid_start)
                 from realm_gm import setup as setup_gm
                 setup_gm(db.conn)
+                from save_import_service import schema as import_schema,cleanup_expired
+                import_schema(db.conn)
+                cleanup_expired(db.conn)
+                self.next_import_cleanup=time.monotonic()+60
             from private_channels import setup as setup_channels
             setup_channels(self.realm_rules)
             self.pending_reclaims.clear()  # Startup has reclaimed all offline public placements.
@@ -489,6 +501,41 @@ class LocalGameService:
             _runtime_owner.release()
             raise
 
+    def _prepare_role(self,slot,name,row):
+        """Prepare the same native role for a first login or a new-account import."""
+        if row:
+            pid=row[0]
+        else:
+            # Do not assign pre-existing, unrelated players from a database imported without its realm mapping.
+            pid=realm_uids.next_uid(db.conn)
+            if pid>=0xffffffff:raise ValueError("No free gameplay player ID")
+            db.conn.execute("INSERT INTO private_slots(player_id,slot) VALUES (?,?)",(pid,slot))
+        account=db.conn.execute("SELECT player_name FROM players WHERE player_id=?",(pid,)).fetchone()
+        if account is None:
+            db.init_player(pid)
+            db.conn.execute("INSERT INTO player_kv(player_id,ns,k,v) VALUES(?,'profile','bottle_intro','active')",(pid,))
+            db.conn.execute("INSERT OR IGNORE INTO private_locations(player_id,scene,channel) VALUES(?,?,?)",
+                            (pid,self.initial_scene,self.realm_rules.public_min))
+        from private_entitlements import grant
+        grant(db.conn,pid,self.entitlements)
+        named = db.conn.execute("SELECT p.nickname FROM authority.profiles p WHERE slot=? AND (EXISTS(SELECT 1 FROM authority.realm_accounts a WHERE a.slot=p.slot) OR EXISTS(SELECT 1 FROM authority.realm_named_profiles n WHERE n.slot=p.slot))",(slot,)).fetchone()
+        if named:
+            proposed = named[0]
+            db.conn.execute("UPDATE players SET player_name=? WHERE player_id=?",(proposed,pid))
+        elif account is None or not (account[0] or '').strip():
+            proposed=name.strip()
+            suffix=0
+            while db.conn.execute("SELECT 1 FROM players WHERE player_id!=? AND player_name=?",(pid,proposed)).fetchone():
+                suffix+=1
+                ending="-"+str(pid)+(("-"+str(suffix)) if suffix>1 else "")
+                proposed=name.strip()[:16-len(ending)]+ending
+            db.conn.execute("UPDATE players SET player_name=? WHERE player_id=?",(proposed,pid))
+        else:
+            proposed=account[0]
+        from private_explore import grant_private_permits
+        grant_private_permits(pid)
+        return pid,proposed
+
     def _open(self,sock,slot,name):
         if not isinstance(name,str) or not name.strip():
             raise ValueError("Private profile name must be provided")
@@ -505,37 +552,9 @@ class LocalGameService:
                 self._flush_poses(row[0])
                 self._reclaim_departed(row[0])
             with db.conn:
-                if row:
-                    pid=row[0]
-                else:
-                    # Do not assign pre-existing, unrelated players from a database imported without its realm mapping.
-                    pid=realm_uids.next_uid(db.conn)
-                    if pid>=0xffffffff:raise ValueError("No free gameplay player ID")
-                    db.conn.execute("INSERT INTO private_slots(player_id,slot) VALUES (?,?)",(pid,slot))
-                account=db.conn.execute("SELECT player_name FROM players WHERE player_id=?",(pid,)).fetchone()
-                if account is None:
-                    db.init_player(pid)
-                    db.conn.execute("INSERT INTO player_kv(player_id,ns,k,v) VALUES(?,'profile','bottle_intro','active')",(pid,))
-                    db.conn.execute("INSERT OR IGNORE INTO private_locations(player_id,scene,channel) VALUES(?,?,?)",
-                                    (pid,self.initial_scene,self.realm_rules.public_min))
-                from private_entitlements import grant
-                grant(db.conn,pid,self.entitlements)
-                named = db.conn.execute("SELECT p.nickname FROM authority.profiles p WHERE slot=? AND (EXISTS(SELECT 1 FROM authority.realm_accounts a WHERE a.slot=p.slot) OR EXISTS(SELECT 1 FROM authority.realm_named_profiles n WHERE n.slot=p.slot))",(slot,)).fetchone()
-                if named:
-                    proposed = named[0]
-                    db.conn.execute("UPDATE players SET player_name=? WHERE player_id=?",(proposed,pid))
-                elif account is None or not (account[0] or '').strip():
-                    proposed=name.strip()
-                    suffix=0
-                    while db.conn.execute("SELECT 1 FROM players WHERE player_id!=? AND player_name=?",(pid,proposed)).fetchone():
-                        suffix+=1
-                        ending="-"+str(pid)+(("-"+str(suffix)) if suffix>1 else "")
-                        proposed=name.strip()[:16-len(ending)]+ending
-                    db.conn.execute("UPDATE players SET player_name=? WHERE player_id=?",(proposed,pid))
-                else:
-                    proposed=account[0]
-                from private_explore import grant_private_permits
-                grant_private_permits(pid)
+                pid,proposed=self._prepare_role(slot,name,row)
+                from save_import_service import seal_native_entry
+                seal_native_entry(db.conn,slot)
                 s=Session(sock,slot,pid,proposed)
                 s.pending_publish = self.pending_publish
                 self.session_sequence += 1
