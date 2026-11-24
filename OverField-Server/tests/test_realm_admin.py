@@ -1,11 +1,12 @@
 """Exercise the public CLI as an external tool, without touching an operator's live realm."""
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 import hashlib
 import json
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,30 @@ def invoke(state, *arguments, data=None, raw=None, expected=True):
     assert message["apiVersion"] == "overfield.admin/v1"
     assert message["ok"] == expected and (process.returncode == 0) == expected, message
     return message["result" if expected else "error"]
+
+
+def check_starting_status(state, realm_admin):
+    state.mkdir()
+    game_path = state / "game.sqlite"
+    with closing(sqlite3.connect(state / "identity.sqlite3")) as identity, identity:
+        identity.execute("CREATE TABLE realm_accounts(name TEXT)")
+        identity.execute("INSERT INTO realm_accounts VALUES('fixture')")
+    with closing(sqlite3.connect(game_path)) as game:
+        game.execute("CREATE TABLE players(id INTEGER)")
+        game.execute("INSERT INTO players VALUES(1)")
+        game.commit()
+        with realm_admin.exclusive_state(state):
+            game.execute("BEGIN EXCLUSIVE")
+            result = invoke(state, "status")
+            assert (result["lifecycle"], result["accounts"], result["characters"]) == ("busy", 1, None)
+            game.rollback()
+            assert invoke(state, "status")["characters"] == 1
+        game.execute("BEGIN EXCLUSIVE")
+        assert invoke(state, "status", expected=False)["code"] == "storage_error"
+        game.rollback()
+    game_path.write_bytes(b"This temporary fixture is not a database")
+    with realm_admin.exclusive_state(state):
+        assert invoke(state, "status", expected=False)["code"] == "storage_error"
 
 
 def run(root):
@@ -52,6 +77,7 @@ def run(root):
         import realm_admin
     finally:
         sys.path.pop(0)
+    check_starting_status(root / "starting status fixture", realm_admin)
     class Console:
         closed = False
         def isatty(self):

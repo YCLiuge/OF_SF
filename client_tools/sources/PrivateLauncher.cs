@@ -350,7 +350,10 @@ namespace OverField.PrivateLauncher {
             var token=PrivateService.Text(privateSession,"import_ticket");
             if(String.IsNullOrEmpty(token)){status.Text="所选区服尚未提供角色进度导入。";return;}
             using(var form=new OfSfImport.ImportWindow(PrivateService.ServerName(target),PrivateService.Text(privateSession,"nickname"),
-                token,(operation,values)=>PrivateService.Request(home,target,operation,values)))form.ShowDialog(this);
+                token,(operation,values)=>PrivateService.Request(home,target,operation,values))){
+                form.ShowDialog(this);
+                if(form.EffectiveNickname!=null) privateSession["nickname"]=form.EffectiveNickname;
+            }
         }
         private bool ImportCurrent(){
             long end;

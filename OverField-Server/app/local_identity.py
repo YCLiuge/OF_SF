@@ -109,11 +109,13 @@ class LocalIdentity:
         """Commit a new profile only if the caller successfully saves its credentials."""
         chosen = _name(nickname) if nickname is not None else None
         with self._write() as db:
+            has_imports = db.execute("SELECT 1 FROM sqlite_schema WHERE name='realm_import_name_reservations'").fetchone()
             while True:
                 slot = "ofp_" + secrets.token_hex(16)
                 secret = "ofk_" + secrets.token_urlsafe(32)
                 display, name_key = chosen or _name("队长" + slot[-12:])
-                if db.execute("SELECT 1 FROM profiles WHERE name_key=?", (name_key,)).fetchone():
+                reserved = has_imports and db.execute("SELECT 1 FROM realm_import_name_reservations WHERE name_key=?", (name_key,)).fetchone()
+                if reserved or db.execute("SELECT 1 FROM profiles WHERE name_key=?", (name_key,)).fetchone():
                     if chosen is not None:
                         raise NicknameUnavailable("Nickname already in use")
                     continue

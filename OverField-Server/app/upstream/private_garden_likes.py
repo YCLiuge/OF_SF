@@ -8,7 +8,7 @@ from private_dungeons import _table
 import private_shop as shop
 from proto import net_pb2 as pb
 from utils import db
-from utils.pb_create import make_QuestNotice
+from private_bless_tasks import record as prayer
 
 
 def day_key():
@@ -75,9 +75,7 @@ def like(session, packet):
     rsp.like_nums += 1
     db.conn.execute("UPDATE players SET garden_like_num=? WHERE player_id=?", (rsp.like_nums,owner))
     # Active quest 522003 uses condition 15220031, authored as type 176 (like another garden).
-    notice = make_QuestNotice(session,(15220031,))
-    if notice:
-        session.send(MsgId.QuestNotice,notice,0)
+    prayer(session,176)
     if packet:
         cache_after_commit(session, "garden_like_receipts", key, rsp.SerializeToString())
     return rsp

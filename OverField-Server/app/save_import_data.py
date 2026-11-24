@@ -40,14 +40,78 @@ def numbers(obj,keys):
     return [integer(obj.get(k)) for k in keys]
 
 
+def source_vector(value):
+    if type(value) is not dict or set(value)-{"x","y","z","decimal_places"}:
+        return None
+    if value.get("decimal_places",0)!=0:
+        return None
+    axes=[value.get(k,0) for k in ("x","y","z")]
+    return axes if all(type(x) is int and -(2**31)<=x<2**31 for x in axes) else None
+
+
+def source_location(snapshot,main):
+    scene=integer(main.get("scene_id"))
+    if not scene:return None
+    result={"scene":scene}
+    source_player=integer(main.get("player_id"),0xffffffff)
+    source_channel=integer(main.get("channel_id"),0xffffffff)
+    if not source_player or not source_channel:return result
+    for notice in documents(snapshot,"SceneDataNotice"):
+        data=notice.get("data",{})
+        if data.get("scene_id")!=scene or data.get("channel_id")!=source_channel:continue
+        own=[p for p in data.get("players",()) if p.get("player_id")==source_player]
+        if len(own)!=1:continue
+        lead=own[0].get("team",{}).get("char1",{})
+        position,rotation=source_vector(lead.get("pos")),source_vector(lead.get("rot"))
+        if position is not None and rotation is not None:
+            result["pose"]={"pos":position,"rot":rotation}
+        # This device is player progress. The scene also contains other players' public objects.
+        if scene==100 and any(a.get("area_id")==101 and integer(a.get("area_state"))==1 for a in data.get("areas",())):
+            result["bottle_device_open"]=True
+        break
+    return result
+
+
+def projected_identity(snapshot):
+    """Only the game's role ID/name describe a character; channel/account identifiers are unrelated."""
+    account = snapshot.get("account")
+    account = account if isinstance(account, dict) else {}
+    frames = list(documents(snapshot, "PlayerMainDataRsp"))
+    source = {}
+    ids = [v for v in [account.get("playerId"), *(d.get("player_id") for d in frames)] if v is not None]
+    if ids:
+        parsed = [integer(v, 0xffffffff) for v in ids]
+        source["uid"] = parsed[0] if parsed[0] and all(v == parsed[0] for v in parsed) else 0
+    names = [v for v in [account.get("playerName"), *(d.get("player_name") for d in frames)] if v]
+    if names:
+        import unicodedata
+        clean = [unicodedata.normalize("NFC", v.strip()) if isinstance(v,str) and len(v)<=64 else "" for v in names]
+        valid = len(clean[0]) in range(1,17) and all(v==clean[0] for v in clean)
+        if valid or ids:
+            source["nickname"] = clean[0] if valid else ""
+    return source
+
+
 def project(snapshot):
     if not isinstance(snapshot,dict) or snapshot.get("format")!="overfield-snapshot/1":
         raise BackupFormatError("请选择全进度工具导出的 snapshot.json 或完整 ZIP。")
-    main=next(documents(snapshot,"PlayerMainDataRsp"),None)
+    mains=list(documents(snapshot,"PlayerMainDataRsp"))
+    owners={owner for entry in mains if (owner:=integer(entry.get("player_id"),0xffffffff))}
+    if len(owners)>1:
+        raise BackupFormatError("此文件含有多个角色的主存档。请选择单一角色的原始备份。")
+    main=next(iter(mains),None)
     if not main:
         raise BackupFormatError("此备份中没有成功解码的个人主存档。")
     data={"format":DATA_FORMAT,"player":numbers(main,("level","exp","world_level")),
           "heroes":[],"quests":[],"chapters":[],"achievements":[],"stacks":[],"outfits":[],"gear":[]}
+    active_head=integer(main.get("head"))
+    if active_head:
+        data["head"]=active_head
+    identity = projected_identity(snapshot)
+    if identity:
+        data["identity"] = identity
+    location=source_location(snapshot,main)
+    if location:data["progress_location"]=location
     for h in main.get("characters",[]):
         core=numbers(h,("character_id","level","max_level","exp","star"))
         skills=[numbers(s,("skill_id","skill_level")) for s in h.get("character_skill_list",[])]

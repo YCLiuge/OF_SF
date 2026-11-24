@@ -34,6 +34,9 @@ def saved(pid, qid):
 
 def save(session, quest):
     db.set_quest(session.player_id, quest.quest_id, quest.SerializeToString())
+    if quest.quest_id==101011 and quest.status in (pb.QuestStatus_Completed,pb.QuestStatus_Finish) and getattr(session,"logged_in",False):
+        from private_bless_tasks import ensure
+        ensure(session,publish=True)
     if quest.status == pb.QuestStatus_InProgress:
         session.quests[quest.quest_id] = quest
     else:

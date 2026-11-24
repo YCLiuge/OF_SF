@@ -17,6 +17,8 @@ class Handler(PacketHandler):
 
         session.send(MsgId.PlayerPingRsp, rsp, packet_id)
         if getattr(session, "logged_in", False):
+            from private_bless_tasks import tick as prayer_tick
+            prayer_tick(session)
             if getattr(session,"fishing_cast",None):
                 from private_fishing import tick as settle_cast
                 settle_cast(session)

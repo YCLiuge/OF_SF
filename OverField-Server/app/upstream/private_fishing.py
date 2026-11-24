@@ -259,6 +259,9 @@ def settle(session,cast,rsp,pending):
         db.conn.execute("""INSERT INTO player_kv VALUES(?,'fishing_rod_wear',?,?) ON CONFLICT(player_id,ns,k)
             DO UPDATE SET v=CAST(v AS INTEGER)+excluded.v""",(pid,str(cast.rod),cast.preview.cost_endurance))
     achievements(session,cast,catches,pending)
+    if catches:
+        from private_bless_tasks import record as prayer
+        prayer(session,26)
     rsp.items.extend(pending.balances.items.values())
     return pb.StatusCode_OK
 

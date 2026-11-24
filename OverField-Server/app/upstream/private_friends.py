@@ -104,6 +104,10 @@ def handle(session,req,rsp):
     for side,peer in ((player,other),(other,player)):
         set_state(side,peer,pb.FriendStatus_FRIEND)
         notify(side,peer,pb.FriendHandleType_ADD)
+        from server.scene_data import online_session
+        from private_bless_tasks import record as prayer
+        target=session if side==player else online_session(side)
+        if target:prayer(target,177)
     return pb.StatusCode_OK
 
 

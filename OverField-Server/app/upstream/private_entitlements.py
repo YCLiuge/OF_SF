@@ -8,6 +8,7 @@ from utils.res_loader import res
 
 INITIAL_BALANCE = 1_000_000
 VERSION = "national-1.1.12-v1"
+HEAD_VERSION = "national-1.1.12-heads-v1"
 # Item bag tag 9 also includes stamina, progression counters, store products and
 # physical-merchandise redemption markers. Only spendable currencies belong here.
 CURRENCY_IDS = (
@@ -30,6 +31,7 @@ class Catalog:
     menu_actions: frozenset
     emoji: frozenset
     requirements: object
+    head_stickers: object
 
 
 def catalog():
@@ -79,8 +81,12 @@ def catalog():
         if items[coin]["new_bag_item_tag"]!=pb.EBagItemTag_Currency:
             raise ValueError(f"Unsupported currency in resource set: {coin}")
         amounts[coin] = INITIAL_BALANCE
+    head_ids = {entry["head_i_d"] for entry in _rows("Head","head")}
+    if any(items.get(key,{}).get("new_bag_item_tag")!=pb.EBagItemTag_Head for key in head_ids):
+        raise ValueError("The avatar directory contains an unknown sticker")
     templates = {}
-    for key,num in sorted(amounts.items()):
+    head_stickers = {}
+    for key,num in sorted((dict.fromkeys(head_ids,1) | amounts).items()):
         row = items[key]
         detail = pb.ItemDetail(extra_quality=row.get("quality",0))
         info = detail.main_item
@@ -92,17 +98,51 @@ def catalog():
         else:
             info.base_item.item_id = key
             info.base_item.num = num
-        templates[key] = detail.SerializeToString()
+        if key in head_ids:
+            head_stickers[key] = detail.SerializeToString()
+        else:
+            templates[key] = detail.SerializeToString()
     return Catalog(MappingProxyType(templates),frozenset(furniture),frozenset(animations),
-                   frozenset(actions),frozenset(emoji),MappingProxyType(requirements))
+                   frozenset(actions),frozenset(emoji),MappingProxyType(requirements),MappingProxyType(head_stickers))
+
+
+def grant_head_stickers(conn,player,stickers):
+    added=conn.execute("INSERT OR IGNORE INTO claimed_rewards(player_id,system,key) VALUES(?,'private_entitlements',?)",
+                       (player,HEAD_VERSION))
+    if not added.rowcount:
+        return False
+    fill_head_stickers(conn,player,stickers)
+    return True
+
+
+def fill_head_stickers(conn,player,stickers):
+    # A prior collection can contain extra copies, metadata or a sticker with zero stock.
+    slots=",".join("?" for _ in stickers)
+    existing=dict(conn.execute(f"SELECT item_id,item_detail_blob FROM items WHERE player_id=? AND item_id IN ({slots})",
+                               (player,*stickers)))
+    updates=[]
+    for key,blob in stickers.items():
+        if key in existing:
+            detail=pb.ItemDetail.FromString(existing[key])
+            item=detail.main_item
+            if item.item_id!=key or item.item_tag!=pb.EBagItemTag_Head or not item.HasField("base_item"):
+                raise ValueError("Invalid stored avatar sticker")
+            if item.base_item.num:
+                continue
+            item.base_item.num=1
+            blob=detail.SerializeToString()
+        updates.append((player,key,blob))
+    conn.executemany("INSERT INTO items(player_id,item_id,item_detail_blob) VALUES(?,?,?) "
+                     "ON CONFLICT(player_id,item_id) DO UPDATE SET item_detail_blob=excluded.item_detail_blob",updates)
 
 
 def grant(conn, player, definitions):
     """The caller owns the SQLite transaction. The receipt and every grant commit together."""
+    new_heads=grant_head_stickers(conn,player,definitions.head_stickers)
     acquired=conn.execute("INSERT OR IGNORE INTO claimed_rewards(player_id,system,key) VALUES(?, 'private_entitlements', ?)",
                           (player,VERSION))
     if not acquired.rowcount:
-        return False
+        return new_heads
     placed = {pb.FurnitureDetailsInfo.FromString(raw).furniture_item_id for raw, in conn.execute(
         "SELECT furniture_detail_blob FROM furnitures WHERE player_id=?",(player,))}
     placed.update(row[0] for row in conn.execute("SELECT item FROM realm_hand_furniture WHERE player=?",(player,)))
@@ -144,8 +184,10 @@ def grant(conn, player, definitions):
 
 
 def migrate(conn, definitions):
-    players=conn.execute("SELECT p.player_id FROM players p WHERE NOT EXISTS (SELECT 1 FROM claimed_rewards c "
-                         "WHERE c.player_id=p.player_id AND c.system='private_entitlements' AND c.key=?)",(VERSION,)).fetchall()
+    players=conn.execute("""SELECT p.player_id FROM players p WHERE
+            NOT EXISTS (SELECT 1 FROM claimed_rewards c WHERE c.player_id=p.player_id AND c.system='private_entitlements' AND c.key=?)
+            OR NOT EXISTS (SELECT 1 FROM claimed_rewards c WHERE c.player_id=p.player_id AND c.system='private_entitlements' AND c.key=?)""",
+            (VERSION,HEAD_VERSION)).fetchall()
     for player, in players:
         with conn:
             grant(conn,player,definitions)

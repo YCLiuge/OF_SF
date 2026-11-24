@@ -35,6 +35,8 @@ def initialize(identity):
         db.execute("CREATE TABLE IF NOT EXISTS realm_launch_tickets(digest BLOB PRIMARY KEY REFERENCES tickets(ticket_hash) ON DELETE CASCADE) WITHOUT ROWID")
         db.execute("CREATE TABLE IF NOT EXISTS realm_pending_names(slot TEXT PRIMARY KEY REFERENCES profiles(slot) ON DELETE CASCADE) WITHOUT ROWID")
         db.execute("CREATE TABLE IF NOT EXISTS realm_named_profiles(slot TEXT PRIMARY KEY REFERENCES profiles(slot) ON DELETE CASCADE) WITHOUT ROWID")
+        db.execute("""CREATE TABLE IF NOT EXISTS realm_import_name_reservations(
+            name_key TEXT PRIMARY KEY, slot TEXT NOT NULL UNIQUE REFERENCES profiles(slot) ON DELETE CASCADE) WITHOUT ROWID""")
         db.execute("""CREATE TABLE IF NOT EXISTS realm_accounts(
             username TEXT PRIMARY KEY, slot TEXT NOT NULL UNIQUE REFERENCES profiles(slot) ON DELETE CASCADE,
             salt BLOB NOT NULL, verifier BLOB NOT NULL, n INTEGER NOT NULL,r INTEGER NOT NULL,p INTEGER NOT NULL
@@ -107,7 +109,10 @@ def register(identity,body,bind):
                 raise AccountError(409,"profile_already_bound")
         if db.execute("SELECT 1 FROM realm_accounts WHERE username=?",(user,)).fetchone():
             raise AccountError(409,"username_taken")
-        if db.execute("SELECT 1 FROM profiles WHERE name_key=? AND slot!=?",(key,slot)).fetchone() or matches_played(identity,slot,key):
+        reserved=db.execute("""SELECT 1 FROM profiles WHERE name_key=? AND slot!=?
+                          UNION ALL SELECT 1 FROM realm_import_name_reservations WHERE name_key=? AND slot!=? LIMIT 1""",
+                          (key,slot,key,slot)).fetchone()
+        if reserved or matches_played(identity,slot,key):
             raise AccountError(409,"nickname_taken")
         if bind:
             db.execute("UPDATE profiles SET nickname=?,name_key=? WHERE slot=?",(display,key,slot))

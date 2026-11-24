@@ -41,6 +41,9 @@ class Handler(PacketHandler):
                             item_t=options[index]
                             item = make_item(item_t["item_i_d"],item_t["count"],session.player_id)
                             rsp.status = receive(session,[item],rsp.items)
+                            if rsp.status==StatusCode.StatusCode_OK and info.get("new_gather_type")==5 and info.get("new_weapon_type")==15:
+                                from private_bless_tasks import record as prayer
+                                prayer(session,76)
                             session.send(
                                 MsgId.GatherRsp, rsp, packet_id
                             )  # TODO 任务进度通知

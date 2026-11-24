@@ -108,6 +108,9 @@ def open_box(session, req, rsp):
                 data.rewards.add().CopyFrom(item)
         db.conn.execute("INSERT OR REPLACE INTO private_boxes(player_id,zone,dynamic,idx,template,data,refresh,claimed) VALUES(?,?,?,?,?,?,?,0)",
                         (*key,template,data.SerializeToString(),data.next_refresh_time))
+        from private_bless_tasks import record as prayer
+        prayer(session,119)
+        if not session.dungeon[0]:prayer(session,3,param=session.scene_id)
     rsp.next_refresh_time = data.next_refresh_time * 1000
     rsp.items.extend(data.rewards)
     return pb.StatusCode_OK

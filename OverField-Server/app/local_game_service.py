@@ -107,7 +107,10 @@ class Session:
         except OSError:pass
         self.sock.close()
 
-    def send(self,msg_id,message,packet_id,is_bin=False):
+    def send(self,msg_id,message,packet_id,is_bin=False,*,inventory_snapshot=False):
+        if not is_bin and not inventory_snapshot and msg_id == MsgId.PackNotice and self.logged_in:
+            from private_arcade_wallet import inventory_notice
+            inventory_notice(self,message)
         if not is_bin and getattr(message, "status", 0) > pb.StatusCode_OK and hasattr(self, "stages"):
             self.stages.failure(msg_id, message.status)
             self.stages.failed_operation(getattr(self, "diagnostic_request", None), msg_id, message.status)

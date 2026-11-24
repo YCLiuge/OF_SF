@@ -6,6 +6,7 @@ import random
 import time
 
 from proto import net_pb2 as pb
+from private_bottle_intro import SCENE as BOTTLE_PATH
 from utils import db
 from utils.pb_create import make_SceneTeam, make_item
 from utils.res_loader import res
@@ -232,12 +233,24 @@ def objectives(session, req, rsp):
 def monster(session, req, rsp):
     did,pid=session.dungeon[0],session.player_id
     if not did:
-        return pb.StatusCode_PlayerNotInDungeon
+        if session.scene_id != BOTTLE_PATH:
+            return pb.StatusCode_PlayerNotInDungeon
+        # SceneGuide's MonsterNodeController.UnitConfigs has two 1206s and one 1022.
+        # All three serialize Index=0. MonsterUtil sends this Index, not ChildIndex.
+        if req.monster_index != 0 or req.monster_id not in (1206, 1022):
+            return pb.StatusCode_BAD_REQ
+        # The two identical reports cannot distinguish the two individual spawns.
+        # Battle completion creates a separate GamePlayReward chest for each encounter.
+        db.conn.execute("INSERT OR IGNORE INTO player_kv(player_id,ns,k,v) VALUES(?,'bottle_monsters',?,1)",
+                        (pid, str(req.monster_id)))
+        rsp.monster_index = req.monster_index
+        return pb.StatusCode_OK
     points=scene(did).get("MonsterInfos", ())
     idx,unit=req.monster_index,req.monster_id
     configured = {r.get("UnitID") for r in points if r.get("Index",0)==idx}
-    if unit in configured:
-        record(pid,did,"monster",idx,unit)
+    if unit in configured and record(pid,did,"monster",idx,unit):
+        from private_bless_tasks import record as prayer
+        prayer(session,86)
     tags=_table("DungeonMonsterTags","monster_character_data")
     # Some bosses are spawned by dungeon scripts. Monster.json verifies the reported unit's tag.
     if tags.get(unit,{}).get("new_tag")==3 and (not configured or unit in configured):

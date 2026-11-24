@@ -8,8 +8,8 @@ import zipfile
 def backup(folder):
     folder.mkdir()
     marker="unrelated-private-test-data"
-    main={"status":{"v":1},"level":2,"exp":1,"world_level":0,"player_name":marker}
-    data={"format":"overfield-snapshot/1","account":{"session":marker},"endpoint":marker,
+    main={"status":{"v":1},"level":2,"exp":1,"world_level":0,"player_id":9067314,"player_name":"群星校验"}
+    data={"format":"overfield-snapshot/1","account":{"session":marker,"uid":marker,"username":marker,"playerId":9067314,"playerName":"群星校验"},"endpoint":marker,
           "decoded":{"main":{"name":"PlayerMainDataRsp","frames":[{"ok":True,"decoded":main}]}},
           "stats":{"other":marker}}
     (folder/"snapshot.json").write_text(json.dumps(data),encoding="utf8")
@@ -26,7 +26,8 @@ def privacy(accounts,folder):
     token="ofi_"+"A"*43
     preview="ofv_"+"a"*32
     expected={"format":"of-sf-progress/1","player":[2,1,0],"heroes":[],"quests":[],"chapters":[],
-              "achievements":[],"stacks":[],"outfits":[],"gear":[],"team":[0,0,0],"loadouts":[]}
+              "achievements":[],"stacks":[],"outfits":[],"gear":[],"team":[0,0,0],"loadouts":[],
+              "identity":{"uid":9067314,"nickname":"群星校验"}}
     def capture(config,verb,path,fields,max_bytes):
         assert verb=="POST" and path=="/local/v1/accounts/import-preview"
         assert fields=={"import_ticket":token,"data":expected}
@@ -86,15 +87,24 @@ def over_tls(accounts, private, config, archive, who, state):
     cancelled=submit("import-preview",path=str(archive))
     assert cancelled.get("ok") and level()==before  # Closing the preview makes no write.
     info=submit("import-preview",path=str(archive))
-    assert info.get("ok") and info.get("eligible"),info
+    assert info.get("ok") and info.get("eligible")
+    assert info["identity"]=={"uid":9067314,"nickname":"群星校验","uid_status":"available","nickname_status":"available"}
     preview=info["preview_id"]
     assert not submit("import-apply",token=other["import_ticket"],preview_id=preview)["ok"]
     applied=submit("import-apply",preview_id=preview)
-    assert applied.get("ok") and level()==2,applied
+    assert applied.get("ok") and level()==2 and applied["identity"]=={"uid":9067314,"nickname":"群星校验"}
+    peer=submit("import-preview",token=other["import_ticket"],path=str(archive))
+    assert peer["eligible"] and peer["identity"]["uid_status"]=="taken" and peer["identity"]["nickname_status"]=="taken"
+    assert not submit("import-apply",token=other["import_ticket"],preview_id=peer["preview_id"])["ok"]
+    peer=submit("import-preview",token=other["import_ticket"],path=str(archive))
+    second=submit("import-apply",token=other["import_ticket"],preview_id=peer["preview_id"],
+                  identity={"uid_mode":"new","nickname_mode":"custom","nickname":"星空新角色"})
+    assert second["ok"] and second["identity"]["uid"]!=9067314 and second["identity"]["nickname"]=="星空新角色"
+    assert submit("import-undo",token=other["import_ticket"])["ok"]
     with closing(sqlite3.connect((state/"game.sqlite").as_uri()+"?mode=ro",uri=True)) as db:
         baseline=json.loads(db.execute("SELECT prior FROM private_import_delta WHERE slot=? AND kind='level'",(target["slot"],)).fetchone()[0])[0]
     assert baseline!=2
-    assert not submit("import-undo",token=other["import_ticket"])["ok"]
+    assert level()==2
     restored=submit("import-undo",token=private("login",**who)["import_ticket"])
     assert restored.get("ok") and level()==baseline,restored
     fresh=private("login",**who)["import_ticket"]

@@ -132,6 +132,8 @@ def daily_proficiency(player,aid,day,old,new,condition,task):
 
 
 def note_success(session, kind, recipe, life):
+    from private_bless_tasks import record as prayer
+    prayer(session,{pb.LIFE_TYPE_Handicraft:49,pb.LIFE_TYPE_Making:50,pb.LIFE_TYPE_Sewing:51}[kind])
     group = GROUP[kind].lower()
     output = recipe["get_item_i_d"]
     player = session.player_id

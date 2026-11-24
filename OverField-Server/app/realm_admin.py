@@ -113,13 +113,19 @@ def arguments(commands):
     call.add_argument("--input", type=Path, help="UTF-8 JSON file; defaults to standard input")
 
 
-def count_records(filename, table):
+def count_records(filename, table, *, allow_busy=False):
     if not filename.is_file():
         return None
-    with closing(sqlite3.connect(filename.as_uri() + "?mode=ro", uri=True, timeout=2)) as db:
-        if db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone():
-            # Both callers supply fixed table names.
-            return db.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
+    try:
+        timeout = 0 if allow_busy else 2
+        with closing(sqlite3.connect(filename.as_uri() + "?mode=ro", uri=True, timeout=timeout)) as db:
+            if db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone():
+                # Both callers supply fixed table names.
+                return db.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
+    except sqlite3.OperationalError as error:
+        primary_code = getattr(error, "sqlite_errorcode", 0) & 0xff
+        if not allow_busy or primary_code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise
     return None
 
 
@@ -148,8 +154,8 @@ def status(state):
     else:
         lifecycle = "stopped" if initialized else "uninitialized"
     return {"state": str(state), "lifecycle": lifecycle, "initialized": initialized,
-            "accounts": count_records(state / "identity.sqlite3", "realm_accounts"),
-            "characters": count_records(state / "game.sqlite", "players")}
+            "accounts": count_records(state / "identity.sqlite3", "realm_accounts", allow_busy=lifecycle=="busy"),
+            "characters": count_records(state / "game.sqlite", "players", allow_busy=lifecycle=="busy")}
 
 
 def unique_keys(pairs):

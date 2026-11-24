@@ -42,6 +42,40 @@ def import_receipt(doc):
     return {"import_ticket":ticket,"import_expires_in":ttl}
 
 
+def identity_choice(choice):
+    if not isinstance(choice,dict) or set(choice)-{"uid_mode","nickname_mode","nickname"}:
+        return None
+    uid_mode=choice.get("uid_mode")
+    name_mode=choice.get("nickname_mode")
+    if uid_mode not in ("original","new") or name_mode not in ("original","custom","local"):
+        return None
+    clean={"uid_mode":uid_mode,"nickname_mode":name_mode}
+    if name_mode=="custom":
+        name=choice.get("nickname")
+        if not isinstance(name,str) or not 1<=len(name.strip())<=32 or any(not c.isprintable() for c in name):
+            return None
+        clean["nickname"]=name.strip()
+    return clean
+
+
+def returned_identity(info,preview):
+    if not isinstance(info,dict):
+        raise ValueError("区服返回的角色身份格式无效。")
+    uid=info.get("uid")
+    nickname=info.get("nickname")
+    if uid is not None and (type(uid) is not int or not 0<=uid<=0xffffffff):
+        raise ValueError("区服返回的角色 UID 格式无效。")
+    if not isinstance(nickname,str) or len(nickname)>128 or not all(c.isprintable() for c in nickname):
+        raise ValueError("区服返回的角色名格式无效。")
+    clean={"uid":uid,"nickname":nickname}
+    if preview:
+        for field in ("uid_status","nickname_status"):
+            if info.get(field) not in ("available","taken","invalid","missing"):
+                raise ValueError("区服返回的角色名或 UID 状态无效。")
+            clean[field]=info[field]
+    return clean
+
+
 def import_backup(action, inp, config):
     ticket=inp.get("import_ticket")
     if not isinstance(ticket,str) or not IMPORT_TICKET.fullmatch(ticket):
@@ -60,6 +94,11 @@ def import_backup(action, inp, config):
         if not isinstance(preview,str) or not PREVIEW_ID.fullmatch(preview):
             return {"ok":False,"code":"invalid_preview"}
         form["preview_id"]=preview
+        if "identity" in inp:
+            selected=identity_choice(inp["identity"])
+            if selected is None:
+                return {"ok":False,"code":"invalid_import_identity"}
+            form["identity"]=selected
     if len(json.dumps(form,ensure_ascii=False,separators=(",",":")).encode("utf8"))>2*1024*1024:
         return {"ok":False,"code":"backup_too_large","message":"备份中的可导入数据超过区服单次上限。"}
     status,doc=request(config,"POST",OPERATIONS[action],form,max_bytes=32768)
@@ -70,6 +109,8 @@ def import_backup(action, inp, config):
         any(not isinstance(k,str) or not 1<=len(k)<=72 or type(v) is not int or not 0<=v<=2**31 for k,v in counts.items())):
         raise ValueError("私服导入统计格式无效。")
     result={"ok":True,"counts":counts}
+    if "identity" in doc:
+        result["identity"]=returned_identity(doc["identity"],action=="import-preview")
     if action=="import-preview":
         eligible, preview, warnings=doc.get("eligible"),doc.get("preview_id"),doc.get("warnings",[])
         if (type(eligible) is not bool or eligible and (not isinstance(preview,str) or not PREVIEW_ID.fullmatch(preview)) or

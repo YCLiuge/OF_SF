@@ -35,51 +35,79 @@ def day_count(player, instant):
     return read_value(player, "exchange:"+_day(instant))
 
 
+def ready_stones(player):
+    return read_value(player, "prayer_ready")
+
+
+def settle_fragments(player, instant, *, commit=True):
+    """Reserve completed stones once and leave the visible fragment stack at the next tier's progress."""
+    key = "exchange:" + _day(instant)
+    converted = read_value(player, key)
+    ready = ready_stones(player)
+    fragments = wallet(player, 124)
+    steps = _table("DailyTask", "daily_task_reward")
+    # The national client uses min(today_converted + 1, max_id) for its next cost.
+    last = max(steps)
+    left = fragments
+    count = 0
+    while converted + count + 1 < last:
+        cost = steps[converted + count + 1]["cost_item_num"]
+        if left < cost:
+            break
+        left -= cost
+        count += 1
+    if converted + count + 1 >= last:
+        repeat, left = divmod(left, steps[last]["cost_item_num"])
+        count += repeat
+    if count and commit:
+        stock = balance(player, 124)
+        stock.main_item.base_item.num = left
+        db.set_item_detail(player, stock.SerializeToString(), 124)
+        write_value(player, key, converted + count)
+        write_value(player, "prayer_ready", ready + count)
+    return converted + count, ready + count, left, count
+
+
 def snapshot(session,out):
-    steps = _table("DailyTask","daily_task_reward")
-    used = day_count(session.player_id,now())
-    out.today_converted = used
-    out.exchange_times_left = max(0,len(steps)-used)
+    # Login, daily rotation and HUD queries must never spend the player's starting balance.
+    out.today_converted, out.exchange_times_left, _, _ = settle_fragments(session.player_id, now(), commit=False)
 
 
-def exchange(session,req,rsp):
-    return run(session,req,rsp,convert)
+def daily_notice(session, converted, ready):
+    from private_bless_tasks import fill_tasks
+    notice = pb.DailyTaskUpdateNotice(status=pb.StatusCode_OK, today_converted=converted, exchange_times_left=ready)
+    fill_tasks(session, notice)
+    return notice
 
 
-def convert(session,req,rsp,pending):
-    day = _day(now())
-    key = "exchange:"+day
+def inventory_notice(session, pack):
+    if any(v.main_item.item_id == 124 for v in pack.items):
+        # Receiving a fragment updates the preview. The native click performs the debit.
+        converted, ready, _, _ = settle_fragments(session.player_id, now(), commit=False)
+        session.send(MsgId.DailyTaskUpdateNotice, daily_notice(session, converted, ready), 0)
+
+
+def exchange(session, req, rsp):
+    return run(session, req, rsp, convert)
+
+
+def convert(session, req, rsp, pending):
     pid = session.player_id
-    used = read_value(pid,key)
-    steps = _table("DailyTask","daily_task_reward")
-    if used >= len(steps):
+    converted, ready, _, new = settle_fragments(pid, now())
+    if not ready:
         return pb.StatusCode_DAILY_WISH_TIMES_NOT_ENOUGH
-    totals = {}
-    available = {}
-    gained = 0
-    for index in range(used+1,len(steps)+1):
-        row = steps[index]
-        item,amount = row["cost_item_i_d"],row["cost_item_num"]
-        required = totals.get(item,0)+amount
-        if item not in available:
-            available[item] = wallet(pid,item)
-        if required > available[item]:
-            break
-        totals[item] = required
-        gained += 1
-        if not req.exchange_all:
-            break
-    if not gained:
-        return pb.StatusCode_ITEM_NOT_ENOUGH
-    for item,amount in totals.items():
-        pending.balances.change(item,-amount)
-    result = pending.balances.change(125,gained)
+    gained = ready if req.exchange_all else 1
+    result = pending.balances.change(125, gained)
     reward = rsp.rewards.add().main_item
     reward.CopyFrom(result)
     reward.base_item.num = gained
-    write_value(pid,key,used+gained)
-    rsp.today_converted = used+gained
-    rsp.exchange_times_left = len(steps)-rsp.today_converted
+    ready -= gained
+    write_value(pid, "prayer_ready", ready)
+    rsp.today_converted, rsp.exchange_times_left = converted, ready
+    if new:
+        pending.pack.items.add().CopyFrom(balance(pid, 124))
+    else:
+        pending.notices.append((MsgId.DailyTaskUpdateNotice, daily_notice(session, converted, ready)))
     return pb.StatusCode_OK
 
 

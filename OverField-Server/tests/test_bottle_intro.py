@@ -99,6 +99,15 @@ def run(root, resources):
                 assert any(box.index==0 and box.box_id==30001 for box in scene.data.treasure_boxes)
                 assert phase(sock,5) == pb.StatusCode_OK
                 assert phase(sock,6,"攻击引导") == pb.StatusCode_OK
+                wallet = db_value(pid,101)
+                for unit in (1206, 1206, 1022):
+                    dead = call(sock,"MonsterDead",120,monster_id=unit,monster_index=0)
+                    assert dead.status == pb.StatusCode_OK and dead.monster_index == 0
+                    assert not dead.HasField("drop_item")
+                for unit, index in ((1206,1),(1022,1),(1014,0)):
+                    invalid = call(sock,"MonsterDead",121,monster_id=unit,monster_index=index)
+                    assert invalid.status == pb.StatusCode_BAD_REQ and not invalid.HasField("drop_item")
+                assert wallet == db_value(pid,101)
                 assert call(sock,"Collecting",23,item_id=10800002).status == pb.StatusCode_OK
                 assert phase(sock,7,"收集水晶2") == pb.StatusCode_OK
                 open_chest(sock,1)
@@ -116,6 +125,7 @@ def run(root, resources):
                 assert phase(sock,9) == pb.StatusCode_OK and db_value(pid,100000021) == 1
                 assert call(sock,"ChangeSceneChannel",24,scene_id=9999).status == pb.StatusCode_OK
                 assert next_msg(sock,MsgId.SceneDataNotice,pb.SceneDataNotice).data.scene_id == 9999
+                assert call(sock,"MonsterDead",122,monster_id=1022).status == pb.StatusCode_PlayerNotInDungeon
                 assert phase(sock,10,"出现开放空间字幕") == pb.StatusCode_OK
                 assert phase(sock,6) == pb.StatusCode_OK  # retransmit after scene switch
                 assert phase(sock,6,"wrong") == pb.StatusCode_BAD_REQ
@@ -132,6 +142,8 @@ def run(root, resources):
             with closing(sqlite3.connect(root/"game.sqlite")) as conn, conn:
                 counts = dict(conn.execute("SELECT player_id, count(*) FROM player_kv WHERE ns='tutorial_stars' GROUP BY player_id"))
                 assert counts == {pid: 29}
+                monsters = conn.execute("SELECT player_id,k,v FROM player_kv WHERE ns='bottle_monsters' ORDER BY k").fetchall()
+                assert [(player,kind,int(count)) for player,kind,count in monsters] == [(pid,"1022",1),(pid,"1206",1)]
                 conn.execute("INSERT INTO player_kv VALUES(?,'tutorial','ids',?)",(peer_id,b"9"))
                 conn.execute("DELETE FROM private_locations WHERE player_id=?",(peer_id,))
                 conn.execute("DELETE FROM player_kv WHERE player_id=? AND ns='profile' AND k='bottle_intro'",(peer_id,))

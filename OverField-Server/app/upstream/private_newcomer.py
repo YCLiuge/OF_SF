@@ -73,6 +73,10 @@ def _counts(player):
 
 def record(session, condition, params=()):
     """Record a successful gameplay transition; repeated no-op requests never reach the call sites."""
+    if condition in (127,129,156):
+        from private_bless_tasks import record as prayer
+        if condition==156:prayer(session,74,only=522002)
+        else:prayer(session,condition)
     current = _stored(session.player_id)
     changes = pb.AchieveNotice(status=pb.StatusCode_OK)
     configs = _table("Achieve", "achieve")

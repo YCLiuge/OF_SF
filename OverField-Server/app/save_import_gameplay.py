@@ -55,7 +55,7 @@ def looks_for_actor(looks):
 
 def validate(data):
     from private_entitlements import CURRENCY_IDS
-    if type(data) is not dict or set(data)-{"team","loadouts"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
+    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
         raise ValueError("invalid data format")
     for key,limit in ARRAY_LIMITS.items():
         rows(data[key],limit)
@@ -65,6 +65,10 @@ def validate(data):
     if level not in player_levels or world not in {0,*_table("Level","world_level")}:
         raise ValueError("unknown level")
     out["player"]=[level,min(xp,max(0,player_levels[level].get("need_exp",0)-1)) if level<max(player_levels) else min(xp,100000),world]
+    if "head" in data:
+        head=number(data["head"])
+        if head in _table("Head","head","head_i_d"):
+            out["head"]=head
     table=_table("Item","item")
     for entry in data["stacks"]:
         key,count=numbers(entry,2)
@@ -182,6 +186,10 @@ def validate(data):
         if active_ids & equipped:continue
         equipped.update(active_ids)
         out["loadouts"].append([actor,active,sorted(chosen.items())])
+    if "progress_location" in data:
+        from save_import_location import validate as validate_location
+        location=validate_location(data["progress_location"])
+        if location:out["progress_location"]=location
     totals={"队长等级":out["player"][0],**{LABELS[k]:len(out[k]) for k in LABELS}}
     skipped=sum(len(data[k])-len(out[k]) for k in LABELS)
     totals["穿搭预设"]=sum(len(h[6]) for h in out["heroes"])
@@ -195,6 +203,8 @@ def restore(pid,plan):
     from private_appearance import valid_preset
     level,exp,world=plan["player"]
     db.conn.execute("UPDATE players SET level=?,exp=?,world_level=? WHERE player_id=?",(level,exp,world,pid))
+    if "head" in plan:
+        db.set_players_info(pid,"head",plan["head"])
     for key,count in plan["stacks"]:
         raw=db.get_item_detail(pid,key)
         value=pb.ItemDetail.FromString(raw) if raw else pb.ItemDetail()
@@ -296,7 +306,5 @@ def restore(pid,plan):
         a=pb.Achieve.FromString(raw) if raw else pb.Achieve(achieve_id=key)
         a.count=max(a.count,count)
         db.set_achieve(pid,key,a.SerializeToString())
-    if (any(1000001 in ids for _,ids in plan["chapters"]) or
-        any(key in (100011,100012,100013) and state==3 for key,state,_,_ in plan["quests"])):
-        db.conn.execute("UPDATE player_kv SET v='departed' WHERE player_id=? AND ns='profile' AND k='bottle_intro'",(pid,))
-        db.conn.execute("UPDATE private_locations SET scene=9999 WHERE player_id=?",(pid,))
+    from save_import_location import restore as restore_location
+    restore_location(pid,plan)

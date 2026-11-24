@@ -844,7 +844,10 @@ def make_QuestNotice(session, conds, qn=None):
         finished = all(c.status == QuestStatus.QuestStatus_Finish for c in current.conditions)
         if finished:
             from private_extra_story_rewards import manual_end
-            if manual_end(row):
+            if row.get("new_type")==7 and row.get("reward")==2000600:
+                from private_bless_tasks import set_reward_phase
+                set_reward_phase(current,QuestStatus.QuestStatus_Completed)
+            elif manual_end(row):
                 current.status = QuestStatus.QuestStatus_Completed
             else:
                 current.status = QuestStatus.QuestStatus_Finish
@@ -854,6 +857,9 @@ def make_QuestNotice(session, conds, qn=None):
             step_reward(session, row)
         save(session, current)
         notice.quests.add().CopyFrom(current)
+        if finished and row.get("new_type")==8:
+            from private_bless_tasks import record as record_prayer
+            record_prayer(session,84)
         if finished:
             next_id = successor.get(current.quest_id)
             if next_id is not None and saved(session.player_id, next_id) is None:

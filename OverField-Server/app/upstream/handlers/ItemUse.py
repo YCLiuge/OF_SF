@@ -64,6 +64,10 @@ class Handler(PacketHandler):
                 session.send(MsgId.ItemUseRsp, rsp, packet_id)
                 return
 
+        if req.num and item_use.main_item.item_tag==10:
+            from private_bless_tasks import record as prayer
+            prayer(session,75)
+
         for data in res.get("Reward", {}).get("reward_pool", {}).get("datas", []):
             if data["i_d"] == req.item_id:  # TODO 如果含有武器, 可能引起严重错误
                 rp = []

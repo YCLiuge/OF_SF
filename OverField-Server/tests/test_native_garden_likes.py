@@ -44,14 +44,19 @@ def run(root, resources):
                 assert visit(visitor,pid).left_like_num==10
                 with game.lock, db.conn:
                     db.conn.execute("UPDATE players SET sign=?,hide_value=0 WHERE player_id=?",("花园见",vid))
-                    q=make_Quest(vid,522003)
-                    db.set_quest(vid,522003,q.SerializeToString())
+                    import private_bless_tasks as prayer
+                    q=make_Quest(vid,prayer.UNLOCK)
+                    q.status=pb.QuestStatus_Finish
+                    db.set_quest(vid,q.quest_id,q.SerializeToString())
+                    with patch.object(prayer,"choose",return_value=[522003,521005,521006,521007]):
+                        prayer.ensure(game.active[profiles[1][0]])
                 assert not history(owner).record
                 first=give(visitor,30)
                 assert first.status==ok and (first.like_nums,first.left_like_nums)==(1,9) and give(visitor,30)==first
                 with game.lock:
                     raw=db.get_quest(vid,522003)
-                    assert pb.Quest.FromString(raw).status==pb.QuestStatus_Finish
+                    quest=pb.Quest.FromString(raw)
+                    assert quest.status==quest.conditions[0].status==pb.QuestStatus_Completed
                 for i in range(1,9):
                     response=give(visitor,30+i)
                     assert response.status==ok and (response.like_nums,response.left_like_nums)==(i+1,9-i)

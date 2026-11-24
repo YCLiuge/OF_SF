@@ -23,7 +23,7 @@ def synthetic():
     def packet(name,data):
         return {"name":name,"frames":[{"ok":True,"decoded":{"status":{"v":1},**data}}]}
     return {"format":"overfield-snapshot/1","phone":"DO-NOT-COPY","decoded":{
-        "main":packet("PlayerMainDataRsp",{"player_name":"DO-NOT-COPY","account_type":9999,"player_id":4444444,
+        "main":packet("PlayerMainDataRsp",{"player_name":"旧服角色甲","account_type":9999,"player_id":4444444,
             "level":20,"exp":322,"world_level":2,"team":{"char1":101001},
             "characters":[{"character_id":101001,"level":17,"max_level":20,"star":1,"exp":21,
                            "equipment_presets":[{"weapon":986654321}],"in_use_outfit_preset_index":2,
@@ -67,7 +67,8 @@ def run(root,resources):
         for path in folder.iterdir():f.write(path,"slot/"+path.name)
     data=project_file(archive)
     assert all(project_file(p)==data for p in (folder,folder/"snapshot.json",folder/"private-server-import.json"))
-    assert not any(secret in json.dumps(data) for secret in ("DO-NOT-COPY","4444444","986654321"))
+    assert data["identity"] == {"uid":4444444,"nickname":"旧服角色甲"}
+    assert not any(secret in json.dumps(data) for secret in ("DO-NOT-COPY","986654321"))
     with zipfile.ZipFile(root/"ambiguous.zip","w") as f:
         for name in ("a","b"):f.writestr(name+"/snapshot.json","{}")
     try:project_file(root/"ambiguous.zip");raise AssertionError("multiple snapshots accepted")
@@ -105,7 +106,7 @@ def run(root,resources):
         assert call("import-undo",wrong)[0]==409
         pid=db.conn.execute("SELECT player_id FROM private_slots WHERE slot=?",(a["slot"],)).fetchone()[0]
         assert pid>=1000001 and pid!=4444444
-        assert db.conn.execute("SELECT player_name,level,exp FROM players WHERE player_id=?",(pid,)).fetchone()==("本服角色甲",20,322)
+        assert db.conn.execute("SELECT player_name,level,exp FROM players WHERE player_id=?",(pid,)).fetchone()==("旧服角色甲",20,322)
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,5012011)).main_item.base_item.num==53
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,101)).main_item.base_item.num==1000000
         hero=pb.Character.FromString(db.get_characters(pid,101001)[0])
@@ -139,7 +140,7 @@ def run(root,resources):
             native_hero=next(h for h in main.characters if h.character_id==101001)
             native_look=native_hero.outfit_presets[native_hero.in_use_outfit_preset_index]
             assert native_look.clothes_dye_scheme_index==1 and native_look.pend_top==4200744 and native_look.outfit_hide_info.hide_braid
-            assert main.level==20 and main.scene_id==9999 and main.player_name=="本服角色甲"
+            assert main.level==20 and main.scene_id==9999 and main.player_name=="旧服角色甲" and main.player_id==4444444
             assert not call("import-preview",{**auth,"data":data})[1]["eligible"]
             assert call("import-undo",auth)[0]==409
         b=call("login",other)[1]

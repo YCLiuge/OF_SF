@@ -88,9 +88,16 @@ class Handler(PacketHandler):
         from private_story_objectives import learned, explored
         learned(session,notify=False)
         explored(session,notify=False)
+        from private_bless_tasks import ensure as prayer_tasks,catalog as prayer_catalog
+        daily=prayer_tasks(session,repair_on_login=not session.logged_in)
+        prayer_definitions=prayer_catalog()
+        rsp.daily_task.tasks.update(dict(enumerate(daily,1)))
         for quest in db.get_quest(session.player_id):
             tmp = rsp.quest_detail.quests.add()
             tmp.ParseFromString(quest)
+            if tmp.quest_id in prayer_definitions and tmp.quest_id not in daily:
+                del rsp.quest_detail.quests[-1]
+                continue
             if tmp.status == QuestStatus.QuestStatus_InProgress:
                 session.quests[tmp.quest_id] = tmp
 
@@ -105,10 +112,6 @@ class Handler(PacketHandler):
         rsp.month_card_over_due_time = db.get_month_card_over_due_time(player_id)
         rsp.garden_likes_num, _, _, _, _ = db.get_garden_info(player_id)
         rsp.month_card_reward_days = db.get_month_card_reward_days(player_id)
-        rsp.daily_task.tasks[1] = 521004  # TODO 随机生成每日月亮任务
-        rsp.daily_task.tasks[2] = 521005
-        rsp.daily_task.tasks[3] = 521006
-        rsp.daily_task.tasks[4] = 521007
         from private_arcade_wallet import snapshot, recover
         snapshot(session,rsp.daily_task)
         recover(session)
@@ -148,7 +151,7 @@ class Handler(PacketHandler):
                     # TODO 临时物品发到邮件
                     rsp.items.add().CopyFrom(item)
                 session.send(
-                    MsgId.PackNotice, rsp, 0
+                    MsgId.PackNotice, rsp, 0, inventory_snapshot=True
                 )  # 按物品类型分组发送items物品数据
 
         from private_inventory import slots, publish

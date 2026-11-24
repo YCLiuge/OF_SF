@@ -173,7 +173,10 @@ namespace OfSfPlayer {
                             var message=new Data(values){{"action",operation},{"server",conf}};
                             string response=await Execute("private_account_api.py","",message,true);
                             return new JavaScriptSerializer().Deserialize<Data>(response);
-                        }))dialog.ShowDialog(this);
+                        })){
+                        dialog.ShowDialog(this);
+                        if(dialog.EffectiveNickname!=null) signedIn["nickname"]=dialog.EffectiveNickname;
+                    }
                     return;
                 }
                 conf["account"]=new Data{{"slot",Get(signedIn,"slot")},{"ticket",Get(signedIn,"ticket")}};

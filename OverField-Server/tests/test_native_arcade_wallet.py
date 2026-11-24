@@ -31,14 +31,15 @@ def run(root,resources):
         sock,pid=connect()
         with sock,patch.object(wallet,"now",return_value=date):
             with host.lock,db.conn:
+                wallet.write_value(pid,"prayer_ready",0)
                 for item,qty in ((124,300),(125,0),(102,9),(117,1)):
                     give(pid,item,qty)
             first=call(sock,"DailyTaskExchange",21)
-            assert first.status==pb.StatusCode_OK and first.today_converted==1 and first.exchange_times_left==20
+            assert first.status==pb.StatusCode_OK and first.today_converted==4 and first.exchange_times_left==3
             assert call(sock,"DailyTaskExchange",21)==first
             batch=call(sock,"DailyTaskExchange",22,exchange_all=True)
             assert batch.status==pb.StatusCode_OK and batch.rewards[0].main_item.base_item.num==3
-            assert call(sock,"DailyTaskExchange",23).status==pb.StatusCode_ITEM_NOT_ENOUGH
+            assert call(sock,"DailyTaskExchange",23).status==pb.StatusCode_DAILY_WISH_TIMES_NOT_ENOUGH
             with host.lock:
                 assert wallet.wallet(pid,124)==60 and wallet.wallet(pid,125)==4
             assert call(sock,"BuyGameCoin",31,buy_count=0).status==pb.StatusCode_BAD_REQ
@@ -56,7 +57,8 @@ def run(root,resources):
             assert call(sock,"BuyGameCoin",35,buy_count=1).status==pb.StatusCode_FAIL
         host.stop()
         host.start()
-        sock,same=connect()
+        with patch.object(wallet,"now",return_value=date+timedelta(minutes=1)):
+            sock,same=connect()
         with sock,patch.object(wallet,"now",return_value=date+timedelta(minutes=1)):
             reset=call(sock,"DailyTaskExchange",40)
             assert reset.status==pb.StatusCode_OK and reset.today_converted==1

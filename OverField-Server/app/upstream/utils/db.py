@@ -725,6 +725,9 @@ def get_item_detail(player_id, item_id=None, instance_id=None, table=None) -> li
 
 
 def set_item_detail(player_id, item_detail_blob, item_id=None, instance_id=None):
+    if item_id in (10,11,101,124):
+        from private_bless_tasks import wallet_write
+        wallet_write(player_id,item_id,item_detail_blob)
     if item_id == 10:
         from private_recovery import note_vitality_write
         note_vitality_write(player_id, item_detail_blob)

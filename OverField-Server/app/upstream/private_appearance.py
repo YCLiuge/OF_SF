@@ -33,37 +33,19 @@ def change_sign(session,req,rsp):
     return pb.StatusCode_OK
 
 
-def heads(player):
-    result=set()
-    roster={row[0] for row in db.conn.execute("SELECT character_id FROM characters WHERE player_id=?",(player,))}
-    for row in _table("Head","head").values():
-        key=row.get("head_i_d")
-        if not key:continue
-        condition=row.get("achieve_condition_i_d")
-        rule=_table("Achieve","achieve").get(condition,{})
-        params=rule.get("param",[])
-        if not condition and row.get("is_show"):
-            result.add(key)
-        elif owned(player,key,pb.EBagItemTag_Head) or (
-                len(params)==1 and (params[0] in roster or owned(player,params[0],pb.EBagItemTag_Head))):
-            result.add(key)
-        elif condition:
-            raw=db.get_achieve(player,condition)
-            if raw and pb.Achieve.FromString(raw).count>=rule.get("count_param",1):
-                result.add(key)
-    return result
-
-
 def unlock_head_list(session,req,rsp):
-    rsp.heads.extend(sorted(heads(session.player_id)))
+    rsp.heads.extend(session.entitlements.head_stickers)
     return pb.StatusCode_OK
 
 
 def change_head(session,req,rsp):
-    if req.head not in heads(session.player_id):
+    if req.head not in session.entitlements.head_stickers:
         return pb.StatusCode_BAD_REQ
-    db.set_players_info(session.player_id,"head",req.head)
-    session.avatar_id=rsp.head=req.head
+    db.conn.execute("UPDATE players SET head=? WHERE player_id=? AND head IS NOT ?",
+                    (req.head,session.player_id,req.head))
+    from private_request import set_after_commit
+    set_after_commit(session,"avatar_id",req.head)
+    rsp.head=req.head
     return pb.StatusCode_OK
 
 

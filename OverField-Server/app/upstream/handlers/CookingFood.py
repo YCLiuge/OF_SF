@@ -37,6 +37,8 @@ def prepare(session,req,rsp):
     result.life_type=pb.LIFE_TYPE_Cooking
     result.is_success=random.random()<food["successful_probability"]
     if result.is_success:
+        from private_bless_tasks import record as prayer
+        prayer(session,22)
         product.main_item.base_item.num+=1
         changes[output]=product
         delta=result.result_items.add()

@@ -147,9 +147,10 @@ class IdentityTest(unittest.TestCase):
             self.assertEqual(st,200)
             self.assertEqual(session["region"],region)
             self.assertEqual(self.ids.resolve_ticket(session["ticket"]),profile["slot"])
+            # These requests reject headers before reading a body.
             for host in ("other.example","127.0.0.1@other","fake.invalid:443","[::1]@example"):
-                self.assertEqual(request(port,"POST","/local/v1/profiles",{},{"Host":host})[0],403)
-            self.assertEqual(request(port,"POST","/local/v1/profiles",{},{"Origin":"null"})[0],403)
+                self.assertEqual(request(port,"POST","/local/v1/profiles",extra={"Host":host})[0],403)
+            self.assertEqual(request(port,"POST","/local/v1/profiles",extra={"Origin":"null"})[0],403)
             self.assertEqual(request(port,"POST","/local/v1/profiles",{"extra":"x"})[0],400)
             self.assertEqual(request(port,"POST","/local/v1/sessions",{"provider":"third-party"})[0],400)
             self.assertEqual(request(port,"POST","/local/v1/sessions",{"slot":"unknown","profile_key":"invalid"})[0],401)

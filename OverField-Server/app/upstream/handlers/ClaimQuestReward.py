@@ -12,7 +12,9 @@ class Handler(PacketHandler):
         req = pb.ClaimQuestRewardReq.FromString(data)
         rsp = pb.ClaimQuestRewardRsp()
         operation = claim_story if req.quest_id == 1000001 else claim
-        if req.quest_type == pb.EQuestType_ExtraQuest:
+        if req.quest_type == pb.EQuestType_RandomEventQuest:
+            from private_bless_tasks import claim as operation
+        elif req.quest_type == pb.EQuestType_ExtraQuest:
             operation = claim_extra
         rsp.status = operation(session,req,rsp)
         session.send(MsgId.ClaimQuestRewardRsp,rsp,packet_id)

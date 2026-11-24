@@ -24,7 +24,9 @@ class Handler(PacketHandler):
                     raise ValueError("invalid birthday")
                 birthday=date(*map(int,match.groups())).isoformat()
             # The identity index reserves names for played and as-yet unplayed accounts.
-            occupied=db.conn.execute("SELECT 1 FROM authority.profiles WHERE name_key=? AND slot!=?",(key,session.slot)).fetchone()
+            occupied=db.conn.execute("""SELECT 1 FROM authority.profiles WHERE name_key=? AND slot!=?
+                UNION ALL SELECT 1 FROM authority.realm_import_name_reservations WHERE name_key=? AND slot!=? LIMIT 1""",
+                (key,session.slot,key,session.slot)).fetchone()
             legacy=db.conn.execute("SELECT player_name FROM players WHERE player_id!=? AND player_name!=''",(session.player_id,))
             if occupied or any(_name(other)[1]==key for (other,) in legacy):
                 rsp.status=pb.StatusCode_DUPLICATED_NAME

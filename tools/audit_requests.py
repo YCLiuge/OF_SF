@@ -24,7 +24,8 @@ SMALL_SUITES = ("test_game_realm", "test_observed_initialization", "test_native_
 OTHER_SUITES = ("test_game_archive","test_game_dungeon","test_dungeon_updates","test_private_channels",
                 "test_home_chairs","test_plaza_actions","test_private_entitlements","test_private_gift_shop",
                 "test_story_starter","test_story_entry","test_bottle_intro","test_hud_queries",
-                "test_faye_dialog","test_season_catalog","test_explore_dispatch")
+                "test_faye_dialog","test_season_catalog","test_explore_dispatch",
+                "test_native_prayer_tasks","test_native_prayer_conversion")
 HANDSHAKE = {"VerifyLoginTokenReq","PlayerLoginReq"}
 MODES = {"AcceptQuestReq": "类型1接取目录主线，类型0按广场委托与已开放的活动对话接取。其他类型有独立参数限制。",
          "ClaimQuestRewardReq": "类型1按目录主线结算。类型9使用额外故事真实末步编号领取，24项结算有独立测试。",

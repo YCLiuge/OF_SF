@@ -170,6 +170,9 @@ def credit(s,kind,key):
     keys=((102,s.scene_id),(118,0)) if kind==RIDDLE else ((103,s.scene_id),(5,s.scene_id),(45,key),(115,0))
     applicable=[row for goal in keys for row in candidates.get(goal,())]
     report(s,((aid,min(limit,progress(s.player_id,aid)+1)) for aid,limit in applicable))
+    if kind==ENCOUNTER:
+        from private_bless_tasks import ensure
+        ensure(s,publish=True)
     q=make_QuestNotice(s,{aid for aid,_ in applicable})
     if q:
         s.send(MsgId.QuestNotice,q,0)

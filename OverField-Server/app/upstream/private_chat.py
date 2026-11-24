@@ -155,6 +155,9 @@ def send(session,req,rsp):
         if matching>=cfg["repeated_times"]:return pb.StatusCode_BAD_REQ
     name,head,badge,frame=db.get_players_info(player,"player_name,head,team_leader_badge,avatar_frame")
     msg=pb.ChatMsgData(player_id=player,name=name,head=head,badge=badge,avatar_frame=frame,text=text,expression=req.expression,send_time=sent)
+    if req.expression:
+        from private_bless_tasks import record as prayer
+        prayer(session,74,only=522001)
     seq=db.conn.execute("INSERT INTO private_chat_messages(kind,room,subroom,author,sent,body) VALUES(?,?,?,?,?,?)",
                         (*key,player,sent,msg.SerializeToString())).lastrowid
     limit=global_value("ChatMsgRecordLimit")

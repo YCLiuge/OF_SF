@@ -187,6 +187,8 @@ def disassemble(session, req, rsp):
         db.del_item_detail(pid, key)
     if rewards:
         grant(session, rewards, rsp.items)
+    from private_bless_tasks import record as prayer
+    prayer(session,124)
     rsp.weapon_ids.extend(req.weapon_ids)
     rsp.armor_ids.extend(req.armor_ids)
     from private_newcomer import record
