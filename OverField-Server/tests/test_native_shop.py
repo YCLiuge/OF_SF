@@ -71,6 +71,15 @@ def run(root,resources):
                 assert gift.status==pb.StatusCode_OK and deltas(gift)=={190:2,101:1000,1501:2},gift
                 assert purchase(a,69,400,1,1).status==pb.StatusCode_SHOP_GRID_BUY_NUM_LIMIT
                 assert purchase(b,70,400,1,1).status==pb.StatusCode_OK
+                # Fresh roles already own the basic rod. The same grid still sells
+                # a real weapon instance to older inventories missing this tool.
+                assert purchase(a,700,15000,1,1).status==pb.StatusCode_SHOP_ITEM_ALREADY_IN_BAG
+                from utils import db
+                with game.lock,db.conn:
+                    for raw in db.get_item_detail(owner,table="items_s"):
+                        rod=pb.ItemDetail.FromString(raw).main_item
+                        if rod.item_id==1006001:
+                            db.del_item_detail(owner,rod.weapon.instance_id)
                 gear=purchase(a,71,15000,1,1)
                 assert gear.status==pb.StatusCode_OK and gear.items[0].main_item.weapon.instance_id>0,gear
                 assert purchase(a,72,15000,1,1).status==pb.StatusCode_SHOP_GRID_BUY_NUM_LIMIT
@@ -89,7 +98,6 @@ def run(root,resources):
                 # In-window 70% national costume listing costs 180 * .7 = 126 private stones.
                 stamp[0]=datetime(2025,6,12,12,tzinfo=stamp[0].tzinfo)
                 fixture_coins(owner,108,200)
-                from utils import db
                 with game.lock,db.conn:
                     db.conn.execute("DELETE FROM items WHERE player_id=? AND item_id=?",(owner,4640181))
                 discounted=purchase(a,84,900,14,1)

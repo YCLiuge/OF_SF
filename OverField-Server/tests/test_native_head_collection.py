@@ -27,7 +27,9 @@ def snapshot(port,ticket,expected):
         for _ in range(300):
             head,data=receive(sock)
             if head.msg_id==MsgId.PlayerMainDataRsp:
-                selected=pb.PlayerMainDataRsp.FromString(data).head
+                main=pb.PlayerMainDataRsp.FromString(data)
+                assert main.player_id==uid
+                selected=main.head
             elif head.msg_id==MsgId.PackNotice:
                 for detail in pb.PackNotice.FromString(data).items:
                     value=detail.main_item
@@ -43,7 +45,7 @@ def snapshot(port,ticket,expected):
             listing=call(sock,"UnlockHeadList",packet)
             assert listing.status==pb.StatusCode_OK and len(listing.heads)==len(expected)
             assert set(listing.heads)==expected
-        return sock,uid,selected,stickers
+        return sock,uid,selected,stickers,main.player_label
     except BaseException:
         sock.close()
         raise
@@ -62,7 +64,7 @@ def run(root,resources):
         return data
     with world(root,resources) as (port,host):
         first=account("register",{**accounts[0],"nickname":"头像甲"},201)
-        sock,uid,selected,stickers=snapshot(host.port,first["ticket"],expected)
+        sock,uid,selected,stickers,_=snapshot(host.port,first["ticket"],expected)
         with sock:
             assert selected==41101 and set(stickers.values())=={1}
             for packet,key in enumerate(sorted(expected),30):
@@ -83,7 +85,7 @@ def run(root,resources):
         set_amount(db,uid,101,123)
     with world(root,resources) as (port,host):
         first=account("login",accounts[0])
-        sock,_,selected,stickers=snapshot(host.port,first["ticket"],expected)
+        sock,_,selected,stickers,_=snapshot(host.port,first["ticket"],expected)
         with sock:
             assert selected==9005 and stickers[41102]==7 and stickers[9005]==1
             source=synthetic()
@@ -91,6 +93,7 @@ def run(root,resources):
             projected=project(source)
             assert projected["head"]==9404
             projected["stacks"].append([41102,8])
+            projected["identity"]["public_label"]=projected["identity"].pop("uid")
             second=account("register",{**accounts[1],"nickname":"头像乙"},201)
             def restore():
                 auth={"import_ticket":second["import_ticket"]}
@@ -111,15 +114,15 @@ def run(root,resources):
                 assert prior==41101 and item(db,owner,41102).main_item.base_item.num==1
             restore()
             second=account("login",accounts[1])
-            other,public_id,head,_=snapshot(host.port,second["ticket"],expected)
+            other,player_id,head,_,label=snapshot(host.port,second["ticket"],expected)
             with other:
-                assert head==9404 and public_id==4444444
-                assert call(sock,"OtherPlayerInfo",251,player_id=public_id).other_info.head==9404
+                assert head==9404 and label==4444444 and player_id!=label
+                assert call(sock,"OtherPlayerInfo",251,player_id=player_id).other_info.head==9404
                 assert call(other,"ChangeHead",252,head=41103).head==41103
-                assert call(sock,"OtherPlayerInfo",253,player_id=public_id).other_info.head==41103
+                assert call(sock,"OtherPlayerInfo",253,player_id=player_id).other_info.head==41103
     with world(root,resources) as (port,host):
         restored=account("login",accounts[1])
-        sock,_,selected,_=snapshot(host.port,restored["ticket"],expected)
+        sock,_,selected,_,_=snapshot(host.port,restored["ticket"],expected)
         with sock:
             assert selected==41103
         with closing(sqlite3.connect(root/"game.sqlite")) as db:
