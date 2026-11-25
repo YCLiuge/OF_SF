@@ -4,11 +4,11 @@ OF_SF 是适配国服 TapTap PC 1.1.12 的区服服务端，支持 Windows x64 �
 
 ## 玩家接入
 
-1. 解压玩家 ZIP，运行 `OF_SF 登陆器.exe`。填写服主提供的 IP 或域名，可指定端口，默认 18443。自签证书首次连接时按服主提供的指纹或 CA 验证。
+1. 下载并双击 Windows 登陆器，也可完整解压 ZIP 后启动。填写服主提供的 IP 或域名，可指定端口，默认 18443。自签证书首次连接时按服主提供的指纹或 CA 验证。
 2. 选择注册或登录。首次核对账号时按提示输入图形验证码。选择含有 `launcher.exe` 的游戏目录。首次准备隔离客户端时建议预留至少 3 GiB 同卷空间。
 3. 已有备份请在首次进游戏前导入，预览并核对 UID、角色名、地图和主线。游戏内按住 **Alt** 唤出指针。要回官服，可从 TapTap 原入口启动。原客户端的发行方在线渠道验证仍有可能出现。
 
-[登陆器源码与玩家说明](https://github.com/YCLiuge/OF_SF_Launcher) · [个人进度导入](OverField-Server/docs/个人进度导入.md)
+[下载 Windows 登陆器](https://github.com/YCLiuge/OF_SF_Launcher/releases/latest/download/OF_SF-Launcher-Windows-x64.exe) · [登陆器源码与玩家说明](https://github.com/YCLiuge/OF_SF_Launcher) · [个人进度导入](OverField-Server/docs/个人进度导入.md)
 
 ## 开服与迁移
 
