@@ -3,14 +3,14 @@ from collections import Counter
 
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_dungeons import _table
+from utils.res_loader import res
 import private_shop as shop
 from private_shop import now
 from utils import db
 
 
 def layout(tree):
-    row = _table("BlessingTree", "blessing_tree_info").get(tree, {})
+    row = res.index("BlessingTree", "blessing_tree_info").get(tree, {})
     return {node["box_i_d"]: node for node in row.get("blessing_tree_info_group_info", ())}
 
 
@@ -47,10 +47,10 @@ def restore_legacy_items(player, earned):
 def login_notice(player):
     notice = pb.BlessTreeNotice(status=pb.StatusCode_OK)
     stored = db.get_bless_tree(player)
-    catalog = _table("Item", "item")
+    catalog = res.index("Item", "item")
     typed = shop.INSTANCE_TAGS | {pb.EBagItemTag_Fashion}
     earned = Counter()
-    for tree in _table("BlessingTree", "blessing_tree_info"):
+    for tree in res.index("BlessingTree", "blessing_tree_info"):
         nodes = layout(tree)
         claims = known_nodes(stored.get(tree, ()), nodes)
         notice.trees[tree].tree_ids.extend(claims)
@@ -84,7 +84,7 @@ def unlock(session, req, rsp):
     got = known_nodes(db.get_bless_tree(player, req.def_id), nodes)
     if req.tree_id in got:
         return pb.StatusCode_PLAYER_BLESS_TREE_EXIST
-    period = _table("BlessingTree", "blessing_tree", "blessing_tree_info_i_d").get(req.def_id)
+    period = res.index("BlessingTree", "blessing_tree", "blessing_tree_info_i_d").get(req.def_id)
     if not period or not is_open(req.def_id, period):
         return pb.StatusCode_Activity_Close
     parent = node.get("relate_box_i_d")

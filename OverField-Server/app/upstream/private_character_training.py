@@ -4,7 +4,6 @@ from fractions import Fraction
 
 from network.msg_id import MsgId
 from private_crafts import payments, save_pack
-from private_dungeons import _table
 from proto import net_pb2 as pb
 from utils import db
 from utils.res_loader import res
@@ -21,7 +20,7 @@ def import_skills(player):
         if len(parts) != 2 or not all(s.isascii() and s.isdigit() and 0 < len(s) <= 10 for s in parts):
             continue
         char_id, skill_id = map(int, parts)
-        cfg = _table("Character","character").get(char_id, {})
+        cfg = res.index("Character","character").get(char_id, {})
         levels = res["CharacterSkills"]["steps"].get(str(skill_id), ())
         raw = db.get_characters(player, char_id) if char_id else ()
         if not raw or skill_id not in active_spells(cfg) or not any(levels):
@@ -70,10 +69,10 @@ def level_up(session, char, cfg, req, rsp):
     if not 1 <= len(req.nums) <= 3 or min(req.nums) < 0 or not any(req.nums) or char.level >= char.max_level:
         return pb.StatusCode_BAD_REQ, {}
     costs = {template: count for template, count in zip((190,191,192), req.nums) if count}
-    curve = {r["level"]: r for r in _table("Character","level")[cfg["growth_level_i_d"]]["level_info"]}
+    curve = {r["level"]: r for r in res.index("Character","level")[cfg["growth_level_i_d"]]["level_info"]}
     if char.level not in curve:
         return pb.StatusCode_CFG_NOT_FOUND, {}
-    items = _table("Item","item")
+    items = res.index("Item","item")
     xp = sum(items[template]["relate_i_d"] * n for template, n in costs.items())
     coins = int(Fraction(str(curve[char.level]["exp_to_coin"])) * xp)
     if coins:
@@ -96,7 +95,7 @@ def level_up(session, char, cfg, req, rsp):
 
 
 def level_break(session, char, cfg, req, rsp):
-    rule = _table("Character","level_rule").get(cfg.get("rule_i_d"), {})
+    rule = res.index("Character","level_rule").get(cfg.get("rule_i_d"), {})
     tier = next((r for r in rule.get("level_rule_info", ()) if r["top_level"] == char.max_level), None)
     if not tier or char.level != char.max_level:
         return pb.StatusCode_BAD_REQ, {}
@@ -127,7 +126,7 @@ def handle(session, name, data, packet_id):
         rsp.status = pb.StatusCode_CharNotExist
         session.send(response_id, rsp, packet_id)
         return
-    cfg = _table("Character","character").get(req.char_id)
+    cfg = res.index("Character","character").get(req.char_id)
     if not cfg:
         rsp.status = pb.StatusCode_CFG_NOT_FOUND
         session.send(response_id, rsp, packet_id)

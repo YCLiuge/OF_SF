@@ -1,7 +1,7 @@
 """Single-condition Chapter 00 objectives backed by actual gameplay, including old-save catch-up."""
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_dungeons import _table
+from utils.res_loader import res
 from private_first_quest import save, saved
 from private_map_progress import catalog as map_catalog, points
 from utils.pb_create import make_Quest
@@ -19,7 +19,7 @@ def _record(session, step, value, notify=True):
     if (q is None or q.status != pb.QuestStatus_InProgress or len(q.conditions)!=1
             or q.conditions[0].condition_id!=aid or q.conditions[0].status!=pb.QuestStatus_InProgress):
         return False
-    rule = _table("Achieve","achieve")[aid]
+    rule = res.index("Achieve","achieve")[aid]
     if rule.get("new_achieve_condition")!=kind or rule.get("count_param",0)<=0:
         return False
     c = q.conditions[0]
@@ -59,7 +59,7 @@ def learned(session, notify=True):
     from private_badge_tree import _owned
     if saved(session.player_id,100032) is None:
         return
-    rule = _table("Achieve","achieve")[11000321]
+    rule = res.index("Achieve","achieve")[11000321]
     if rule.get("param")==[101000000] and _owned(session.player_id,101000000):
         _record(session,100032,1,notify)
 
@@ -67,7 +67,7 @@ def learned(session, notify=True):
 def explored(session, scene=1, notify=True):
     if scene!=1 or saved(session.player_id,100093) is None:
         return
-    rule = _table("Achieve","achieve")[11000931]
+    rule = res.index("Achieve","achieve")[11000931]
     total = sum(map_catalog()[0].get(scene,{}).values())
     if rule.get("param")==[scene] and total:
         _record(session,100093,10000*points(session.player_id,scene)//total,notify)

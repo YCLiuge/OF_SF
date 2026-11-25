@@ -51,6 +51,7 @@ def inside(root, temp):
     from test_player_save_import import privacy,over_tls
     archive=privacy(accounts,temp/"backup-fixture")
 
+    print("Checking packaged UI and separate client staging",flush=True)
     if os.name=="nt":
         assert subprocess.run([str(root/patch.EXE),"--check-ui"],check=False,timeout=12).returncode==0
         assert subprocess.run([str(root/patch.EXE),"--realm-picker","--check-ui"],check=False,timeout=12).returncode==0
@@ -116,6 +117,11 @@ def inside(root, temp):
                 try:accounts.request(bad,"GET","/local/v1/region")
                 except ssl.SSLCertVerificationError:pass
                 else:raise AssertionError("untrusted TLS server or hostname accepted")
+            if os.name=="nt":
+                from test_friends_patch import fixture as invite_fixture, run_probe
+                local_invite=invite_fixture(temp/"loopback.ofinvite",addr,cert.read_text(encoding="ascii"))
+                run_probe(root,local_invite,"account",temp)
+                print("PASS new Windows account via actual UI, invite, masked picker and backup screen before first play.",flush=True)
             who=dict(username="player_test",password="single-use-test-password")
             assert private("register",nickname="测试玩家",**who)["ok"]
             logged=private("login",**who)
@@ -146,7 +152,9 @@ def inside(root, temp):
             sys.path.insert(0,str(Path(__file__).resolve().parent))
             from test_player_remote_features import run as features
             signed=private("login",**who)
+            print("Checking authenticated native gameplay",flush=True)
             features(remote,remote.reserve(signed["slot"],signed["ticket"]),state,config,accounts)
+            print("Checking private backup preview, apply and undo",flush=True)
             over_tls(accounts,private,config,archive,who,state)
             assert accounts.request(config,"GET","/private/maintenance")[0]==200
         finally:
@@ -172,7 +180,16 @@ def verify(archive):
         for rel,expected in info["files"].items():
             assert hashlib.sha256((root/rel).read_bytes()).hexdigest()==expected,rel
         binary=root/"OverField-Server/runtime-win64/python.exe"
-        subprocess.run([str(binary),"-B",str(Path(__file__).resolve()),"--inside",str(root),str(test)],check=True,timeout=100)
+        command=[str(binary),"-B",str(Path(__file__).resolve()),"--inside",str(root),str(test)]
+        with subprocess.Popen(command) as worker:
+            try:
+                status=worker.wait(timeout=240)
+            except subprocess.TimeoutExpired:
+                if os.name=="nt":
+                    subprocess.run(["taskkill","/PID",str(worker.pid),"/T","/F"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                if worker.poll() is None:worker.kill()
+                raise
+            if status:raise subprocess.CalledProcessError(status,command)
 
 
 if __name__=="__main__":

@@ -1,7 +1,7 @@
 """Validate character loadouts against the private player's inventory and released equipment tables."""
 from network.msg_id import MsgId
 from private_appearance import broadcast
-from private_dungeons import _table
+from utils.res_loader import res
 from private_equipment import load
 from proto import net_pb2 as pb
 from utils import db
@@ -61,7 +61,7 @@ def slots(preset):
 
 def checked_items(pid, character, preset):
     result = {}
-    actor = _table("Character", "character").get(character)
+    actor = res.index("Character", "character").get(character)
     if not actor:
         raise ValueError("unavailable character")
     for kind, index, key in slots(preset):
@@ -70,7 +70,7 @@ def checked_items(pid, character, preset):
             raise ValueError("unowned or duplicate instance")
         detail = item.main_item
         template = getattr(getattr(detail, kind), kind + "_id")
-        rule = _table(kind.title(), kind).get(template)
+        rule = res.index(kind.title(), kind).get(template)
         if not rule or template != detail.item_id:
             raise ValueError("unavailable equipment")
         if kind != "poster" and rule.get("new_weapon_system_type", 0) != actor.get("new_weapon_system_type", 0):

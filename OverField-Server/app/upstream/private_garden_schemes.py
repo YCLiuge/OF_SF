@@ -4,7 +4,7 @@ import unicodedata
 
 from network.msg_id import MsgId
 from private_channels import HOME, bag_adjust, room_limit, tally
-from private_dungeons import _table
+from utils.res_loader import res
 from private_garden_actions import fresh_id, publish
 from proto import net_pb2 as pb
 from realm_uids import public_uid
@@ -153,7 +153,7 @@ def replace_layout(session, target):
     tally(pid)
     if pack.items:
         session.send(MsgId.PackNotice, pack, 0)
-    catalog = _table("HomeItem", "home_item", "item_i_d")
+    catalog = res.index("HomeItem", "home_item", "item_i_d")
     all_items = (pb.FurnitureDetailsInfo.FromString(row[-1]).furniture_item_id for row in db.get_furniture(HOME,channel))
     points = sum(catalog.get(item,{}).get("home_item_point_num",0) for item in all_items)
     publish(session, pb.GardenFurnitureBatchUpdateNotice(status=pb.StatusCode_OK, player_id=pid,

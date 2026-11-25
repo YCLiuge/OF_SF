@@ -15,7 +15,7 @@ UPSTREAM = Path(__file__).resolve().parent / "upstream"
 sys.path.insert(0, str(UPSTREAM))
 
 from google.protobuf.message import DecodeError
-from config import Config
+from realm_database import open_game_database
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from server import notice_sync, scene_data
@@ -170,6 +170,17 @@ class _TCP(socketserver.ThreadingTCPServer):
                         self.owner._publish_pending()
                 except sqlite3.Error:
                     _log.exception("Could not expire campfires, will retry")
+        if now >= self.owner.next_moon_cleanup:
+            self.owner.next_moon_cleanup = now + 30
+            with self.owner.lock:
+                try:
+                    from private_moon_spots import expire
+                    with db.conn:
+                        expire(self.owner.scene_members)
+                    self.owner._publish_pending()
+                except sqlite3.Error:
+                    self.owner._discard_pending()
+                    _log.exception("Could not expire wish beacons, will retry")
         if now >= self.owner.next_pose_flush:
             self.owner.next_pose_flush = now + self.owner.pose_flush_interval
             if not (self.owner.pending_poses or self.owner.pending_dungeon_poses or self.owner.pending_reclaims):
@@ -403,48 +414,12 @@ class LocalGameService:
             self.next_pose_flush=time.monotonic()+self.pose_flush_interval
             self.data_dir.mkdir(parents=True,exist_ok=True)
             res_loader.init(self.resources)
-            Config.DB_PATH=str(self.data_dir/"game.sqlite")
-            from realm_accounts import initialize
-            initialize(self.identity)
-            db.init()
-            db.conn.execute("ATTACH DATABASE ? AS authority",(str(self.identity.path),))
-            db.conn.executescript("""
-                CREATE TABLE IF NOT EXISTS private_slots (
-                    player_id INTEGER PRIMARY KEY AUTOINCREMENT, slot TEXT NOT NULL UNIQUE);
-                CREATE TABLE IF NOT EXISTS private_poses (
-                    player_id INTEGER NOT NULL, scene INTEGER NOT NULL, pos BLOB NOT NULL, rot BLOB NOT NULL,
-                    PRIMARY KEY(player_id,scene));
-                CREATE TABLE IF NOT EXISTS player_kv (
-                    player_id INTEGER NOT NULL, ns TEXT NOT NULL, k TEXT NOT NULL, v BLOB,
-                    PRIMARY KEY(player_id,ns,k), FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE);
-                CREATE TABLE IF NOT EXISTS claimed_rewards (
-                    player_id INTEGER NOT NULL, system TEXT NOT NULL, key TEXT NOT NULL, claim_time INTEGER DEFAULT 0,
-                    PRIMARY KEY(player_id,system,key), FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE);
-                CREATE TABLE IF NOT EXISTS supply_box (
-                    player_id INTEGER PRIMARY KEY REFERENCES players(player_id), next_reward_time INTEGER NOT NULL);
-                CREATE TABLE IF NOT EXISTS private_wishes (
-                    player_id INTEGER NOT NULL REFERENCES players(player_id), shop INTEGER NOT NULL,
-                    grid INTEGER NOT NULL, pool INTEGER NOT NULL, created INTEGER NOT NULL,
-                    PRIMARY KEY(player_id,shop,grid));
-                CREATE TABLE IF NOT EXISTS private_boxes (
-                    player_id INTEGER NOT NULL REFERENCES players(player_id), zone INTEGER NOT NULL, dynamic INTEGER NOT NULL,
-                    idx INTEGER NOT NULL, template INTEGER NOT NULL, data BLOB, refresh INTEGER DEFAULT 0, claimed INTEGER DEFAULT 0,
-                    PRIMARY KEY(player_id,zone,dynamic,idx));
-                CREATE TABLE IF NOT EXISTS private_locations (
-                    player_id INTEGER PRIMARY KEY, scene INTEGER NOT NULL);
-            """)
-            import private_abyss
-            private_abyss.setup()
-            from private_redemption import setup as setup_redemption
-            setup_redemption()
-            import realm_reports
-            realm_reports.setup(db.conn)
-            from private_character_life import setup as setup_character_life
-            setup_character_life()
-            from private_photos import setup as setup_photos
-            setup_photos(db.conn)
-            from private_field_activities import setup as setup_field_activities
-            setup_field_activities(db.conn)
+            open_game_database(self.identity, self.data_dir)
+            from private_moon_spots import setup as setup_moon_spots
+            setup_moon_spots(db.conn)
+            from private_actions_study import setup as setup_studied_actions
+            setup_studied_actions(db.conn)
+            self.next_moon_cleanup = time.monotonic() + 30
             import private_gomoku
             self.gomoku = private_gomoku
             self.gomoku.initialize(db.conn,self.scene_members)
@@ -479,7 +454,7 @@ class LocalGameService:
             from private_activity_rewards import setup as setup_activity_rewards
             setup_activity_rewards()
             from private_entitlements import catalog, migrate
-            self.entitlements = catalog()
+            self.entitlements = catalog(bool(self.realm_rules.starter_teachable_actions))
             migrate(db.conn,self.entitlements)
             self.scene_ids={r["ID"] for r in res_loader.res["ScenesConfigAsset"]["Scenes"] if r.get("Born")}
             self.initial_scene = int(next(row["values"][0] for row in res_loader.res["GlobalConfig"]["config"]["datas"]
@@ -617,6 +592,9 @@ class LocalGameService:
                 s.send(MsgId.ChangeSceneChannelRsp,pb.ChangeSceneChannelRsp(status=pb.StatusCode_BAD_REQ),packet_id)
                 s.publish()
             return
+        if msg_id == MsgId.SPOperateReq:
+            from private_secondary_password import prepare
+            body = prepare(self.lock, s, body, packet_id)
         # Channel admission is transactional in the scene-switch handler.
         with self.lock:
             if msg_id in (MsgId.ChangeSceneChannelReq, MsgId.DungeonEnterReq, MsgId.DungeonExitReq, MsgId.DungeonRepeatEnterReq):
@@ -652,6 +630,7 @@ class LocalGameService:
                 from private_vehicle_seats import depart as leave_vehicle
                 leave_vehicle(s)
                 s.social_invite = s.social_clap = s.social_roll = None
+                s.study_offer = None
                 s.active_challenge = None
                 s.fishing_cast = None
             if s.commit_callbacks:

@@ -1,7 +1,7 @@
 """Persistent unlocked difficulty tiers for the native world-level menu."""
 from proto import net_pb2 as pb
 from utils import db
-from private_dungeons import _table
+from utils.res_loader import res
 
 
 def state(player):
@@ -22,7 +22,7 @@ def objectives(player, captain, config):
         aid = row.get("achieve_i_d")
         if not aid:
             continue
-        rule = _table("Achieve", "achieve")[aid]
+        rule = res.index("Achieve", "achieve")[aid]
         raw = db.get_achieve(player, aid)
         count = pb.Achieve.FromString(raw).count if raw else 0
         if rule["new_achieve_condition"] == 36:
@@ -37,7 +37,7 @@ def objectives(player, captain, config):
 
 def list_levels(session, req, rsp):
     captain, _, highest = state(session.player_id)
-    for tier, row in sorted(_table("Level", "world_level").items()):
+    for tier, row in sorted(res.index("Level", "world_level").items()):
         if tier <= highest:
             rsp.unlock_world_levels.append(tier)
         for aid, count, _ in objectives(session.player_id, captain, row):
@@ -49,7 +49,7 @@ def unlock(session, req, rsp):
     player, tier = session.player_id, req.world_level
     captain, current, highest = state(player)
     rsp.world_level = current
-    config = _table("Level", "world_level").get(tier)
+    config = res.index("Level", "world_level").get(tier)
     if not config:
         return pb.StatusCode_BAD_REQ
     if tier <= highest:
@@ -68,7 +68,7 @@ def change(session, req, rsp):
     player, tier = session.player_id, req.world_level
     _, current, highest = state(player)
     rsp.world_level = current
-    if tier not in _table("Level", "world_level"):
+    if tier not in res.index("Level", "world_level"):
         return pb.StatusCode_BAD_REQ
     if tier > highest:
         return pb.StatusCode_WORLD_LEVEL_LOCKED

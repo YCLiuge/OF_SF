@@ -5,18 +5,18 @@ from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
 from proto import net_pb2 as pb
 from private_badge_config import ABILITY_BY_ITEM, NODE_REWARDS
-from private_dungeons import _table
+from utils.res_loader import res
 from private_initial_queries import badges
 import private_shop as shop
 from utils import db
 
 
 def _area(page):
-    return _table("MoonStone", "stone_area_data", "scene_i_d").get(page)
+    return res.index("MoonStone", "stone_area_data", "scene_i_d").get(page)
 
 
 def _boxes(area):
-    group = _table("MoonStone", "stone_unlock_data")[area["unlock_i_d"]]
+    group = res.index("MoonStone", "stone_unlock_data")[area["unlock_i_d"]]
     return {node["box_i_d"]: node for node in group["stone_unlock_data_group_info"] if node.get("item_count")}
 
 
@@ -27,13 +27,13 @@ def _owned(player, item):
 
 def _access(player, area):
     item = area["unlock_item_i_d"]
-    unlock = _table("PlayerUnlock", "player_unlock", "item_i_d").get(item)
+    unlock = res.index("PlayerUnlock", "player_unlock", "item_i_d").get(item)
     known = db.get_players_info(player, "unlock_functions")[0] or ()
     return (unlock is not None and unlock["i_d"] in known) or _owned(player, item)
 
 
 def _achieve_count(player, key):
-    rule = _table("Achieve", "achieve").get(key, {})
+    rule = res.index("Achieve", "achieve").get(key, {})
     raw = db.get_achieve(player, key)
     old = pb.Achieve.FromString(raw).count if raw else 0
     value = old
@@ -47,7 +47,7 @@ def _achieve_count(player, key):
 
 
 def _completed(player, key):
-    target = _table("Achieve", "achieve").get(key, {}).get("count_param", 0)
+    target = res.index("Achieve", "achieve").get(key, {}).get("count_param", 0)
     return target > 0 and _achieve_count(player, key) >= target
 
 
@@ -94,7 +94,7 @@ def starter_talk(session, req, packet_id):
 
 
 def list_badges(session, req, rsp):
-    for group in _table("MoonStone", "stone_unlock_data").values():
+    for group in res.index("MoonStone", "stone_unlock_data").values():
         for node in group.get("stone_unlock_data_group_info", ()):
             for key in node.get("unlock_achieve_i_d", ()):
                 _achieve_count(session.player_id, key)
@@ -107,7 +107,7 @@ def list_badges(session, req, rsp):
 
 def list_abilities(session, req, rsp):
     player = session.player_id
-    abilities = {r["need_item_i_d"]:r["i_d"] for r in _table("Ability","ability").values()}
+    abilities = {r["need_item_i_d"]:r["i_d"] for r in res.index("Ability","ability").values()}
     marks = ",".join("?" for _ in abilities)
     inventory = db.conn.execute(f"SELECT item_id,item_detail_blob FROM items WHERE player_id=? AND item_id IN ({marks})",
                                 (player,*abilities))
@@ -115,7 +115,7 @@ def list_abilities(session, req, rsp):
         info = pb.ItemDetail.FromString(blob).main_item
         if info.WhichOneof("item") == "base_item" and info.base_item.num:
             db.conn.execute("INSERT OR IGNORE INTO player_kv VALUES(?,'ability',?,0)", (player,str(abilities[key])))
-    limits = {r["i_d"]: max(t["level"] for t in r["level_info"]) for r in _table("Ability", "ability").values()}
+    limits = {r["i_d"]: max(t["level"] for t in r["level_info"]) for r in res.index("Ability", "ability").values()}
     for key, val in db.conn.execute("SELECT k,v FROM player_kv WHERE player_id=? AND ns='ability' ORDER BY CAST(k AS INTEGER)",
                                     (player,)):
         if str(key).isdecimal() and str(val).isdecimal() and int(val) <= limits.get(int(key), -1):
@@ -130,7 +130,7 @@ def _grant(player, rewards, rsp, pack, notices):
     current = list(db.get_players_info(player, "unlock_functions")[0] or ())
     added = []
     for item in rewards:
-        unlock = _table("PlayerUnlock", "player_unlock", "item_i_d").get(item)
+        unlock = res.index("PlayerUnlock", "player_unlock", "item_i_d").get(item)
         if unlock is not None and unlock["i_d"] not in current:
             added.append(unlock["i_d"])
             current.append(unlock["i_d"])
@@ -179,7 +179,7 @@ def activate(session, req, rsp, pack, notices):
         learned(session)
         msg = pb.AchieveNotice(status=pb.StatusCode_OK)
         for key in {k for n in nodes.values() for k in n.get("unlock_achieve_i_d",())}:
-            if _table("Achieve","achieve")[key].get("new_achieve_condition") == 44:
+            if res.index("Achieve","achieve")[key].get("new_achieve_condition") == 44:
                 msg.achieves.add(achieve_id=key, count=_achieve_count(player,key))
         if msg.achieves:
             notices.append((MsgId.AchieveNotice,msg))
@@ -212,8 +212,8 @@ def achievement_reward(session, req, rsp, pack, notices):
     if not req.achieve_ids:
         return pb.StatusCode_BAD_REQ
     catalog = {}
-    groups = _table("MoonStone","stone_reward_quest_data")
-    for area in _table("MoonStone","stone_area_data").values():
+    groups = res.index("MoonStone","stone_reward_quest_data")
+    for area in res.index("MoonStone","stone_area_data").values():
         for rule in groups[area["reward_quest_i_d"]]["stone_reward_quest_data_group_info"]:
             catalog[rule["achieve_condition_i_d"]] = area
     keys = dict.fromkeys(req.achieve_ids)

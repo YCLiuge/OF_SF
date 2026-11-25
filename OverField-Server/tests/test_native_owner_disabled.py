@@ -1,4 +1,4 @@
-"""The three disabled operator services discard submitted data and preserve the native failure reply."""
+"""The disabled operator services discard submitted data and preserve the native failure reply."""
 import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -17,6 +17,7 @@ def run(root, resources):
     marker = "OF-SF-SYNTHETIC-DISCARD-ONLY"
     examples = {
         "GetExpressAddress": {},
+        "UploadFGBytes": {"info": marker.encode()},
         "UploadExpressAddress": {"address": marker},
         "ClientLogAuth": {"device_id": marker, "log_server_token": marker},
         "ClientLogMessage": {"logs": [{"log_template": marker}]},
@@ -37,7 +38,7 @@ def run(root, resources):
     for path in root.rglob("*"):
         if path.is_file():
             assert marker.encode() not in path.read_bytes(), path.name
-    print("PASS four owner-disabled native requests discarded synthetic values, returned original status only and kept gameplay online.")
+    print("PASS five owner-disabled native requests discarded synthetic values, returned original status only and kept gameplay online.")
 
 
 if __name__ == "__main__":

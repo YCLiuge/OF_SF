@@ -7,7 +7,7 @@ import photo_media
 import realm_plaza
 from private_appearance import WEAR_SLOTS, publish
 from private_chat_text import chat_text
-from private_dungeons import _table
+from utils.res_loader import res
 from private_gameplay_transaction import Rejected, run
 from private_outfit_dye import outfit, store_outfit, worn
 from private_shop import now
@@ -38,7 +38,7 @@ def setup(conn):
 
 
 def configs(key):
-    return _table("GlobalConfig","config","key")["PhotoWall_"+key]["values"]
+    return res.index("GlobalConfig","config","key")["PhotoWall_"+key]["values"]
 
 
 def limit(key):
@@ -83,8 +83,8 @@ def active_show(uploading=False):
     plaza = _decoded(raw).get("plaza")
     in_plaza = realm_plaza.active(plaza,instant)
     overrides = _overrides(raw,in_plaza)
-    shows = _table("ActivityFashionShow","activity_fashion_show")
-    for row in _table("Activity","activity").values():
+    shows = res.index("ActivityFashionShow","activity_fashion_show")
+    for row in res.index("Activity","activity").values():
         if row.get("new_activity_type") != 9 or row.get("activity_i_d") not in shows:
             continue
         selected = current(row,instant,overrides)

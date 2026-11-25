@@ -4,19 +4,19 @@ import time
 
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_dungeons import _table
+from utils.res_loader import res
 import private_shop as shop
 from realm_events import NEWCOMER
 from utils import db
 
 
 def tasks():
-    return _table("ActivityQuest", "activity_quest")[NEWCOMER]["activity_quest_achieve_items"]
+    return res.index("ActivityQuest", "activity_quest")[NEWCOMER]["activity_quest_achieve_items"]
 
 
 def tiers():
-    target = _table("ActivityQuest", "activity_quest")[NEWCOMER]["activity_quest_reward_i_d"]
-    return _table("ActivityQuest", "activity_quest_reward")[target]["activity_quest_reward_item"]
+    target = res.index("ActivityQuest", "activity_quest")[NEWCOMER]["activity_quest_reward_i_d"]
+    return res.index("ActivityQuest", "activity_quest_reward")[target]["activity_quest_reward_item"]
 
 
 def _age(player, instant, row):
@@ -43,7 +43,7 @@ def _counts(player):
     pulls = db.conn.execute("SELECT COUNT(*) FROM gacha_record WHERE player_id=?", (player,)).fetchone()[0]
     crafts = dict(db.conn.execute("""SELECT CAST(substr(k,1,instr(k,':')-1) AS INTEGER),SUM(CAST(v AS INTEGER))
                                      FROM player_kv WHERE player_id=? AND ns='life_book' GROUP BY 1""", (player,)))
-    configs = _table("Achieve", "achieve")
+    configs = res.index("Achieve", "achieve")
     for task in tasks():
         key = task["achieve_i_d"]
         rule = configs[key]
@@ -79,7 +79,7 @@ def record(session, condition, params=()):
         else:prayer(session,condition)
     current = _stored(session.player_id)
     changes = pb.AchieveNotice(status=pb.StatusCode_OK)
-    configs = _table("Achieve", "achieve")
+    configs = res.index("Achieve", "achieve")
     for task in tasks():
         key = task["achieve_i_d"]
         rule = configs[key]
@@ -128,7 +128,7 @@ def update(session, instant, row, *, force):
 
 def heartbeat(session, instant):
     if NEWCOMER in getattr(session, "active_event_ids", ()) and time.monotonic() - getattr(session, "newcomer_checked", 0) >= 15:
-        update(session, instant, _table("Activity", "activity")[NEWCOMER], force=False)
+        update(session, instant, res.index("Activity", "activity")[NEWCOMER], force=False)
 
 
 def claim(session, req, rsp):
@@ -137,7 +137,7 @@ def claim(session, req, rsp):
     if req.activity_id != NEWCOMER:
         return pb.StatusCode_FAIL
     instant = shop.now()
-    row = current(_table("Activity", "activity")[NEWCOMER], instant, settings())
+    row = current(res.index("Activity", "activity")[NEWCOMER], instant, settings())
     if row is None:
         return pb.StatusCode_Activity_Close
     if req.is_progress:
@@ -155,7 +155,7 @@ def claim(session, req, rsp):
             return pb.StatusCode_BAD_REQ
         if task["days"] > _age(session.player_id, instant, row):
             return pb.StatusCode_FAIL
-        if _counts(session.player_id)[req.param] < _table("Achieve", "achieve")[req.param]["count_param"]:
+        if _counts(session.player_id)[req.param] < res.index("Achieve", "achieve")[req.param]["count_param"]:
             return pb.StatusCode_FAIL
         amounts = {r["item_i_d"]: r["item_num"] for r in task["activity_quest_item"]}
         system = "newcomer_goal"

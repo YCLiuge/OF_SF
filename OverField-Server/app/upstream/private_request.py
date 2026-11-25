@@ -32,10 +32,10 @@ def set_after_commit(session, attribute, value):
     session.commit_callbacks.append((setattr, (session, attribute, value)))
 
 
-def cached_mutation(session, name, data, packet_id, method):
+def cached_mutation(session, name, data, packet_id, method, *, context=()):
     reply = getattr(pb, name + "Rsp")()
     cache = getattr(session, "mutation_receipts", None)
-    key = (name, packet_id, blake2s(data).digest())
+    key = (name, *context, packet_id, blake2s(data).digest())
     if packet_id and cache is not None and key in cache:
         reply.ParseFromString(cache[key])
     else:

@@ -1,4 +1,5 @@
 """Settle a realm-issued code and its per-player receipt in the game database transaction."""
+from functools import partial
 import json
 
 from network.msg_id import MsgId
@@ -7,22 +8,22 @@ from private_dungeons import credit_player_experience
 from private_gameplay_transaction import run
 from private_shop import now
 from proto import net_pb2 as pb
-from realm_codes import SCHEMA, normalize
+from realm_codes import ensure_schema, normalize
 from utils import db
 
 
 def setup():
-    db.conn.execute("CREATE TABLE IF NOT EXISTS authority.realm_reward_codes "+SCHEMA)
+    ensure_schema(db.conn, attached=True)
     db.conn.execute("CREATE TABLE IF NOT EXISTS pc_redeem_totals(code TEXT PRIMARY KEY, uses INTEGER NOT NULL) WITHOUT ROWID")
 
 
-def claim(session, req, rsp, pending):
+def claim(session, req, rsp, pending, *, kind):
     try:
         code = normalize(req.code)
     except ValueError:
         return pb.StatusCode_REDEMPTION_CODE_NOT_EXIST
-    row = db.conn.execute("SELECT quota,expiry,rewards FROM authority.realm_reward_codes WHERE code=? AND enabled=1",
-                          (code,)).fetchone()
+    row = db.conn.execute("SELECT quota,expiry,rewards FROM authority.realm_reward_codes WHERE code=? AND kind=? AND enabled=1",
+                          (code,kind)).fetchone()
     if not row or row[1] and row[1] < now().strftime("%Y-%m-%d %H:%M:%S"):
         return pb.StatusCode_REDEMPTION_CODE_NOT_EXIST
     pid = session.player_id
@@ -40,9 +41,21 @@ def claim(session, req, rsp, pending):
         pending.notices.append((MsgId.PlayerLevelExpNotice,credit_player_experience(pid,amounts[1])))
     db.conn.execute("""INSERT INTO pc_redeem_totals VALUES(?,1)
                     ON CONFLICT(code) DO UPDATE SET uses=uses+1""",(code,))
-    rsp.code=req.code
     return pb.StatusCode_OK
 
 
-def redeem(session,req,rsp):
-    return run(session,req,rsp,claim)
+redeem_claim = partial(claim, kind="redemption")
+inherit_claim = partial(claim, kind="inherit")
+
+
+def redeem(session, req, rsp):
+    status = run(session, req, rsp, redeem_claim)
+    if status == pb.StatusCode_OK:
+        rsp.code = req.code
+    return status
+
+
+def inherit(session, req, rsp):
+    status = run(session, req, rsp, inherit_claim)
+    rsp.code_str = req.code
+    return status

@@ -2,7 +2,7 @@
 import time
 
 from network.msg_id import MsgId
-from private_dungeons import _table
+from utils.res_loader import res
 from private_events import _day
 from private_gameplay_transaction import run
 from private_shop import balance,now
@@ -13,7 +13,7 @@ from utils.pb_create import make_item
 
 
 def config(name):
-    return [int(v) for v in _table("GlobalConfig","config","key")[name]["values"]]
+    return [int(v) for v in res.index("GlobalConfig","config","key")[name]["values"]]
 
 
 def wallet(player, item):
@@ -45,7 +45,7 @@ def settle_fragments(player, instant, *, commit=True):
     converted = read_value(player, key)
     ready = ready_stones(player)
     fragments = wallet(player, 124)
-    steps = _table("DailyTask", "daily_task_reward")
+    steps = res.index("DailyTask", "daily_task_reward")
     # The national client uses min(today_converted + 1, max_id) for its next cost.
     last = max(steps)
     left = fragments

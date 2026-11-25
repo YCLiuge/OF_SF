@@ -16,7 +16,7 @@ CN_TIME=timezone(timedelta(hours=8))
 
 def catalog(activity):
     table="explore_activity" if activity else "explore_area"
-    return {r["i_d"]:r for r in res["Explore"][table]["datas"]}
+    return res.index("Explore", table)
 
 def active(config,now):
     return all((not value or check(datetime.fromisoformat(value).replace(tzinfo=CN_TIME).timestamp()*1000))

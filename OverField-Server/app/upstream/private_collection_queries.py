@@ -2,7 +2,7 @@
 from google.protobuf.message import DecodeError
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_dungeons import _table
+from utils.res_loader import res
 from utils import db
 
 
@@ -39,7 +39,7 @@ def owned_ids(session,req,rsp):
 
 
 def moon_scene(mid, kind):
-    config=_table("CollectionItem","collection_item").get(mid)
+    config=res.index("CollectionItem","collection_item").get(mid)
     if not config or config.get("new_collection_type")!=kind:
         return None
     # The original 11001xxx–11005xxx world families are verified by of-ps and the PC table.

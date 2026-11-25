@@ -5,6 +5,7 @@ from functools import partial
 
 from network.msg_id import MsgId
 from private_boxes import loot
+import private_encounter_gifts as gifts
 from private_dungeons import _table, progress, report, reward_items
 from private_gameplay_transaction import Rejected, run
 from private_shop import now
@@ -138,7 +139,7 @@ def create_chest(s,kind,template):
 
 
 def show_chest(s,idx,details):
-    if not idx:
+    if not idx or not gifts.visible(s,idx):
         return 0
     row=db.conn.execute("SELECT template,data FROM private_boxes WHERE player_id=? AND zone=? AND dynamic=1 AND idx=?"
                         " AND claimed=0",(s.player_id,s.scene_id,idx)).fetchone()
@@ -225,9 +226,12 @@ def update(kind,s,req,rsp,write):
     stamp=int(now().timestamp())
     expired = kind==ENCOUNTER and started and stamp-started>cfg["live_timer"]
     victory=phase==pb.Finish and (kind==ENCOUNTER or req.is_win)
+    preview=0
     if phase==pb.Start:
-        if kind==ENCOUNTER and stamp<available:
-            return pb.StatusCode_BAD_REQ
+        if kind==ENCOUNTER:
+            if stamp<available:
+                return pb.StatusCode_BAD_REQ
+            preview=gifts.for_battle(s,key,available,started and not expired)
         if not started or expired:
             started=stamp
         state=pb.Start
@@ -236,8 +240,10 @@ def update(kind,s,req,rsp,write):
         if state!=pb.Finish or not wins:
             if state!=pb.Start or not started or expired:
                 return pb.StatusCode_BAD_REQ
-            template = daily_template(s,cfg,wins) if kind==RIDDLE else 300000
+            template = daily_template(s,cfg,wins) if kind==RIDDLE else gifts.for_battle(s,key,available,started)
             chest=create_chest(s,kind,template)
+            if kind==ENCOUNTER and chest:
+                gifts.earned(s,chest,stamp)
             if kind==RIDDLE and not template:
                 # The published cap refers to a fallback pool. No retail row for
                 # pool 3 is present in 1.1.12. Only award a configured fallback.
@@ -265,7 +271,7 @@ def update(kind,s,req,rsp,write):
     else:
         rsp.encounter.battle_id=key
         rsp.encounter.state=state
-        rsp.encounter.box_id=show_chest(s,chest,None) if state==pb.Finish else 0
+        rsp.encounter.box_id=show_chest(s,chest,None) if state==pb.Finish else preview
     return pb.StatusCode_OK
 
 
@@ -278,6 +284,22 @@ def encounter_state(s, key, row, instant):
             if state==pb.Finish:
                 data.box_id=show_chest(s,chest,None)
     return data
+
+
+def mark_previews(s, entries, records, stamp):
+    available=[]
+    for entry in entries:
+        if entry.state!=pb.Start:
+            continue
+        key=entry.battle_id
+        prior=records.get(key)
+        started,cycle=prior[3:] if prior else (0,0)
+        live=bool(started and stamp-started<=configured(ENCOUNTER,key,s.scene_id)["live_timer"])
+        available.append((key,cycle,live))
+    marks=gifts.previews(s,available)
+    for entry in entries:
+        if entry.battle_id in marks:
+            entry.box_id=marks[entry.battle_id]
 
 
 def encounters(s,req,rsp):
@@ -293,6 +315,7 @@ def encounters(s,req,rsp):
             rsp.encounters.add(battle_id=key,state=pb.Close)
         else:
             rsp.encounters.add().CopyFrom(encounter_state(s,key,records.get(key),instant))
+    mark_previews(s,rsp.encounters,records,instant)
     return pb.StatusCode_OK
 
 
@@ -317,12 +340,15 @@ def fill(s,data):
     if s.scene_id==100 and getattr(s,"voice_scope",None)==(s.scene_id,s.channel_id):
         data.region_voices.extend(sorted(getattr(s,"field_voices",())))
     instant=int(now().timestamp())
+    encounter_records={}
     for kind,key,state,wins,chest,started,available in db.conn.execute("SELECT kind,id,state,wins,chest,started,available "
             "FROM realm_field_activities WHERE player=? AND scene=?",(s.player_id,s.scene_id)):
         if kind==RIDDLE:
             data.riddles.add(riddle_id=key,is_win=bool(wins) and state==pb.Finish,state=state)
         elif kind==ENCOUNTER:
-            data.encounter_data.add().CopyFrom(encounter_state(s,key,(state,wins,chest,started,available),instant))
+            encounter_records[key]=(state,wins,chest,started,available)
+            data.encounter_data.add().CopyFrom(encounter_state(s,key,encounter_records[key],instant))
+    mark_previews(s,data.encounter_data,encounter_records,instant)
 
 
 riddle = partial(run,operation=partial(update,RIDDLE))

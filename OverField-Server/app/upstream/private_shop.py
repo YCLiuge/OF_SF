@@ -7,7 +7,6 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from utils import db
 from utils.pb_create import make_item
-from private_dungeons import _table
 from utils.res_loader import res
 
 CN=timezone(timedelta(hours=8))
@@ -48,7 +47,7 @@ def count(player,key):
 
 
 def select_goods(grid,level,instant):
-    pool=_table("Shop","pool").get(grid["shop_pool_i_d"],{})
+    pool=res.index("Shop","pool").get(grid["shop_pool_i_d"],{})
     return next((v for v in pool.get("items",()) if v.get("min_level",1)<=level<=v.get("max_level",100)
                  and in_window(v,instant)),None)
 
@@ -63,11 +62,11 @@ def grid_info(view,shop,grid,goods,bought):
 
 def info(session,req,rsp):
     rsp.shop_id=req.shop_id
-    cfg=_table("Shop","grid").get(req.shop_id)
+    cfg=res.index("Shop","grid").get(req.shop_id)
     if cfg is None:
         return pb.StatusCode_CFG_NOT_FOUND
     instant=now()
-    if not in_window(_table("Shop","info").get(req.shop_id,{}),instant):
+    if not in_window(res.index("Shop","info").get(req.shop_id,{}),instant):
         return pb.StatusCode_OK
     level=db.get_players_info(session.player_id,"level")[0]
     for grid in cfg.get("items",()):
@@ -84,7 +83,7 @@ def quote(goods,bought,quantity):
             return None
         unit=currency.get("price",0)
         if bought and currency.get("increasing_i_d"):
-            steps=_table("Shop","increasing").get(currency["increasing_i_d"],{}).get("items",())
+            steps=res.index("Shop","increasing").get(currency["increasing_i_d"],{}).get("items",())
             if not steps:
                 return None
             unit=steps[min(bought-1,len(steps)-1)]["price"]
@@ -113,13 +112,13 @@ class UnsupportedGoods(Exception):
 def fixed_gift(player,template,level):
     """National shop gift boxes list world/level-specific reward groups. Only exact unconditional grants qualify."""
     world=db.get_players_info(player,"world_level")[0]
-    maps=_table("Reward","world_level_pool").get(template,{}).get("world_level_pool_group",())
+    maps=res.index("Reward","world_level_pool").get(template,{}).get("world_level_pool_group",())
     group_ids=[r["pool_i_d"] for r in maps if r.get("world_level",0)==world]
     group_ids=group_ids or [r["pool_i_d"] for r in maps if not r.get("world_level")]
     result=Counter()
     for group in group_ids or [template]:
-        for row in _table("Reward","reward_pool").get(group,{}).get("reward_pool_group",()):
-            source=_table("Reward","reward_item_pool").get(row["reward_pool_group_i_d"],{})
+        for row in res.index("Reward","reward_pool").get(group,{}).get("reward_pool_group",()):
+            source=res.index("Reward","reward_item_pool").get(row["reward_pool_group_i_d"],{})
             choices=[a for a in source.get("reward_item_pool_group",()) if a.get("min_level_limit",0)<=level<=a.get("max_level_limit",0xffffffff)]
             if len(choices)!=1:
                 return None
@@ -132,7 +131,7 @@ def fixed_gift(player,template,level):
 
 def award(player,amounts,rsp,notice):
     for item,qty in amounts.items():
-        tag=_table("Item","item")[item]["new_bag_item_tag"]
+        tag=res.index("Item","item")[item]["new_bag_item_tag"]
         if tag in INSTANCE_TAGS:
             for _ in range(qty):
                 instance=make_item(item,1,player)
@@ -166,12 +165,12 @@ def award(player,amounts,rsp,notice):
 def buy(session,req,rsp):
     player=session.player_id
     rsp.shop_id=req.shop_id
-    board=_table("Shop","grid").get(req.shop_id,{})
+    board=res.index("Shop","grid").get(req.shop_id,{})
     grid=next((g for g in board.get("items",()) if g["grid_i_d"]==req.grid_id),None)
     instant=now()
     if not grid:
         return pb.StatusCode_CFG_NOT_FOUND
-    if grid.get("goods_i_d") or not in_window(_table("Shop","info").get(req.shop_id,{}),instant):
+    if grid.get("goods_i_d") or not in_window(res.index("Shop","info").get(req.shop_id,{}),instant):
         return pb.StatusCode_MODULE_CLOSE
     level=db.get_players_info(player,"level")[0]
     goods=select_goods(grid,level,instant)
@@ -192,7 +191,7 @@ def buy(session,req,rsp):
     amounts=Counter({item:goods["item_num"]*quantity})
     if goods.get("add_item_i_d") and goods.get("add_item_num"):
         amounts[goods["add_item_i_d"]]+=goods["add_item_num"]*quantity
-    catalog=_table("Item","item")
+    catalog=res.index("Item","item")
     shipped={int(x) for x in params.get("Shop_Dispatched_ItemIDList",())}
     for template,units in list(amounts.items()):
         if catalog.get(template,{}).get("new_bag_item_tag")==pb.EBagItemTag_Gift:

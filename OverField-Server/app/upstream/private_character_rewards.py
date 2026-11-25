@@ -2,7 +2,7 @@
 from proto import net_pb2 as pb
 from utils import db
 from private_achievement_lists import character_list
-from private_dungeons import _table
+from utils.res_loader import res
 from private_shop import balance
 from private_activity_rewards import deliver_once
 
@@ -14,19 +14,19 @@ def receive(session, req, rsp, badge):
         return status
     cid = req.character_id
     char = pb.Character.FromString(db.get_characters(session.player_id, cid)[0])
-    config = _table("Character", "character")[cid]
+    config = res.index("Character", "character")[cid]
     if badge:
         key = req.achievement_id
         claimed = set(info.rewarded_id_lst)
         output = rsp.rewarded_achievement_id_lst
-        entries = _table("Character", "character_achieve")[config["character_achieve_i_d"]]["achieve_info"]
+        entries = res.index("Character", "character_achieve")[config["character_achieve_i_d"]]["achieve_info"]
         row = next((r for r in entries if r["achieve_i_d"] == key), None)
     else:
         rsp.character_id = cid
         key = req.reward_index
         claimed = set(info.has_rewarded_ids)
         output = rsp.rewarded_index_lst
-        entries = _table("Character", "character_achieve_reward")[config["achieve_reward_i_d"]]["achieve_reward_info"]
+        entries = res.index("Character", "character_achieve_reward")[config["achieve_reward_i_d"]]["achieve_reward_info"]
         row = next((r for r in entries if r["num"] == key), None)
     if row is None:
         return pb.StatusCode_CFG_NOT_FOUND
@@ -34,7 +34,7 @@ def receive(session, req, rsp, badge):
         output.extend(sorted(claimed))
         return pb.StatusCode_REPEAT_GET_REWARD
     if badge:
-        goal = _table("Achieve", "achieve")[key]["count_param"]
+        goal = res.index("Achieve", "achieve")[key]["count_param"]
         progress = next(a for a in info.character_achievement_lst if a.achieve_id == key)
         if progress.count < goal:
             return pb.StatusCode_Quest_Not_Finish
@@ -70,7 +70,7 @@ def tier_reward(session, req, rsp):
 def unlock_track(session, req, rsp):
     cid = req.character_id
     raws = db.get_characters(session.player_id, cid) if cid else ()
-    if not raws or cid not in _table("Character", "character"):
+    if not raws or cid not in res.index("Character", "character"):
         return pb.StatusCode_CharNotExist
     char = pb.Character.FromString(raws[0])
     if not char.is_unlock_payment:

@@ -5,7 +5,7 @@ import time
 
 from network.msg_id import MsgId
 from private_crafts import payments, save_pack
-from private_dungeons import _table
+from utils.res_loader import res
 from private_request import set_after_commit
 from private_social_profile import config, friend_points
 from proto import net_pb2 as pb
@@ -36,8 +36,8 @@ _multi_index = None
 
 def multiplayer_actions():
     global _multi_index
-    rows = _table("Expression","expression")
-    details = _table("Expression","multiplayer_expression")
+    rows = res.index("Expression","expression")
+    details = res.index("Expression","multiplayer_expression")
     if _multi_index is None or _multi_index[0] is not rows or _multi_index[1] is not details:
         actions = {g["action_i_d"]:details[g["multiplayer_i_d"]] for row in rows.values()
                    for g in row["expression_group_info"] if g.get("multiplayer_i_d") in details}
@@ -118,7 +118,7 @@ def clap(s, req, rsp):
 def dice(s, req, rsp):
     if not group(s) or not req.dice_id or not req.HasField("position") or req.pips>6:
         return pb.StatusCode_BAD_REQ
-    goods = _table("Expression","expression")[1020]["expression_group_info"][0]
+    goods = res.index("Expression","expression")[1020]["expression_group_info"][0]
     costs,status = payments(s.player_id,{goods["need_item_i_d"]:goods["need_item_count"]})
     if status != pb.StatusCode_OK:
         return status

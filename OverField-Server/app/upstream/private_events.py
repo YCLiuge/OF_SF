@@ -5,7 +5,7 @@ import json
 
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_dungeons import _table
+from utils.res_loader import res
 import private_shop as shop
 from realm_events import DAILY, NEWCOMER, WISH, SCHEMA
 import realm_plaza
@@ -71,8 +71,8 @@ def current(activity, instant, overrides):
 
 
 def _goals():
-    daily = _table("ActivityRegular", "activity_regular")[DAILY]
-    return _table("ActivityRegular", "activity_regular_pool")[daily["daily_pool_i_d"]]["activity_regular_pool_item"]
+    daily = res.index("ActivityRegular", "activity_regular")[DAILY]
+    return res.index("ActivityRegular", "activity_regular_pool")[daily["daily_pool_i_d"]]["activity_regular_pool_item"]
 
 
 def _day(instant):
@@ -94,7 +94,7 @@ def _notice_daily(session, day, activity):
             setattr(entry, field, int(stamp.timestamp() * 1000))
     for goal in _goals():
         aid = goal["achieve_i_d"]
-        expected = _table("Achieve", "achieve")[aid]
+        expected = res.index("Achieve", "achieve")[aid]
         if expected.get("new_achieve_condition") != 82 or expected.get("count_param") != 1:
             raise ValueError("Unsupported daily dessert condition")
         claimed = db.conn.execute("SELECT 1 FROM claimed_rewards WHERE player_id=? AND system=? AND key=?",
@@ -128,7 +128,7 @@ def refresh(session, force=False):
     bounds = [midnight + timedelta(hours=hour) for hour in (4, 5, 28)]
     if returning_until > instant.timestamp():
         bounds.append(datetime.fromtimestamp(returning_until,shop.CN))
-    for activity in _table("Activity", "activity").values():
+    for activity in res.index("Activity", "activity").values():
         aid = activity["i_d"]
         if (aid in (DAILY, NEWCOMER, WISH) or activity.get("new_activity_type") in (1, 2, 3, 6, 12, 13)
                 or activity.get("new_activity_type") in (8,9,10,11) or activity_dialogue(activity) or (aid in overrides and aid in realm_plaza.PAGES)):
@@ -186,7 +186,7 @@ def claim(session, req, rsp):
     if req.activity_id != DAILY:
         return pb.StatusCode_FAIL
     instant = shop.now()
-    activity = current(_table("Activity", "activity")[DAILY], instant, settings())
+    activity = current(res.index("Activity", "activity")[DAILY], instant, settings())
     if activity is None:
         return pb.StatusCode_Activity_Close
     goal = next((row for row in _goals() if row["achieve_i_d"] == req.param), None)
@@ -203,7 +203,7 @@ def claim(session, req, rsp):
 
 
 def use_potion(session, req, rsp):
-    cfg = _table("Item", "item")[req.item_id]
+    cfg = res.index("Item", "item")[req.item_id]
     currency = 10 if cfg["new_bag_item_tag"] == pb.EBagItemTag_Vitality else 11
     stock = shop.balance(session.player_id, req.item_id)
     if req.choose_item_id:

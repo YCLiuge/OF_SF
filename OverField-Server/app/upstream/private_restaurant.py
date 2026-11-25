@@ -4,7 +4,6 @@ import json
 import random
 
 from network.msg_id import MsgId
-from private_dungeons import _table
 from private_shop import now
 from proto import net_pb2 as pb
 from utils import db
@@ -17,21 +16,21 @@ def calendar_day():
 
 
 def weight(key):
-    return int(_table("GlobalConfig","config","key")[key]["values"][0])
+    return int(res.index("GlobalConfig","config","key")[key]["values"][0])
 
 
 def activity_config(activity):
     if "RestaurantGame" not in res:
         return None
     def group(sheet,index):
-        row=_table("RestaurantGame",sheet).get(activity,{})
+        row=res.index("RestaurantGame",sheet).get(activity,{})
         return {g[index]:g for g in row.get(sheet+"_group_info",[])}
     quests=group("restaurant_game_quest","game_quest_i_d")
     bags=group("restaurant_desk_bag","bag_i_d")
     foods=group("restaurant_game_food","food_i_d")
-    pools={k:r for k,r in _table("RestaurantGame","restaurant_random_pool").items() if r.get("activity_i_d")==activity}
+    pools={k:r for k,r in res.index("RestaurantGame","restaurant_random_pool").items() if r.get("activity_i_d")==activity}
     # All four retail themes reference the same stage IDs in their own quest sheets.
-    stages=_table("RestaurantGame","restaurant_dungeon")
+    stages=res.index("RestaurantGame","restaurant_dungeon")
     requested={q.get("param") for q in quests.values() if not q.get("new_restaurant_game_quest_type")}
     chain={did:stages[did] for did in requested if did in stages}
     roots=[did for did,row in chain.items() if not row.get("unlock_dungeon_i_d") and not row.get("is_refresh")]

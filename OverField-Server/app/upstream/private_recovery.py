@@ -7,7 +7,7 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from utils import db
 from utils.pb_create import make_item
-from private_dungeons import _table
+from utils.res_loader import res
 from private_shop import balance, now, CN
 
 
@@ -17,7 +17,7 @@ def seconds():
 
 def level_cap(pid, resource):
     row = db.get_players_info(pid,"level")
-    return _table("Level","player_level").get(row[0],{}).get("player_"+resource.lower(),0) if row else 0
+    return res.index("Level","player_level").get(row[0],{}).get("player_"+resource.lower(),0) if row else 0
 
 
 def read_vitality(pid):
@@ -68,7 +68,7 @@ def settle_vitality(pid):
         # Legacy saves have no trustworthy recovery anchor. Preserve the stored inventory.
         clock_set(pid,instant)
         return
-    interval=int(_table("GlobalConfig","config","key")["Player_Recover_Vitality_Second"]["values"][0])
+    interval=int(res.index("GlobalConfig","config","key")["Player_Recover_Vitality_Second"]["values"][0])
     ticks=(instant-anchor)//interval
     if ticks>0:
         data.main_item.base_item.num=min(cap,current+ticks)
@@ -77,7 +77,7 @@ def settle_vitality(pid):
 
 
 def daily_count(pid, key, instant):
-    hours = int(_table("GlobalConfig","config","key")["SystemRefreshTime"]["values"][0])
+    hours = int(res.index("GlobalConfig","config","key")["SystemRefreshTime"]["values"][0])
     day = (instant.astimezone(CN) - timedelta(hours=hours)).date().isoformat()
     row = db.conn.execute("SELECT v FROM player_kv WHERE player_id=? AND ns='recovery_buy' AND k=?",(pid,key)).fetchone()
     saved_day, _, count = str(row[0]).partition("/") if row else ("","","")
@@ -123,7 +123,7 @@ def purchase(session, rsp, name, packet_id, resource, item, day, count, current)
         return
     pid = session.player_id
     vitality = item == 10
-    options = _table("GlobalConfig","config","key")["Player_"+resource+"_Buy_Times"]["values"]
+    options = res.index("GlobalConfig","config","key")["Player_"+resource+"_Buy_Times"]["values"]
     cap = level_cap(pid,resource)
     if cap <= 0 or not options:
         rsp.status = pb.StatusCode_CFG_NOT_FOUND

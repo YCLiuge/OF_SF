@@ -8,7 +8,6 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from utils import db
 from utils.res_loader import res
-from private_dungeons import _table
 import private_shop as shop
 
 
@@ -35,7 +34,7 @@ def request_key(session, packet_id):
 
 
 def box_contents(player, item, level, choice=0):
-    template=_table("GiftBag","gift_bag").get(item)
+    template=res.index("GiftBag","gift_bag").get(item)
     if not template or level < template.get("player_lv",1):
         return None
     result=Counter()
@@ -98,7 +97,7 @@ def claim(player, shop_id, grid_id, request_id, *, pool=0):
             return failure(pb.StatusCode_BAD_REQ)
         delivery.ParseFromString(old[2])
         return pb.StatusCode_OK, delivery, pack, []
-    board = _table("Shop","grid").get(shop_id,{})
+    board = res.index("Shop","grid").get(shop_id,{})
     grid = next((g for g in board.get("items",()) if g["grid_i_d"]==grid_id and g.get("goods_i_d")),None)
     if not grid or pool not in (0,grid["shop_pool_i_d"],grid.get("first_buy_shop_pool_i_d")):
         return failure(pb.StatusCode_CFG_NOT_FOUND)
@@ -110,7 +109,7 @@ def claim(player, shop_id, grid_id, request_id, *, pool=0):
     key = shop.counter_key(grid,instant)
     bought = shop.count(player,key)
     selected = grid.get("first_buy_shop_pool_i_d",grid["shop_pool_i_d"]) if not bought else grid["shop_pool_i_d"]
-    alternatives = [entry for entry in _table("Shop","pool")[selected]["items"]
+    alternatives = [entry for entry in res.index("Shop","pool")[selected]["items"]
                     if entry.get("min_level",1)<=level<=entry.get("max_level",100)]
     if not alternatives:
         return failure(pb.StatusCode_CFG_NOT_FOUND)
@@ -147,7 +146,7 @@ def claim(player, shop_id, grid_id, request_id, *, pool=0):
                     totals[premium["item_i_d"]]+=premium.get("item_num",1)
     if not totals and not staged:
         return failure(pb.StatusCode_CFG_NOT_FOUND)
-    item_table = _table("Item","item")
+    item_table = res.index("Item","item")
     for item, quantity in totals.copy().items():
         if item_table.get(item,{}).get("new_bag_item_tag")==pb.EBagItemTag_Gift:
             contents=box_contents(player,item,level)

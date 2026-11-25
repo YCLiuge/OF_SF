@@ -8,7 +8,7 @@ from server.scene_data import online_session
 from utils import db
 from utils.pb_create import make_PlayerBriefInfo
 from private_crafts import payments, save_pack
-from private_dungeons import _table
+from utils.res_loader import res
 from private_social_profile import config, friend_points
 import private_shop as shop
 
@@ -73,9 +73,9 @@ def by_shop(session, req, rsp):
 
 
 def selection(player, board, grid_id, instant):
-    grid = next((g for g in _table("Shop","grid").get(board,{}).get("items",())
+    grid = next((g for g in res.index("Shop","grid").get(board,{}).get("items",())
                  if g["grid_i_d"] == grid_id and g.get("is_gift")), None)
-    info = _table("Shop","info").get(board,{})
+    info = res.index("Shop","info").get(board,{})
     if not grid or not shop.in_window(info,instant):
         return None
     goods = shop.select_goods(grid,db.get_players_info(player,"level")[0],instant)
@@ -136,7 +136,7 @@ def deliver(session):
     orders = db.conn.execute("""SELECT id,giver,shop,grid,pool,item,units,extra,extra_units,replacement,
         price,unique_goods,closing FROM private_wish_orders WHERE recipient=? AND mail=0 ORDER BY id""",(target,)).fetchall()
     for oid,giver,board,grid,pool,item,units,extra,extra_units,replacement,price,unique,closing in orders:
-        tag = _table("Item","item")[item]["new_bag_item_tag"]
+        tag = res.index("Item","item")[item]["new_bag_item_tag"]
         duplicate = unique and shop.already_owned(target,item,tag)
         if unique and not duplicate:
             # An earlier outstanding mail also reserves a unique product until its attachment is claimed.

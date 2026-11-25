@@ -42,9 +42,9 @@ class StackChanges:
 
 def grant_typed(player, template, quantity, rewards, pack, *, balances=None):
     """Deliver instance/role rewards or apply the existing stacked-item settlement path."""
-    from private_dungeons import _table
+    from utils.res_loader import res
     import private_shop as shop
-    tag = _table("Item","item")[template]["new_bag_item_tag"]
+    tag = res.index("Item","item")[template]["new_bag_item_tag"]
     if tag == pb.EBagItemTag_Card:
         from private_gacha import award
         for _ in range(quantity):

@@ -1,5 +1,5 @@
 from network.msg_id import MsgId
-from private_dungeons import _table
+from utils.res_loader import res
 from private_equipment import load
 from private_request import handler
 from proto import net_pb2 as pb
@@ -14,7 +14,7 @@ def update(session, req, rsp):
     actor = pb.Character.FromString(raw[0])
     if req.weapon_id:
         item = load(session.player_id,req.weapon_id,"weapon")
-        if not item or _table("Weapon","weapon").get(item.main_item.weapon.weapon_id,{}).get("new_weapon_system_type") != 6:
+        if not item or res.index("Weapon","weapon").get(item.main_item.weapon.weapon_id,{}).get("new_weapon_system_type") != 6:
             return pb.StatusCode_GATHER_WEAPON_NOT_WEAR
     if actor.gather_weapon == req.weapon_id:
         return pb.StatusCode_OK

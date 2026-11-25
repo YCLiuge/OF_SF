@@ -7,7 +7,6 @@ from server.scene_data import channel_members, online_session
 from utils import db
 from utils.res_loader import res
 from private_chat_text import chat_text
-from private_dungeons import _table
 from private_friends import peer_exists,state
 
 NEAR,WORLD,DM=pb.ChatChannel_Default,pb.ChatChannel_ChatRoom,pb.ChatChannel_Private
@@ -34,7 +33,7 @@ def setup():
 
 
 def global_value(key):
-    return int(_table("GlobalConfig","config","key")[key]["values"][0])
+    return int(res.index("GlobalConfig","config","key")[key]["values"][0])
 
 
 def nearby(session):
@@ -111,12 +110,12 @@ def history(session,req,rsp):
 
 
 def expression_ok(player,emotion):
-    row=_table("Chat","chat_emotion").get(emotion)
+    row=res.index("Chat","chat_emotion").get(emotion)
     if not row:return False
     if row.get("is_show"):return True
     if not row.get("achieve_condition_i_d"):return False
     source=db.get_achieve(player,row["achieve_condition_i_d"])
-    cfg=_table("Achieve","achieve").get(row["achieve_condition_i_d"],{})
+    cfg=res.index("Achieve","achieve").get(row["achieve_condition_i_d"],{})
     return bool(source and pb.Achieve.FromString(source).count>=cfg.get("count_param",1))
 
 

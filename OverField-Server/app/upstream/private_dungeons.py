@@ -12,17 +12,7 @@ from utils.pb_create import make_SceneTeam, make_item
 from utils.res_loader import res
 
 
-_indices = {}
-
-def _table(resource, group, key="i_d"):
-    owner = res[resource][group]
-    marker = (resource, group, key)
-    entry = _indices.get(marker)
-    if entry is None or entry[0] is not owner:
-        rows = owner["datas"] if isinstance(owner, dict) else owner
-        entry = (owner, {row[key]: row for row in rows if row.get(key)})
-        _indices[marker] = entry
-    return entry[1]
+_table = res.index
 
 
 def config(did):
@@ -236,7 +226,8 @@ def monster(session, req, rsp):
     did,pid=session.dungeon[0],session.player_id
     if not did:
         if session.scene_id != BOTTLE_PATH:
-            return pb.StatusCode_PlayerNotInDungeon
+            from private_ground_loot import monster as field_monster
+            return field_monster(session,req,rsp)
         # SceneGuide's MonsterNodeController.UnitConfigs has two 1206s and one 1022.
         # All three serialize Index=0. MonsterUtil sends this Index, not ChildIndex.
         if req.monster_index != 0 or req.monster_id not in (1206, 1022):

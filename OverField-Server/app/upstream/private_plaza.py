@@ -102,6 +102,10 @@ def send_action(session,req,rsp):
         return pb.StatusCode_CFG_NOT_FOUND
     from network.msg_id import MsgId
     notice=pb.SendActionNotice(status=pb.StatusCode_OK,action_id=req.action_id,from_player_id=session.player_id,from_player_name=session.player_name)
+    from private_actions_study import perform
+    status=perform(session,req.action_id,notice)
+    if status!=pb.StatusCode_OK:
+        return status
     from private_room_actions import invite
     invite(session,req.action_id,notice)
     for peer in channel_members(session.channel_id):

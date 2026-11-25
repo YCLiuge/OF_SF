@@ -3,7 +3,7 @@ from datetime import datetime
 from secrets import randbelow
 
 from network.msg_id import MsgId
-from private_dungeons import _table
+from utils.res_loader import res
 from private_gameplay_transaction import Rejected, StackChanges, run
 import private_shop as shop
 from proto import net_pb2 as pb
@@ -21,12 +21,12 @@ def setup():
 
 
 def spec():
-    return _table("ActivityJinli","jinli")[KOI]
+    return res.index("ActivityJinli","jinli")[KOI]
 
 
 def active(instant):
     from private_events import current, settings
-    row = _table("Activity","activity")[KOI]
+    row = res.index("Activity","activity")[KOI]
     return current(row,instant,settings(instant))
 
 

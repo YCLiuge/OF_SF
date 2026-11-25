@@ -14,8 +14,8 @@ from server.scene_data import get_session, online_session
 from utils import db
 
 
-COMMANDS = {"help", "whoami", "online", "give", "announce", "mail"}
-HELP = "服管命令：help、whoami、online、announce 正文、mail UID 正文、give 代币ID 数量。"
+COMMANDS = {"help", "whoami", "online", "give", "announce", "mail", "moonspot"}
+HELP = "服管命令：help、whoami、online、announce 正文、mail UID 正文、give 代币ID 数量、moonspot place、moonspot move/remove 编号。"
 
 
 def chat_command(text):
@@ -37,6 +37,9 @@ def message_body(value):
 def dispatch(session, verb, arg, reply):
     pid=session.player_id
     actor=public_uid(pid)
+    if verb=="moonspot":
+        from private_moon_spots import command
+        return command(session,arg,reply)
     if verb in ("help","whoami","online"):
         if arg:
             return None
@@ -85,15 +88,19 @@ def dispatch(session, verb, arg, reply):
     return None
 
 
+def current_grant(session):
+    # Acquire the same SQLite write lock used by CLI grant/revoke before the permission read.
+    # The operator change, command side effects, receipts and audit thus have a defined order.
+    db.conn.execute("UPDATE gm_grants SET generation=generation WHERE 0")
+    return db.conn.execute("""SELECT g.generation FROM private_slots p JOIN gm_grants g ON g.slot=p.slot
+        JOIN authority.profiles a ON a.slot=p.slot WHERE p.player_id=? AND p.slot=?""",(session.player_id,session.slot)).fetchone()
+
+
 def execute(session, raw, via, packet_id):
     reply=pb.GmCodeRsp(status=pb.StatusCode_FAIL,result="此账号没有本服游戏管理员权限")
     pid=session.player_id
     actor=public_uid(pid)
-    # Acquire the same SQLite write lock used by CLI grant/revoke before the permission read.
-    # The operator change, command side effects, receipts and audit thus have a defined order.
-    db.conn.execute("UPDATE gm_grants SET generation=generation WHERE 0")
-    row=db.conn.execute("""SELECT g.generation FROM private_slots p JOIN gm_grants g ON g.slot=p.slot
-        JOIN authority.profiles a ON a.slot=p.slot WHERE p.player_id=? AND p.slot=?""",(pid,session.slot)).fetchone()
+    row=current_grant(session)
     if not row:
         db.conn.execute("""INSERT INTO gm_denials VALUES(?,?,?,1)
             ON CONFLICT(day,player,via) DO UPDATE SET attempts=attempts+1""",(int(time.time())//86400,actor,via))

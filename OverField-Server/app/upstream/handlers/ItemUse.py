@@ -9,7 +9,6 @@ import utils.db as db
 from utils.res_loader import res
 from utils.pb_create import make_item
 from private_gifts import open_box
-from private_dungeons import _table
 from private_events import use_potion
 from proto import net_pb2 as pb
 
@@ -25,12 +24,12 @@ class Handler(PacketHandler):
             rsp.status=StatusCode.StatusCode_BAD_REQ
             session.send(MsgId.ItemUseRsp,rsp,packet_id)
             return
-        tag = _table("Item", "item").get(req.item_id, {}).get("new_bag_item_tag")
+        tag = res.index("Item", "item").get(req.item_id, {}).get("new_bag_item_tag")
         if tag == pb.EBagItemTag_PetGrid:
             from private_pets import expand
             return cached_mutation(session, "ItemUse", data, packet_id, expand)
         potion = tag in (pb.EBagItemTag_Vitality, pb.EBagItemTag_Energy)
-        if potion or req.item_id in _table("GiftBag","gift_bag"):
+        if potion or req.item_id in res.index("GiftBag","gift_bag"):
             key=(packet_id,req.item_id,req.num,req.choose_item_id)
             previous=getattr(session,"last_opened_gift",None)
             if packet_id and previous and previous[0]==key:

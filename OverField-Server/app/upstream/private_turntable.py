@@ -4,7 +4,7 @@ from datetime import datetime
 import random
 
 from network.msg_id import MsgId
-from private_dungeons import _table
+from utils.res_loader import res
 from private_gameplay_transaction import run
 from proto import net_pb2 as pb
 import private_shop as shop
@@ -19,12 +19,12 @@ def setup():
 
 
 def config(activity):
-    sheet = _table("ActivityTurntable", "activity_turntable")
+    sheet = res.index("ActivityTurntable", "activity_turntable")
     return sheet[activity.get("activity_i_d",activity["i_d"])]
 
 
 def pool(cfg):
-    return _table("ActivityTurntable","turntable_pool")[cfg["turntable_pool_i_d"]]["turntable_pool_item"]
+    return res.index("ActivityTurntable","turntable_pool")[cfg["turntable_pool_i_d"]]["turntable_pool_item"]
 
 
 def state(player, event):
@@ -73,7 +73,7 @@ def draw(session, req, rsp):
 
 def settle(session, req, rsp, pending):
     from private_events import current, settings
-    activity = _table("Activity","activity").get(req.activity_id)
+    activity = res.index("Activity","activity").get(req.activity_id)
     if not activity or activity.get("new_activity_type") != 6:
         return pb.StatusCode_CFG_NOT_FOUND
     if req.draw_times not in (1,10):
@@ -91,7 +91,7 @@ def settle(session, req, rsp, pending):
         return pb.StatusCode_TURNTABLE_NO_REWARD_REMAIN
     discounted = discount and req.draw_times == 1
     if discounted:
-        item, price = map(int,_table("GlobalConfig","config","key")["TurntableFirstOneNeed"]["values"])
+        item, price = map(int,res.index("GlobalConfig","config","key")["TurntableFirstOneNeed"]["values"])
     else:
         item, price = cfg["cost_item_i_d"], cfg["one_need_item_num"]
     # The native ten-draw confirmation checks the full ticket price. Any unused tickets
@@ -128,7 +128,7 @@ def settle(session, req, rsp, pending):
 
 
 def record(session, req, rsp):
-    activity = _table("Activity","activity").get(req.activity_id)
+    activity = res.index("Activity","activity").get(req.activity_id)
     if not activity or activity.get("new_activity_type") != 6:
         return pb.StatusCode_CFG_NOT_FOUND
     page = max(req.page,1)

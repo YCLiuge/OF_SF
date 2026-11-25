@@ -15,7 +15,7 @@ def now():
 
 
 def settings():
-    return {r["i_d"]:r for r in res["Explore"]["explore_interval"]["datas"]}
+    return res.index("Explore", "explore_interval")
 
 
 def setup():
@@ -75,7 +75,7 @@ def create_offer(session,explore_id=None):
     migrate(player)
     if active(player) or offer(player):
         return 0
-    areas={r["i_d"] for r in res["Explore"]["explore_area"]["datas"]}
+    areas=res.index("Explore", "explore_area")
     area=explore_id if explore_id in areas else min(areas)
     configs=settings()
     kind=101 if explore_id is None else random.choice(sorted(configs))
@@ -243,7 +243,7 @@ def reward(session,req,rsp):
     if claimed:return pb.StatusCode_REPEAT_GET_REWARD
     if finish>now():return pb.StatusCode_INTERVAL_NOT_FINISH
     # The shipped client gives no dedicated rift reward table. The private realm issues local area materials.
-    cfg=next((r for r in res["Explore"]["explore_area"]["datas"] if r["i_d"]==area),None)
+    cfg=res.index("Explore", "explore_area").get(area)
     if not cfg:return pb.StatusCode_CFG_NOT_FOUND
     amount=2 if player==owner else 1
     items=Counter()

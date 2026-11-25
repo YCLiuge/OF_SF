@@ -3,7 +3,7 @@ import time
 import unicodedata
 
 from network.msg_id import MsgId
-from private_dungeons import _table
+from utils.res_loader import res
 from private_friends import state as friend_state
 from proto import net_pb2 as pb
 from server.scene_data import get_session, online_session
@@ -45,7 +45,7 @@ def roster(team):
 
 
 def mode_rules(mode,sub):
-    options=_table("TeamGameplay","mode").get(mode,{}).get("mode_items",[])
+    options=res.index("TeamGameplay","mode").get(mode,{}).get("mode_items",[])
     if not sub and options:
         return options[0]
     return next((row for row in options if row["sub_mode_id"]==sub),None)
@@ -53,7 +53,7 @@ def mode_rules(mode,sub):
 
 def checked_name(session,text,default=False):
     maximum=min(session.realm_rules.mp_team_name_length,
-                int(_table("GlobalConfig","config","key")["TeamNameMaxLen"]["values"][0]))
+                int(res.index("GlobalConfig","config","key")["TeamNameMaxLen"]["values"][0]))
     text=unicodedata.normalize("NFC",text).strip()
     if not text and default:
         text=(session.player_name+"的队伍")[:maximum]
@@ -249,7 +249,7 @@ def kick(session,req,rsp):
     if team_for(target)!=row[0]:return pb.StatusCode_PLAYER_NOT_IN_MP_TEAM
     team=row[0]
     remove_member(team,target)
-    seconds=int(_table("GlobalConfig","config","key")["TeamKickRejoinCD"]["values"][0])
+    seconds=int(res.index("GlobalConfig","config","key")["TeamKickRejoinCD"]["values"][0])
     db.conn.execute("INSERT OR REPLACE INTO private_mp_kicks VALUES(?,?,?)",(team,target,int(time.time())+seconds))
     notify([target],MsgId.MPTeamPlayerKickedNotice,pb.MPTeamPlayerKickedNotice(status=pb.StatusCode_OK,team_id=team))
     member_update(row)
@@ -312,4 +312,3 @@ def on_login(session):
         detail(session,notice.m_p_team,row,roster(row[0]))
         rooms.restore_member(session,row,notice)
         session.send(MsgId.PlayerMPGameNotice,notice,0)
-

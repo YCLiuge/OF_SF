@@ -1,7 +1,7 @@
 """Native 4000 ten-pull fashion banner, including its per-player boost and item discovery rules."""
 import secrets
 
-from private_dungeons import _table
+from utils.res_loader import res
 from private_gacha_rewards import record
 from private_shop import in_window,now
 from proto import net_pb2 as pb
@@ -23,7 +23,7 @@ def setup():
 
 def choice(pool,item):
     if pool not in (PURPLE,GOLD,OUTFIT):return None
-    return next((r for r in _table("Gacha","reward_pool")[pool]["items"]
+    return next((r for r in res.index("Gacha","reward_pool")[pool]["items"]
                  if r["item_i_d"]==item and r.get("is_optional")),None)
 
 
@@ -37,7 +37,7 @@ def current(player):
 
 
 def rate(misses):
-    start,step=map(int,_table("GlobalConfig","config","key")["Gacha_OptionalUp_Param"]["values"])
+    start,step=map(int,res.index("GlobalConfig","config","key")["Gacha_OptionalUp_Param"]["values"])
     return min(100,start+step*misses)
 
 
@@ -70,8 +70,8 @@ _catalog_cache=None
 
 def weapon_catalog():
     global _catalog_cache
-    table=_table("Weapon","weapon")
-    pools=_table("Gacha","reward_pool")
+    table=res.index("Weapon","weapon")
+    pools=res.index("Gacha","reward_pool")
     if _catalog_cache is None or _catalog_cache[0] is not table or _catalog_cache[1] is not pools:
         families={tid:r.get("asset_full_name") for tid,r in table.items() if r.get("asset_full_name")}
         allowed={families[tid] for tid in BASIC_WEAPONS}
@@ -94,7 +94,7 @@ def known_ids(pid):
 
 
 def groups_for(known):
-    source=_table("Gacha","reward_pool")
+    source=res.index("Gacha","reward_pool")
     families,basic=weapon_catalog()
     allowed=basic.union(families[item] for item in known if item in families)
     sets={}
@@ -130,7 +130,7 @@ def ten_items(weights,groups,selected,boost):
 
 def draw(s,req,rsp,pending,pool):
     if req.is_single:return pb.StatusCode_BAD_REQ
-    cfg=_table("Gacha","info")[FASHION]
+    cfg=res.index("Gacha","info")[FASHION]
     if cfg.get("method2_count")!=10:return pb.StatusCode_CFG_NOT_FOUND
     pending.balances.change(cfg["consume_item2_i_d"],-cfg["consume_item2_num"])
     pid=s.player_id

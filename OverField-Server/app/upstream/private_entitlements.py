@@ -32,9 +32,10 @@ class Catalog:
     emoji: frozenset
     requirements: object
     head_stickers: object
+    starter_teachable_actions: bool
 
 
-def catalog():
+def catalog(starter_teachable_actions=True):
     items = {row["i_d"]:row for row in _rows("Item","item")}
     achievements = {row["i_d"]:row for row in _rows("Achieve","achieve") if row.get("i_d")}
     animations = {row["i_d"] for row in _rows("Action","action_info") if row.get("anim_prefab")}
@@ -68,6 +69,8 @@ def catalog():
             if clip not in animations:
                 continue
             actions.add(entry["i_d"])
+            if group.get("is_study") and not starter_teachable_actions:
+                continue
             collect_condition(group,pb.EBagItemTag_Item)
             material = group.get("need_item_i_d")
             if material in items and group.get("need_item_count",0)>0:
@@ -103,7 +106,8 @@ def catalog():
         else:
             templates[key] = detail.SerializeToString()
     return Catalog(MappingProxyType(templates),frozenset(furniture),frozenset(animations),
-                   frozenset(actions),frozenset(emoji),MappingProxyType(requirements),MappingProxyType(head_stickers))
+                   frozenset(actions),frozenset(emoji),MappingProxyType(requirements),MappingProxyType(head_stickers),
+                   starter_teachable_actions)
 
 
 def grant_head_stickers(conn,player,stickers):
@@ -143,6 +147,8 @@ def grant(conn, player, definitions):
                           (player,VERSION))
     if not acquired.rowcount:
         return new_heads
+    starter_key = "study-all-v1" if definitions.starter_teachable_actions else "study-manual-v1"
+    conn.execute("INSERT OR IGNORE INTO claimed_rewards(player_id,system,key) VALUES(?,'private_entitlements',?)",(player,starter_key))
     placed = {pb.FurnitureDetailsInfo.FromString(raw).furniture_item_id for raw, in conn.execute(
         "SELECT furniture_detail_blob FROM furnitures WHERE player_id=?",(player,))}
     placed.update(row[0] for row in conn.execute("SELECT item FROM realm_hand_furniture WHERE player=?",(player,)))
@@ -196,7 +202,8 @@ def migrate(conn, definitions):
 def notify(session):
     data = session.entitlements
     actions = pb.AchieveActionUnLockNotice(status=pb.StatusCode_OK)
-    actions.action_id_lst.extend(sorted(data.menu_actions))
+    from private_actions_study import unlocks
+    unlocks(session,actions)
     session.send(MsgId.AchieveActionUnLockNotice,actions,0)
     emoji = pb.ChatUnLockExpressionNotice(status=pb.StatusCode_OK)
     emoji.expression_id.extend(sorted(data.emoji))

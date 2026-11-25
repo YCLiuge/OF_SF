@@ -25,6 +25,9 @@ class RealmRules:
     mp_team_name_length:int=20
     mp_team_limit:int=0
     game_connections:int=24
+    starter_teachable_actions:int=1
+    monster_gift_percent:int=20
+    ordinary_ground_drop_percent:int=0
 
     def validated(self):
         numbers=[value for k,value in asdict(self).items() if k!="public_furniture_scope"]
@@ -32,6 +35,12 @@ class RealmRules:
             raise ValueError("Invalid integer for realm rules")
         if not 1<=self.game_connections<=512:
             raise ValueError("Choose 1..512 simultaneous game connections")
+        if not 0 <= self.ordinary_ground_drop_percent <= 100:
+            raise ValueError("Choose an ordinary ground drop chance between 0 and 100 percent")
+        if not 0 <= self.monster_gift_percent <= 100:
+            raise ValueError("Choose a monster gift chance between 0 and 100 percent")
+        if self.starter_teachable_actions not in (0,1):
+            raise ValueError("Choose 1 for permanent starter actions or 0 to learn teachable actions")
         if not 1<=self.public_min<=self.public_max<self.uid_start<0xffffffff:
             raise ValueError("Public channels must be positive, nonempty and below the first private home UID")
         if not 1<=self.world_min<=self.world_max:
@@ -83,4 +92,3 @@ def configure(state,changes):
 def command(state,args):
     changes={f.name:getattr(args,f.name,None) for f in fields(RealmRules) if getattr(args,f.name,None) is not None}
     print(json.dumps(asdict(configure(state,changes)),ensure_ascii=False,indent=2))
-

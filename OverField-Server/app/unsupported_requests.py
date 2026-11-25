@@ -7,7 +7,7 @@ from proto import net_pb2 as pb
 # observed failure code and do not register or process any future upstream handler.
 OWNER_DISABLED = frozenset((
     MsgId.GetExpressAddressReq, MsgId.UploadExpressAddressReq,
-    MsgId.ClientLogAuthReq, MsgId.ClientLogMessageReq,
+    MsgId.ClientLogAuthReq, MsgId.ClientLogMessageReq, MsgId.UploadFGBytesReq,
 ))
 
 

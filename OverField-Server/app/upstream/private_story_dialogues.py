@@ -3,7 +3,7 @@ from math import hypot
 
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_dungeons import _table
+from utils.res_loader import res
 from private_first_quest import save, saved
 from private_story_catalog import catalog
 from utils.pb_create import make_Quest
@@ -27,10 +27,10 @@ def dialogue_index():
     stories = catalog()
     if _cached_catalog is stories:
         return _by_condition, _reserved_aliases
-    quests = _table("Quest", "quest")
-    groups = _table("Quest", "condition_set_group")
-    sources = _table("Quest", "quest_resource")
-    achieves = _table("Achieve", "achieve")
+    quests = res.index("Quest", "quest")
+    groups = res.index("Quest", "condition_set_group")
+    sources = res.index("Quest", "quest_resource")
+    achieves = res.index("Achieve", "achieve")
     verified = {}
     aliases = {NPC}
     for sid in STORIES:

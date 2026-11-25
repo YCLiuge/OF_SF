@@ -2,7 +2,6 @@
 from network.msg_id import MsgId
 from private_arcade_wallet import wallet
 from private_channels import HOME, owner_for
-from private_dungeons import _table
 from proto import net_pb2 as pb
 from realm_uids import public_uid
 from utils import db
@@ -87,9 +86,9 @@ def clear_furniture(s,fid):
 
 
 def can_display(pid,cid):
-    row=_table("Character","character").get(cid,{})
-    tiers=_table("Character","character_achieve_reward").get(row.get("achieve_reward_i_d"),{}).get("achieve_reward_info",())
-    position=int(_table("GlobalConfig","config","key")["Character_HomeDisplay_Condition"]["values"][0])-1
+    row=res.index("Character","character").get(cid,{})
+    tiers=res.index("Character","character_achieve_reward").get(row.get("achieve_reward_i_d"),{}).get("achieve_reward_info",())
+    position=int(res.index("GlobalConfig","config","key")["Character_HomeDisplay_Condition"]["values"][0])-1
     if not 0<=position<len(tiers):return False
     threshold=tiers[position]
     return wallet(pid,threshold["unlock_item_i_d"])>=threshold["unlock_item_count"]

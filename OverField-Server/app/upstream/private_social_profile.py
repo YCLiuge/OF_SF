@@ -5,7 +5,7 @@ import unicodedata
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from private_crafts import payments, save_pack
-from private_dungeons import _table
+from utils.res_loader import res
 from private_friends import peer_exists, state
 from private_shop import now
 from utils import db
@@ -13,7 +13,7 @@ from utils.pb_create import make_PlayerBriefInfo, update_birthday
 
 
 def config(name):
-    return int(_table("GlobalConfig", "config", "key")[name]["values"][0])
+    return int(res.index("GlobalConfig", "config", "key")[name]["values"][0])
 
 
 def visibility(session, req, rsp):
@@ -62,7 +62,7 @@ def friend_points(player, other):
 
 
 def stage(points):
-    return max((row["intimacy_level"] for row in _table("Intimacy", "intimacy_stage").values()
+    return max((row["intimacy_level"] for row in res.index("Intimacy", "intimacy_stage").values()
                 if points >= row.get("intimacy_condition_value", 0)), default=0)
 
 
@@ -86,7 +86,7 @@ def labels(session, req, rsp):
             if field.value:
                 return pb.StatusCode_BAD_REQ
             if value:
-                rows = _table("Intimacy", "intimacy_label").values()
+                rows = res.index("Intimacy", "intimacy_label").values()
                 attr = "label_text_i_d" if field.type == 2 else "icon_i_d"
                 matches = [r for r in rows if r.get(attr) and value in (r["i_d"], r[attr])]
                 if not matches:
@@ -124,7 +124,7 @@ def gift(session, req, rsp):
     if current is None:
         return pb.StatusCode_FRIEND_NOT_EXIST
     rsp.intimacy = current
-    cfg = _table("Item", "item").get(req.item_id, {})
+    cfg = res.index("Item", "item").get(req.item_id, {})
     gain = cfg.get("relate_i_d", 0)
     if cfg.get("new_bag_item_tag") != pb.EBagItemTag_IntimacyGift or gain <= 0:
         return pb.StatusCode_BAD_REQ

@@ -1,6 +1,5 @@
 """Original 1.1.12 NPC commission and event dialogue panels send the quest ID with type 0."""
 from proto import net_pb2 as pb
-from private_dungeons import _table
 from private_first_quest import save, saved, within_target
 from private_story_objectives import at_fount
 from utils import db
@@ -21,9 +20,9 @@ _delegates = {}
 def delegates():
     global _npc_source, _delegates
     if _npc_source is not res["NPC"]:
-        pools = _table("NPC", "delegate_quest_pool")
+        pools = res.index("NPC", "delegate_quest_pool")
         result = {}
-        for actor in _table("NPC", "info").values():
+        for actor in res.index("NPC", "info").values():
             for action in actor.get("funcs", ()):
                 if action.get("new_n_p_c_function") != 13:
                     continue
@@ -76,7 +75,7 @@ def accept(session, req, rsp):
     import private_shop as shop
 
     quest_id = req.quest_id
-    definition = _table("Quest", "quest").get(quest_id)
+    definition = res.index("Quest", "quest").get(quest_id)
     if req.quest_type != pb.EQuestType_None or not definition:
         return pb.StatusCode_BAD_REQ
     role = delegates().get(quest_id)
@@ -86,7 +85,7 @@ def accept(session, req, rsp):
     elif quest_id == 910101:
         instant, overrides = shop.now(), settings()
         if not any(activity_dialogue(row) and current(row, instant, overrides)
-                   for row in _table("Activity", "activity").values()):
+                   for row in res.index("Activity", "activity").values()):
             return pb.StatusCode_Activity_Close
     else:
         return pb.StatusCode_BAD_REQ

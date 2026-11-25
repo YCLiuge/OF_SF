@@ -4,7 +4,7 @@ from datetime import datetime
 
 from network.msg_id import MsgId
 from private_activity_rewards import _sign_days, deliver_once
-from private_dungeons import _table
+from utils.res_loader import res
 import private_shop as shop
 from proto import net_pb2 as pb
 from utils import db
@@ -31,7 +31,7 @@ def mode(player,gift):
 
 
 def edition(gift):
-    return next(a for a in _table("Activity","activity").values() if a.get("new_activity_type")==2
+    return next(a for a in res.index("Activity","activity").values() if a.get("new_activity_type")==2
                 and a.get("activity_i_d",a["i_d"])==gift["i_d"])
 
 
@@ -49,14 +49,14 @@ def notice(player,activities,instant):
         if a.get("new_activity_type")!=2:
             continue
         aid=a["i_d"]
-        gift=_table("ActivityGift","activity_gift")[a["activity_i_d"]]
+        gift=res.index("ActivityGift","activity_gift")[a["activity_i_d"]]
         purchased=mode(player,gift)
         info=result.info.add(activity_id=aid,has_buy=purchased is not None)
         for col,field in (("opening_time","open_time"),("closing_time","close_time")):
             if a.get(col):
                 setattr(info,field,int(datetime.fromisoformat(a[col]).replace(tzinfo=shop.CN).timestamp()*1000))
         stages=gift["activity_gift_item"]
-        rules=_table("Achieve","achieve")
+        rules=res.index("Achieve","achieve")
         limit=max(rules[s["achieve_i_d"]]["count_param"] for s in stages)
         count,_,_=_sign_days(player,a,limit,instant)
         existing={key for key, in db.conn.execute("SELECT key FROM claimed_rewards WHERE player_id=? AND system='activity_gift' AND key LIKE ?",
@@ -78,13 +78,13 @@ def send(session,activities,instant):
 def claim(session,req,rsp):
     from private_events import current,settings
     now=shop.now()
-    a=_table("Activity","activity").get(req.activity_id)
+    a=res.index("Activity","activity").get(req.activity_id)
     if not a or a.get("new_activity_type")!=2:
         return pb.StatusCode_CFG_NOT_FOUND
     a=current(a,now,settings(now))
     if a is None:
         return pb.StatusCode_Activity_Close
-    gift=_table("ActivityGift","activity_gift")[a["activity_i_d"]]
+    gift=res.index("ActivityGift","activity_gift")[a["activity_i_d"]]
     stage=next((s for s in gift["activity_gift_item"] if s["achieve_i_d"]==req.achieve_id),None)
     if not stage:
         return pb.StatusCode_BAD_REQ
@@ -97,7 +97,7 @@ def claim(session,req,rsp):
     if req.achieve_id in view.info[0].rewarded_id_lst:
         return pb.StatusCode_ActivityGift_Rewarded
     count=next(v.count for v in view.quest_info_lst if v.achieve_id==req.achieve_id)
-    if count<_table("Achieve","achieve")[req.achieve_id]["count_param"]:
+    if count<res.index("Achieve","achieve")[req.achieve_id]["count_param"]:
         return pb.StatusCode_FAIL
     amounts=Counter()
     for row in stage["a_activity_gift_reward_item"]:

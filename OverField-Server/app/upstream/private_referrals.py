@@ -5,7 +5,7 @@ import time
 
 from network.msg_id import MsgId
 from private_activity_rewards import deliver_once
-from private_dungeons import _table
+from utils.res_loader import res
 from private_social_profile import config
 from proto import net_pb2 as pb
 from server.scene_data import get_session
@@ -50,13 +50,13 @@ def is_returning(pid,instant):
 
 def row_for(aid,instant):
     from private_events import current, settings
-    base=_table("Activity","activity").get(aid)
+    base=res.index("Activity","activity").get(aid)
     return current(base,instant,settings(instant)) if base else None
 
 
 def related(aid,kind):
     # Reruns reuse template 80001/90001. Pair the original calendar rows from the same run.
-    rows=_table("Activity","activity")
+    rows=res.index("Activity","activity")
     base=rows[aid]
     return next((r["i_d"] for r in rows.values() if r.get("new_activity_type")==kind
                  and r.get("opening_time")==base.get("opening_time") and r.get("closing_time")==base.get("closing_time")),0)
@@ -65,10 +65,10 @@ def related(aid,kind):
 def tasks(row):
     template=row["activity_i_d"]
     if row["new_activity_type"]==INVITE:
-        group=_table("ActivityInvite","activity_invite")[template]["invitor_quest_group"]
-        entries=_table("ActivityInvite","activity_invite_quest")[group]["activity_invite_quest_pool_item"]
+        group=res.index("ActivityInvite","activity_invite")[template]["invitor_quest_group"]
+        entries=res.index("ActivityInvite","activity_invite_quest")[group]["activity_invite_quest_pool_item"]
         return [(r["achieve_i_d"],r.get("complete_i_d"),r.get("activity_invite_pool_reward_item",())) for r in entries]
-    entries=_table("InteractionActivity","recall_activity")[template]["recall_activity_item"]
+    entries=res.index("InteractionActivity","recall_activity")[template]["recall_activity_item"]
     return [(r["achieve_condition_i_d"],None,r.get("recall_activity_reward_item",())) for r in entries]
 
 
@@ -143,7 +143,7 @@ def view(s,row,instant,notify=True):
     if kind==INVITE:
         all_counts=dict(db.conn.execute("""SELECT activity,COUNT(*) FROM referral_links WHERE owner=? AND activity IN
             (SELECT activity FROM referral_codes WHERE owner=?) GROUP BY activity""",(pid,pid)))
-        invite_counts={k:v for k,v in all_counts.items() if _table("Activity","activity")[k]["new_activity_type"]==INVITE}
+        invite_counts={k:v for k,v in all_counts.items() if res.index("Activity","activity")[k]["new_activity_type"]==INVITE}
         entry.invited=progress[170]
         entry.invited_total=sum(invite_counts.values())
         update=pb.ActivityInviteCountUpdateNotice(status=pb.StatusCode_OK,invited_total=entry.invited_total)
@@ -151,7 +151,7 @@ def view(s,row,instant,notify=True):
         s.send(MsgId.ActivityInviteCountUpdateNotice,update,0)
     tracker=pb.AchieveNotice(status=pb.StatusCode_OK)
     for goal,_,_ in tasks(row):
-        config_row=_table("Achieve","achieve")[goal]
+        config_row=res.index("Achieve","achieve")[goal]
         tracker.achieves.add(achieve_id=goal,count=min(config_row.get("count_param",1),progress.get(config_row["new_achieve_condition"],0)))
     s.send(MsgId.AchieveNotice,tracker,0)
     s.send(MsgId.ActivityInviteNotice if kind==INVITE else MsgId.ActivityRecallNotice,notice,0)
@@ -192,9 +192,9 @@ def use(s,req,rsp,kind):
         paired=row_for(related(aid,RETURN),instant)
         if not paired or not is_returning(pid,instant):
             return pb.StatusCode_ACTIVITY_INVITE_NOT_OPEN
-        items=_table("InteractionActivity","homecoming_reward")[paired["activity_i_d"]]["homecoming_reward_item"]
+        items=res.index("InteractionActivity","homecoming_reward")[paired["activity_i_d"]]["homecoming_reward_item"]
     else:
-        items=_table("ActivityInvite","activity_invite")[row["activity_i_d"]]["activity_invite_item"]
+        items=res.index("ActivityInvite","activity_invite")[row["activity_i_d"]]["activity_invite_item"]
     if db.conn.execute("SELECT 1 FROM referral_links WHERE activity=? AND guest=?",(aid,pid)).fetchone():
         return pb.StatusCode_INVITE_CODE_ALREADY_FILLED
     result=deliver_once(s,"referral_bind",aid,{r["item_i_d"]:r["item_num"] for r in items},rsp.rewards)
@@ -226,7 +226,7 @@ def claim(s,req,rsp,kinds):
     previous=claimed(pid,aid)
     if goal in previous:
         return pb.StatusCode_ACTIVITY_INVITE_TASK_CLAIMED
-    spec=_table("Achieve","achieve")[goal]
+    spec=res.index("Achieve","achieve")[goal]
     if ((entry[1] and entry[1] not in previous) or
             counts(pid,row).get(spec["new_achieve_condition"],0)<spec["count_param"]):
         return pb.StatusCode_ACTIVITY_INVITE_TASK_NOT_COMPLETED

@@ -27,7 +27,8 @@ OTHER_SUITES = ("test_game_archive","test_game_dungeon","test_dungeon_updates","
                 "test_faye_dialog","test_season_catalog","test_explore_dispatch",
                 "test_native_prayer_tasks","test_native_prayer_conversion")
 HANDSHAKE = {"VerifyLoginTokenReq","PlayerLoginReq"}
-MODES = {"AcceptQuestReq": "类型1接取目录主线，类型0按广场委托与已开放的活动对话接取。其他类型有独立参数限制。",
+MODES = {"UploadFGBytesReq": "发行方 FairGuard SDK 数据按区服策略关闭，正文不解析、不持久化。",
+         "AcceptQuestReq": "类型1接取目录主线，类型0按广场委托与已开放的活动对话接取。其他类型有独立参数限制。",
          "ClaimQuestRewardReq": "类型1按目录主线结算。类型9使用额外故事真实末步编号领取，24项结算有独立测试。",
          "PlayerSceneRecordReq": "实际移动上报更新场景或副本位置，测试可核对落库；目前处理器不发送同名响应。",
          "CreatePayOrderReq": "本地福利能发入背包；客户端交易响应会关闭真实支付。"}

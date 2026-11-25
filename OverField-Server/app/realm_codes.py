@@ -10,8 +10,18 @@ from realm_events import _timestamp
 from state_lock import exclusive_state
 
 VALID = re.compile(r"[A-Z0-9_-]{1,48}\Z", re.ASCII)
-SCHEMA = """(code TEXT PRIMARY KEY, rewards TEXT NOT NULL, quota INTEGER NOT NULL,
-             expiry TEXT, enabled INTEGER NOT NULL) WITHOUT ROWID"""
+KIND_COLUMN = "TEXT NOT NULL DEFAULT 'redemption' CHECK (kind IN ('redemption', 'inherit'))"
+SCHEMA = f"""(code TEXT PRIMARY KEY, rewards TEXT NOT NULL, quota INTEGER NOT NULL,
+             expiry TEXT, enabled INTEGER NOT NULL, kind {KIND_COLUMN}) WITHOUT ROWID"""
+
+
+def ensure_schema(conn, *, attached=False):
+    schema = "authority" if attached else "main"
+    table = f"{schema}.realm_reward_codes"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {table} " + SCHEMA)
+    columns = conn.execute(f"PRAGMA {schema}.table_info(realm_reward_codes)")
+    if all(column[1] != "kind" for column in columns):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN kind {KIND_COLUMN}")
 
 
 def normalize(code):
@@ -33,10 +43,10 @@ def manage(state, name, params):
     with exclusive_state(state,purpose="profiles") as root:
         root.mkdir(parents=True,exist_ok=True)
         with LocalIdentity(root/"identity.sqlite3")._write() as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS realm_reward_codes "+SCHEMA)
+            ensure_schema(conn)
             if name=="codes.list":
-                return {"codes":[dict(code=c,rewards=json.loads(r),quota=q,expires_at=t,enabled=bool(e))
-                    for c,r,q,t,e in conn.execute("SELECT * FROM realm_reward_codes ORDER BY code")]}
+                return {"codes":[dict(code=c,kind=k,rewards=json.loads(r),quota=q,expires_at=t,enabled=bool(e))
+                    for c,r,q,t,e,k in conn.execute("SELECT code,rewards,quota,expiry,enabled,kind FROM realm_reward_codes ORDER BY code")]}
             code = normalize(params["code"])
             if name=="codes.withdraw":
                 if not conn.execute("UPDATE realm_reward_codes SET enabled=0 WHERE code=?", (code,)).rowcount:
@@ -55,8 +65,9 @@ def manage(state, name, params):
             if not amounts:
                 raise ValueError("Supply at least one reward")
             try:
-                conn.execute("INSERT INTO realm_reward_codes VALUES(?,?,?,?,1)",
-                             (code,json.dumps(amounts),params["quota"],params.get("expires_at")))
+                conn.execute("INSERT INTO realm_reward_codes(code,rewards,quota,expiry,kind,enabled) VALUES(?,?,?,?,?,1)",
+                             (code,json.dumps(amounts),params["quota"],params.get("expires_at"),
+                              params.get("kind","redemption")))
             except sqlite3.IntegrityError as exc:
                 raise ValueError("This reward code has already been issued") from exc
             return {"code":code,"enabled":True}

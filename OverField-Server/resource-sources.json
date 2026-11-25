@@ -338,6 +338,12 @@
       "source": "TapTap PC 1.1.12",
       "detail": "Manual.json"
     },
+    "resources/data/MoonSpot.json": {
+      "sha256": "0f911e5aae45ccc9da164f7fb47f770a101e8ccb8c9bcb94578e8a937f3d84e5",
+      "bytes": 222,
+      "source": "TapTap PC 1.1.12",
+      "detail": "MoonSpot.json"
+    },
     "resources/data/MoonStone.json": {
       "sha256": "2628fffd07bfa143bc9e9d09ef59a315a96f53de48d7ea175f404c89af47fbcc",
       "bytes": 183903,
@@ -541,6 +547,12 @@
       "bytes": 40812,
       "source": "TapTap PC 1.1.12",
       "detail": "Unity Resources swirlnoisetexture/4"
+    },
+    "resources/data/EncounterMonsterNodes.json": {
+      "sha256": "a2c50b069d066ac7f41b9c4af6f2ce2fa4ff406fc203cbfc6d2cbb332732a55c",
+      "bytes": 11132,
+      "source": "TapTap PC 1.1.12",
+      "detail": "BattleEncounter.asset_full_name -> EncounterBattle prefab > MonsterNode.UnitConfigs (UnitID, Index), unique per encounter"
     }
   }
 }

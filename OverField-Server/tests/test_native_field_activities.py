@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from local_game_service import LocalGameService, MsgId, pb
 from local_identity import LocalIdentity
+from realm_rules import configure
 from private_shop import CN
 from test_game_realm import join, login, next_msg
 from test_native_gacha import call
@@ -18,6 +19,7 @@ OK=pb.StatusCode_OK
 def run(root,resources):
     ident=LocalIdentity(root/"identity.sqlite3")
     accounts=[ident.create_profile(v) for v in ("野外甲","野外乙")]
+    configure(root,{"monster_gift_percent":100})
     host=LocalGameService(ident,root,resources,port=0)
     def connect(i):
         sock,_,pid=login(host.port,ident.issue_ticket(*accounts[i]))

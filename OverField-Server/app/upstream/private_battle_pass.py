@@ -5,7 +5,6 @@ from time import monotonic
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from private_activity_rewards import _reward
-from private_dungeons import _table
 import private_events
 import private_shop as shop
 from utils import db
@@ -31,7 +30,7 @@ def _claim_keys(player, ns):
 
 
 def _open(activity_id, kind, instant):
-    rows = _table("Activity", "activity")
+    rows = res.index("Activity", "activity")
     row = rows.get(activity_id)
     if row is None and kind == 3:
         # Some retail dialogs send the template ID rather than the dated activity ID.
@@ -49,7 +48,7 @@ def _open(activity_id, kind, instant):
 
 
 def _template(row):
-    return _table("BattlePass", "battle_pass").get(row.get("activity_i_d", row["i_d"]))
+    return res.index("BattlePass", "battle_pass").get(row.get("activity_i_d", row["i_d"]))
 
 
 def _open_pass(request, instant):
@@ -73,7 +72,7 @@ def _period(instant):
 
 def _goals(template, instant):
     day, week = _period(instant)
-    groups = _table("BattlePass", "battle_pass_queset")
+    groups = res.index("BattlePass", "battle_pass_queset")
     for kind, field, period in (("day", "daily_achieve_reward_lst", day),
                                 ("week", "weekly_achieve_reward_lst", week),
                                 ("season", "season_achieve_reward_lst", "season")):
@@ -84,7 +83,7 @@ def _goals(template, instant):
 
 def _progress(player, row, goal, period, instant):
     aid, key = row["i_d"], goal["achieve_i_d"]
-    rule = _table("Achieve", "achieve")[key]
+    rule = res.index("Achieve", "achieve")[key]
     limit = rule["count_param"]
     condition = rule.get("new_achieve_condition")
     if condition == 82 and limit == 1:  # National daily login condition.
@@ -147,8 +146,8 @@ def _pass_info(session, notice, row, template, instant):
 
 
 def _wish_goal(row):
-    regular = _table("ActivityRegular", "activity_regular")[row["activity_i_d"]]
-    pool = _table("ActivityRegular", "activity_regular_pool")[regular["pool_i_d"]]
+    regular = res.index("ActivityRegular", "activity_regular")[row["activity_i_d"]]
+    pool = res.index("ActivityRegular", "activity_regular_pool")[regular["pool_i_d"]]
     return pool["activity_regular_pool_item"][0]
 
 
@@ -165,7 +164,7 @@ def _wish_days(player, row, target, instant):
 def _wish_info(session, row, instant):
     goal = _wish_goal(row)
     key = goal["achieve_i_d"]
-    target = _table("Achieve", "achieve")[key]["count_param"]
+    target = res.index("Achieve", "achieve")[key]["count_param"]
     days = _wish_days(session.player_id, row, target, instant)
     progress = pb.AchieveNotice(status=pb.StatusCode_OK)
     progress.achieves.add(achieve_id=key, count=days)
@@ -257,7 +256,7 @@ def quest_reward(session, req, rsp):
     key = f"{aid}:{req.achieve_id}:{period}"
     if key in _claim_keys(player, "pass_goal"):
         return pb.StatusCode_BattlePass_QuestRewarded
-    if _progress(player, row, goal, period, instant) < _table("Achieve", "achieve")[req.achieve_id]["count_param"]:
+    if _progress(player, row, goal, period, instant) < res.index("Achieve", "achieve")[req.achieve_id]["count_param"]:
         return pb.StatusCode_FAIL
     total = _read(player, "pass_xp", aid)
     week_key = f"{aid}:{_period(instant)[1]}"
@@ -326,7 +325,7 @@ def wish_claim(session, req, rsp):
     goal = _wish_goal(row)
     if req.pool_type != 3 or req.param != goal["achieve_i_d"]:
         return pb.StatusCode_BAD_REQ
-    target = _table("Achieve", "achieve")[req.param]["count_param"]
+    target = res.index("Achieve", "achieve")[req.param]["count_param"]
     if _wish_days(session.player_id, row, target, instant) < target:
         return pb.StatusCode_FAIL
     rsp.param, rsp.pool_type = req.param, req.pool_type

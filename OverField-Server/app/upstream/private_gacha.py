@@ -6,7 +6,7 @@ from functools import lru_cache
 from proto import net_pb2 as pb
 from utils import db
 from utils.pb_create import make_item
-from private_dungeons import _table
+from utils.res_loader import res
 from private_first_quest import STEPS, saved
 from private_request import cache_after_commit
 import private_tutorial_recruit as tutorial
@@ -78,7 +78,7 @@ CHOICE = 9000
 
 
 def choices(pools):
-    allowed = _table("Gacha", "info")[CHOICE]["card_pool_range"]
+    allowed = res.index("Gacha", "info")[CHOICE]["card_pool_range"]
     return [key for key in allowed if key in pools]
 
 
@@ -134,13 +134,13 @@ def outcome(pool, misses, guarantee_group, randbelow=secrets.randbelow):
                 break
         else:
             raise ValueError("Invalid recruit group weights")
-    members = _table("Gacha", "reward_pool")[group]["items"]
+    members = res.index("Gacha", "reward_pool")[group]["items"]
     item = members[randbelow(len(members))]["item_i_d"]
     return item, 0 if group == guarantee_group else misses + 1
 
 
 def explorer_at_least(item, quality):
-    row = _table("Item", "item").get(item, {})
+    row = res.index("Item", "item").get(item, {})
     return row.get("new_bag_item_tag") == pb.EBagItemTag_Card and row.get("quality", 0) >= quality
 
 
@@ -172,7 +172,7 @@ def extra(balances, item_id, amount, delta):
 
 
 def duplicate_bonus(balances, prefix, quality, delta):
-    rule = _table("GlobalConfig", "config", "key")[f"Gacha_{prefix}Quality{quality}_Reward"]
+    rule = res.index("GlobalConfig", "config", "key")[f"Gacha_{prefix}Quality{quality}_Reward"]
     for value in rule["values"]:
         item_id, amount = map(int, value.split(":"))
         extra(balances, item_id, amount, delta)
@@ -209,7 +209,7 @@ def award(pid, item_id, delta, notice, *, balances=None, recruit=False):
 
 
 def apply_award(pid, item_id, delta, notice, balances, recruit):
-    row = _table("Item", "item")[item_id]
+    row = res.index("Item", "item")[item_id]
     item = make_item(item_id, 1, pid)
     delta.CopyFrom(item)
     # Only a real random pull receives the appearance vouchers listed in string_gacha (PC 1.1.12).
@@ -227,7 +227,7 @@ def apply_award(pid, item_id, delta, notice, balances, recruit):
         return
     if row["new_bag_item_tag"] != pb.EBagItemTag_Card:
         raise ValueError("Unsupported recruit item type")
-    config = _table("Character", "character")[item_id]
+    config = res.index("Character", "character")[item_id]
     owned = db.get_characters(pid, item_id)
     if owned:
         delta.main_item.character.ParseFromString(owned[0])
@@ -277,7 +277,7 @@ def regular_draw(session, req, rsp, pending):
     pid = session.player_id
     if pool_id==FASHION:
         return fashion.draw(session,req,rsp,pending,pool)
-    config = _table("Gacha", "info")[req.gacha_id]
+    config = res.index("Gacha", "info")[req.gacha_id]
     key = "1" if req.is_single else "2"
     count = config["method" + key + "_count"]
     ticket_id, price = config["consume_item" + key + "_i_d"], config["consume_item" + key + "_num"]
@@ -285,7 +285,7 @@ def regular_draw(session, req, rsp, pending):
         return pb.StatusCode_BAD_REQ
     pending.balances.change(ticket_id, -price)
     misses = pity_misses(pid, pool)
-    reward_config = _table("Gacha", "info")[pool_id]
+    reward_config = res.index("Gacha", "info")[pool_id]
     sr_limit = pool.get("sr_pity", 10) if pool_id == 2000 else 0
     since_sr = recent_misses(pid, sr_limit - 1, 3) if sr_limit else 0
     for _ in range(count):
@@ -293,7 +293,7 @@ def regular_draw(session, req, rsp, pending):
         if sr_limit:
             if not explorer_at_least(item, 3) and since_sr + 1 >= sr_limit:
                 # Preserve an SSR explorer rolled by the base pool or hard pity on this exact pull.
-                item = secrets.choice(_table("Gacha", "reward_pool")[300]["items"])["item_i_d"]
+                item = secrets.choice(res.index("Gacha", "reward_pool")[300]["items"])["item_i_d"]
             since_sr = 0 if explorer_at_least(item, 3) else since_sr + 1
         delta = rsp.items.add()
         award(pid, item, delta, pending.pack, balances=pending.balances, recruit=True)
@@ -304,7 +304,7 @@ def regular_draw(session, req, rsp, pending):
 
 
 def history(session, req, rsp):
-    if req.gacha_id not in _table("Gacha", "info") or req.page < 1:
+    if req.gacha_id not in res.index("Gacha", "info") or req.page < 1:
         return pb.StatusCode_BAD_REQ
     rsp.gacha_id, rsp.page = req.gacha_id, req.page
     pid = session.player_id
@@ -324,8 +324,8 @@ def grant_pick(session, req, rsp, pending):
     pool = active().get(req.gacha_id)
     if not pool or onboarding(session):
         return pb.StatusCode_BAD_REQ
-    config = _table("Gacha", "info")[req.gacha_id]
-    options = _table("Gacha", "reward_pool").get(config.get("optional_pool_i_d"), {})
+    config = res.index("Gacha", "info")[req.gacha_id]
+    options = res.index("Gacha", "reward_pool").get(config.get("optional_pool_i_d"), {})
     if req.item_id not in {r["item_i_d"] for r in options.get("items", [])}:
         return pb.StatusCode_BAD_REQ
     pid = session.player_id
@@ -344,7 +344,7 @@ def trace_draw(session, req, size, status):
     diagnostics = getattr(session, "stages", None)
     if diagnostics is None or not diagnostics.enabled:
         return
-    catalog = _table("Gacha", "info")
+    catalog = res.index("Gacha", "info")
     configured = active()
     is_tutorial = onboarding(session)
     if is_tutorial:

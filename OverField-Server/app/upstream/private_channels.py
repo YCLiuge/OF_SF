@@ -6,7 +6,7 @@ from server.scene_data import get_session
 from utils import db
 from utils.pb_create import make_item
 from realm_uids import local_uid, public_uid
-from private_dungeons import _table
+from utils.res_loader import res
 
 HOME = 9999
 
@@ -185,8 +185,7 @@ def fill_garden(s,world):
                 shown.player_id=player
                 shown.furniture_info.furniture_id=fid
                 shown.furniture_info.furniture_item_id=item
-    catalog = _table("HomeItem", "home_item", "item_i_d")
+    catalog = res.index("HomeItem", "home_item", "item_i_d")
     points = sum(catalog.get(entry.furniture_item_id, {}).get("home_item_point_num", 0)
                  for entry in world.garden_furniture_info_map.values())
     world.furniture_current_point_num = min(points, 0xffffffff)
-

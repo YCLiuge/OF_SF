@@ -52,6 +52,10 @@ def template_at(session, index):
 def key_for(session, req, index):
     if req.box_type not in (0, 1) or req.loc_type != (pb.TreasureBoxLocType_DUNGEON if session.dungeon[0] else pb.TreasureBoxLocType_SCENE):
         return None
+    if req.box_type==1:
+        from private_encounter_gifts import visible
+        if not visible(session,index):
+            return None
     return (session.player_id, zone(session), int(req.box_type), index)
 
 
@@ -148,4 +152,3 @@ def fill_scene(session, data):
         entry = data.treasure_boxes.add()
         entry.ParseFromString(blob)
         entry.next_refresh_time *= 1000
-

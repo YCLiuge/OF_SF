@@ -1,7 +1,7 @@
 """Place owned treasure maps on original field gathering points and settle a completed dig."""
 import random
 
-from private_dungeons import _table
+from utils.res_loader import res
 from private_equipment import load
 from private_gameplay_transaction import run
 from proto import net_pb2 as pb
@@ -14,7 +14,7 @@ _point_index = None
 
 def field_points():
     global _point_index
-    scenes = _table("ScenesConfigAsset","Scenes","ID")
+    scenes = res.index("ScenesConfigAsset","Scenes","ID")
     if _point_index and _point_index[0] is scenes:
         return _point_index[1]
     result = {}
@@ -76,23 +76,23 @@ def equipped_shovel(session):
     if actor.is_dead or not detail:
         return None
     weapon = detail.main_item.weapon
-    config = _table("Shovel","shovel").get(weapon.weapon_id)
+    config = res.index("Shovel","shovel").get(weapon.weapon_id)
     if not config or config.get("item_i_d")!=detail.main_item.item_id or not weapon.durability:
         return None
     return config
 
 
 def draw_reward(level,pool):
-    groups = _table("Reward","reward_pool").get(pool,{}).get("reward_pool_group",())
+    groups = res.index("Reward","reward_pool").get(pool,{}).get("reward_pool_group",())
     choices = []
     for group in groups:
-        entries = _table("Reward","reward_item_pool").get(group["reward_pool_group_i_d"],{})
+        entries = res.index("Reward","reward_item_pool").get(group["reward_pool_group_i_d"],{})
         choices.extend(row for row in entries.get("reward_item_pool_group",())
                        if row.get("min_level_limit",0)<=level<=row.get("max_level_limit",0xffffffff))
     if not choices:
         return None
     row = random.choice(choices)
-    if row.get("need_items") or row["item_i_d"] not in _table("Item","item"):
+    if row.get("need_items") or row["item_i_d"] not in res.index("Item","item"):
         return None
     qty = random.randint(row.get("item_min_count",1),row.get("item_max_count",1))
     return {row["item_i_d"]:qty} if qty else None

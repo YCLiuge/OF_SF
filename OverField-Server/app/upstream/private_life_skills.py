@@ -6,7 +6,7 @@ import time
 
 from network.msg_id import MsgId
 from private_crafts import base, payments, save_pack
-from private_dungeons import _table
+from utils.res_loader import res
 from proto import net_pb2 as pb
 from utils import db
 
@@ -29,7 +29,7 @@ def clock():
 def tiers(kind, skill):
     resource, prefix, _ = DISCIPLINES[kind]
     group = prefix + "_spell"
-    return _table(resource, group).get(skill, {}).get(group + "_items", ())
+    return res.index(resource, group).get(skill, {}).get(group + "_items", ())
 
 
 def import_legacy(player):
@@ -121,7 +121,7 @@ def start(session, req, rsp):
         if not due:
             return pb.StatusCode_SkillAlreadyStudy if level else pb.StatusCode_BAD_REQ
         # The native confirmation shows floor(remaining_seconds * per_minute / 60 + 0.5).
-        pair = _table("GlobalConfig", "config", "key")["ClearCDByItemConfig"]["values"][0]
+        pair = res.index("GlobalConfig", "config", "key")["ClearCDByItemConfig"]["values"][0]
         currency, rate = map(int, pair.split(":"))
         cost = (max(0, due - clock()) * rate + 30) // 60
         charges, status = payments(player, {currency: cost}) if cost else ({}, pb.StatusCode_OK)

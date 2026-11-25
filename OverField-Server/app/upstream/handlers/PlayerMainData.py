@@ -144,8 +144,9 @@ class Handler(PacketHandler):
         rsp.player_buffs.add().system_type = PlayerBuff.BuffSystemType_GLOBAL
         from private_outfit_dye import fill_login
         fill_login(player_id, rsp)
-        rsp.player_drop_rate_info.kill_drop_rate = 1000
-        rsp.player_drop_rate_info.treasure_drop_rate = 1000
+        # Normal account values in the 1.1.12 national profile snapshot.
+        rsp.player_drop_rate_info.kill_drop_rate = 100
+        rsp.player_drop_rate_info.treasure_drop_rate = 100
         rsp.questionnaire_info.CopyFrom(PlayerQuestionnaireInfo())
         rsp.player_label = player_id
         rsp.channel_label = session.channel_id
@@ -157,8 +158,8 @@ class Handler(PacketHandler):
         recover(session)
         from private_appearance import phone_case
         rsp.phone_case=phone_case(player_id)
-        rsp.sp_open_status = True
-        rsp.sp_check_status = True
+        from private_secondary_password import snapshot as secondary_status
+        secondary_status(session, rsp)
         session.send(MsgId.PlayerMainDataRsp, rsp, packet_id)  # 1005,1006
 
         from private_social_profile import daily, gift_count

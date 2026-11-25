@@ -4,7 +4,7 @@ from datetime import timedelta
 import random
 
 from network.msg_id import MsgId
-from private_dungeons import _table
+from utils.res_loader import res
 from private_gameplay_transaction import run
 import private_shop as shop
 from proto import net_pb2 as pb
@@ -36,13 +36,13 @@ def total(event):
 
 def config(event):
     from private_events import current, settings
-    activity = _table("Activity","activity").get(event)
+    activity = res.index("Activity","activity").get(event)
     if not activity or activity.get("new_activity_type") != 12:
         return None,pb.StatusCode_CFG_NOT_FOUND
     now = shop.now()
     if current(activity,now,settings(now)) is None:
         return None,pb.StatusCode_Activity_Close
-    return _table("InteractionActivity","activity_interaction")[activity["activity_i_d"]],pb.StatusCode_OK
+    return res.index("InteractionActivity","activity_interaction")[activity["activity_i_d"]],pb.StatusCode_OK
 
 
 def box(target, values):
@@ -85,10 +85,10 @@ def heartbeat(session):
 
 
 def choose_reward(pool,level):
-    groups = _table("Reward","reward_pool")[pool]["reward_pool_group"]
+    groups = res.index("Reward","reward_pool")[pool]["reward_pool_group"]
     if len(groups)!=1:
         raise ValueError("Expected one authored sandbag drop group")
-    entries = _table("Reward","reward_item_pool")[groups[0]["reward_pool_group_i_d"]]["reward_item_pool_group"]
+    entries = res.index("Reward","reward_item_pool")[groups[0]["reward_pool_group_i_d"]]["reward_item_pool_group"]
     eligible = [r for r in entries if r.get("min_level_limit",0)<=level<=r.get("max_level_limit",0xffffffff)]
     row = random.choice(eligible)
     return row["item_i_d"], random.randint(row["item_min_count"],row["item_max_count"])
@@ -155,7 +155,7 @@ def claim_once(session,req,rsp,pending):
         return pb.StatusCode_BAD_REQ
     gains=Counter()
     if req.reward_type==pb.RewardType_Server:
-        tiers=_table("InteractionActivity","full_server_activity")[cfg["i_d"]]["full_server_activity_item"]
+        tiers=res.index("InteractionActivity","full_server_activity")[cfg["i_d"]]["full_server_activity_item"]
         by_id={r["index"]:r for r in tiers}
         count=total(event)
         for idx in req.seq_list:

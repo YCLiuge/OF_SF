@@ -1,7 +1,7 @@
 """Validate the native ten-slot character appearance snapshot against this player's inventory."""
 from network.msg_id import MsgId
 from private_appearance import owned
-from private_dungeons import _table
+from utils.res_loader import res
 from private_equipment import load
 from proto import net_pb2 as pb
 from utils import db
@@ -22,7 +22,7 @@ def valid_tool(player,instance,kind):
     if not detail:
         return False
     template=detail.main_item.weapon.weapon_id
-    config=_table("Weapon","weapon").get(template,{})
+    config=res.index("Weapon","weapon").get(template,{})
     return (detail.main_item.item_id==template and config.get("new_weapon_type")==kind
             and config.get("new_weapon_system_type")==6)
 
@@ -44,7 +44,7 @@ def update(session,req,rsp):
     if value.badge not in (0,5000) and not owned(player,value.badge,pb.EBagItemTag_Badge):
         return pb.StatusCode_BAD_REQ
     if value.umbrella_id:
-        umbrella=_table("Umbrella","umbrella").get(value.umbrella_id)
+        umbrella=res.index("Umbrella","umbrella").get(value.umbrella_id)
         if (not umbrella or umbrella.get("item_i_d")!=value.umbrella_id or
                 value.umbrella_id not in legacy and not owned(player,value.umbrella_id,pb.EBagItemTag_Umbrella)):
             return pb.StatusCode_BAD_REQ

@@ -41,17 +41,25 @@ py -3 tools/test_compact_player.py
 py -3 tools/test_player_patch.py --archive dist/OF_SF-PlayerPatch-1.1.12-Windows-x64.zip
 ```
 
-## 生成预填区服的朋友包
+## 生成可公开分享的朋友包
 
-从上一步校验通过的通用 ZIP 生成。把示例地址和公开 CA 换成自己区服的值。朋友包可重新解压到任意目录，首次运行从随包预设读取地址和证书；已有个人设置优先。
+从校验通过的通用 ZIP 生成，构建过程只需该 ZIP 和它的 SHA-256。连接资料通过独立邀请在玩家本机导入。
 
 ```powershell
 $baseZip = "dist/OF_SF-PlayerPatch-1.1.12-Windows-x64.zip"
 $baseHash = ((Get-Content -LiteralPath "$baseZip.sha256" -Raw).Trim() -split '\s+')[0]
 $friendsZip = "dist/OF_SF-Friends-1.1.12-Windows-x64.zip"
-py -3 tools/package_friends_patch.py --source $baseZip --sha256 $baseHash --endpoint https://realm.example:18443 --ca realm-ca.pem --output $friendsZip
-py -3 tools/test_friends_patch.py --source $baseZip --friends $friendsZip --check-connection
+py -3 tools/package_friends_patch.py --source $baseZip --sha256 $baseHash --output $friendsZip
+py -3 tools/test_friends_patch.py --source $baseZip --friends $friendsZip
 ```
+
+服主可在已配置好的玩家补丁目录中，使用随包运行时从本机设置导出独立明文邀请。请把输出指定到自己的私有文件夹，通过单独渠道发给获准加入的人。邀请只包含区服地址和可选的公开 CA，不能代替玩家的账号密码。
+
+```powershell
+.\OverField-Server\runtime-win64\python.exe -B .\client_tools\realm_invitation.py export --output "$env:LOCALAPPDATA\我的区服.ofinvite"
+```
+
+若需实际验证区服 TLS，可在测试命令后添加 `--invitation <私有邀请文件> --check-connection`。
 
 ## 复测频道移动
 
@@ -123,18 +131,22 @@ python -B "$server/tests/test_login_inventory.py" --resources "$server/resources
 
 当前是单进程区服，Python 执行玩法，Protobuf 使用原生 upb 扩展。SQLite WAL 保存本机存档。32 个回环客户端的写入测试中，请求等待区服锁的 P95 为 24.98 ms，SQLite 提交为 0.41 ms；两项独立统计。现阶段优先缩短区服锁内的计算、减少重复解包和大对象分配。不同区服可运行独立进程并使用各自的存档目录。
 
-PostgreSQL 的多版本并发控制和行级锁适合多个进程同时修改不同玩家的记录。若要让同一个区服跨进程扩展，需先明确角色与场景的写入归属，以及跨玩家转移、唯一角色名、领奖防重和提交后广播的事务边界。迁移决策应在目标硬件上以同一份脱敏存档对照 SQLite 与 PostgreSQL 的吞吐、P95/P99、常驻内存及故障恢复。当前没有 PostgreSQL 与本项目的同负载对跑数据。[PostgreSQL 并发控制](https://www.postgresql.org/docs/current/mvcc-intro.html) · [SQLite WAL](https://www.sqlite.org/wal.html#concurrency)
+`of.py postgres-report refresh` 可将完整备份中的公开角色与背包数据投影到 PostgreSQL，`verify` 逐行校验。24 个角色、45,696 条库存上，每批 240 次跨角色道具统计的中位耗时从 SQLite 的 615 ms 降至 PostgreSQL 14.23 的 201 ms。指定角色和道具的点查分别为 1.73 和 139 ms，后者每批包含一次 `psql` 启动和本地连接。游戏仍向 SQLite 写入。多进程共用一个世界还需明确角色和场景的写入归属、跨玩家交易与领奖的事务边界。[PostgreSQL 查询副本与复测方法](../OverField-Server/docs/PostgreSQL查询副本.md)
 
 原生扩展适合在 CPU 分析确认热点后替换独立的编解码或广播运算。每次替换必须保持相同的消息顺序、收件人、存档与重试结果。服务进程内存和网络延迟分别测量，配置的连接上限由服主按实际机器验证。
 
 ### 实际进程内存
 
-Windows 11 x64，Python 3.12.13。用同一份合成数据库对比两版游戏进程，每人 1,997 件物品，24 个原生客户端共 47,928 件。每版独立启动三次并交错运行，每次稳定后采七个样本。下表为三轮中位数，单位 MiB。登录响应、头像、签名与存档回读均一致。 另外一次 1,998 件混合物品的登录快照对照中，临时 Python 分配峰值从 342 降至 46 KiB（未计入原生 Protobuf 分配）。
+Windows 11 x64，Python 3.12.13。用同一份合成数据库对比两版游戏进程，每人 1,997 件物品，24 个原生客户端共 47,928 件。每版独立启动三次并交错运行，每次稳定后采七个样本。下表为三轮中位数，单位 MiB。登录响应、头像、签名与存档回读均一致。另一次 1,998 件混合物品的登录快照对照中，临时 Python 分配峰值从 342 降至 46 KiB（未计入原生 Protobuf 分配）。
 
 | 游戏进程 | 旧版工作集 | 新版工作集 | 旧版私有提交 | 新版私有提交 |
 | --- | ---: | ---: | ---: | ---: |
-| 启动后空闲 | 105.32 | 103.67 | 93.64 | 92.28 |
-| 24 人在线 | 111.84 | 110.35 | 101.34 | 99.61 |
+| 启动后空闲 | 105.67 | 86.71 | 93.92 | 75.51 |
+| 24 人在线 | 111.41 | 93.25 | 100.30 | 82.64 |
+
+本轮旧版为同机已安装区服，新版在启动时解析校验配置，保留启动和首登实际用到的 30 张表，其余表在首次使用时解码并缓存。独立跟踪确认首登时无需再解码资源表。每版 8 轮交错冷启动，进程启动中位数为 665 → 543 ms，第一个角色的完整登录为 76 → 88 ms（两组范围分别为 73–111 和 71–98 ms），后两次热登录合计中位数为 16.1 → 17.1 ms。
+
+24 人分四频道同时移动、写入存档、切换头像和修改签名，每版 4 轮、每轮 2,304 次请求、3,456 次广播投递。单轮分位数的中位值 P50/P95/P99 分别为 10.01/13.66/33.47 → 9.46/12.64/21.09 ms。角色存档、响应和广播摘要全部相同。开发中的一次首登出现 EOF，旧记录没有异常堆栈。增加诊断后，最终版本另用 5 组存档、20 次启动验证 120 次首次登录和 480 次携带装备重登，均成功。
 
 内存统计仅含区服游戏进程。工作集计入部分可共享页面，私有提交也包含可换出的内存。网关、启动器、客户端及操作系统另计。使用同一 Python 环境执行以下命令可复测。
 

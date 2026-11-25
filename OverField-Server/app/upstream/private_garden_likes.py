@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from network.msg_id import MsgId
 from private_channels import HOME, owner_for
-from private_dungeons import _table
+from utils.res_loader import res
 import private_shop as shop
 from proto import net_pb2 as pb
 from utils import db
@@ -12,14 +12,14 @@ from private_bless_tasks import record as prayer
 
 
 def day_key():
-    hours = int(_table("GlobalConfig", "config", "key")["SystemRefreshTime"]["values"][0])
+    hours = int(res.index("GlobalConfig", "config", "key")["SystemRefreshTime"]["values"][0])
     return (shop.now().astimezone(shop.CN) - timedelta(hours=hours)).date().isoformat()
 
 
 def remaining(session, day):
     from private_life_skills import garden_like_bonus
     player = session.player_id
-    cap = int(_table("GlobalConfig", "config", "key")["HomeLikesNum"]["values"][0])
+    cap = int(res.index("GlobalConfig", "config", "key")["HomeLikesNum"]["values"][0])
     cap += garden_like_bonus(session)
     used = db.conn.execute("SELECT count FROM realm_like_daily WHERE player=? AND day=?", (player,day)).fetchone()
     return max(0, cap - (used[0] if used else 0))

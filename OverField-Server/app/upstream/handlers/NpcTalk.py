@@ -43,8 +43,8 @@ class Handler(PacketHandler):
             session.send(MsgId.NpcTalkRsp, rsp, packet_id)
             return
         rsp.status = StatusCode.StatusCode_OK
-        from private_dungeons import _table
-        goals = _table("Achieve", "achieve")
+        from utils.res_loader import res
+        goals = res.index("Achieve", "achieve")
         if req.talk_type == NpcTalkReq.NpcTalkType_Mechanism:
             conds = [key for key, goal in goals.items() if goal.get("new_achieve_condition") == 40
                      and goal.get("param", [])[:1] == [req.id]]

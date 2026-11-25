@@ -3,7 +3,7 @@ from functools import partial
 import random
 
 from private_appearance import WEAR_SLOTS, publish
-from private_dungeons import _table
+from utils.res_loader import res
 from private_dye_palette import colors
 from private_gameplay_transaction import run, Rejected
 from private_newcomer import record
@@ -12,7 +12,7 @@ from utils import db
 
 
 def global_value(key):
-    return _table("GlobalConfig", "config", "key")[key]["values"][0]
+    return res.index("GlobalConfig", "config", "key")[key]["values"][0]
 
 
 def price(pending, key):
@@ -39,7 +39,7 @@ def outfit(player, key):
     raw = db.get_item_detail(player, key)
     value = pb.ItemDetail.FromString(raw) if raw else None
     if (not value or not value.main_item.HasField("outfit") or value.main_item.outfit.outfit_id != key
-            or not _table("Fashion", "fashion_info").get(key, {}).get("asset_full_name")):
+            or not res.index("Fashion", "fashion_info").get(key, {}).get("asset_full_name")):
         raise Rejected(pb.StatusCode_NOT_DYE)
     return value
 
@@ -75,7 +75,7 @@ def select(session, req, rsp, pending):
     player = session.player_id
     outfit(player, req.outfit_id)
     if req.colorant_item_id:
-        if req.colorant_item_id not in _table("DyeStuff", "dye_data"):
+        if req.colorant_item_id not in res.index("DyeStuff", "dye_data"):
             return pb.StatusCode_CFG_NOT_FOUND
         raw = db.get_item_detail(player, req.colorant_item_id)
         if not raw or not pb.ItemDetail.FromString(raw).main_item.base_item.num:
@@ -98,7 +98,7 @@ def selected(session, req):
     palette = getattr(session, "dye_palette", None)
     if not palette or palette[0] != req.outfit_id or not palette[1] or not 0 <= req.uvy <= 1:
         raise Rejected(pb.StatusCode_BAD_REQ)
-    return _table("DyeStuff", "dye_data")[palette[1]], pb.OutfitDyeParam.FromString(palette[2])
+    return res.index("DyeStuff", "dye_data")[palette[1]], pb.OutfitDyeParam.FromString(palette[2])
 
 
 def preview(session, req, rsp, pending):
@@ -222,7 +222,7 @@ def generic(session, req, rsp, pending):
     rsp.params.extend(req.params)
     if req.generic_msg_id == 7:
         palette = getattr(session, "dye_palette", None)
-        if not palette or palette[0] != key or not palette[1] or _table("DyeStuff", "dye_data")[palette[1]].get("new_dye_type"):
+        if not palette or palette[0] != key or not palette[1] or res.index("DyeStuff", "dye_data")[palette[1]].get("new_dye_type"):
             return pb.StatusCode_RANDOM_DYE_STUFF_NOT_RANDOM_COLOR
         # The success callback reselects the same dye and reads a new palette.
         pending.after_commit.append((setattr, (session, "dye_palette", None)))

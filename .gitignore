@@ -28,8 +28,11 @@ OverField-Server/docs/native-config/*.bz2
 *.tar.gz
 client-config.json
 server-addresses.json
+player-settings.json
+realm-preset.json
+*.ofinvite
+**/PrivateConnections/
 .launcher.*
 .env
 *.pem
 *.key
-

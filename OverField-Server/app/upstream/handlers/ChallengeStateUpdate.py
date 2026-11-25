@@ -1,12 +1,12 @@
 """Timed national field challenges. The persisted result is the player's personal best."""
-from private_dungeons import _table
+from utils.res_loader import res
 from private_request import handler, set_after_commit
 from proto import net_pb2 as pb
 from utils import db
 
 
 def update(session, req, rsp):
-    row = _table("Challenge", "challenge").get(req.challenge_id)
+    row = res.index("Challenge", "challenge").get(req.challenge_id)
     if not row or not row.get("scene_i_d"):
         return pb.StatusCode_CFG_NOT_FOUND
     if row["scene_i_d"] != session.scene_id or session.dungeon[0]:

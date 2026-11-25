@@ -209,8 +209,7 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False, *, eq
     r = []
     if item_detail == None:
         item_detail = ItemDetail()
-    from private_dungeons import _table
-    rows = res["Item"]["item"]["datas"] if is_all else (_table("Item","item").get(item_id),)
+    rows = res["Item"]["item"]["datas"] if is_all else (res.index("Item","item").get(item_id),)
     for i in rows:
         if i is not None:
             item_detail.extra_quality = i.get("quality", 0)
@@ -691,6 +690,10 @@ def make_SceneDataNotice(session):
     fill_room_decor(session, data)
     from private_field_activities import fill as fill_field_activities
     fill_field_activities(session,data)
+    from private_ground_loot import fill as fill_ground_loot
+    fill_ground_loot(session,data)
+    from private_moon_spots import snapshot as fill_moon_spots
+    fill_moon_spots(session,data)
     from private_mp_rooms import scene_beacons
     scene_beacons(session, data)
     session.campfires.snapshot(session, data)
@@ -763,8 +766,7 @@ def make_PlayerBriefInfo(player_id, info=None, *, online=None):
 
 
 def make_Quest(player_id, quest_id, q=None):
-    from private_dungeons import _table
-    row = _table("Quest", "quest").get(quest_id)
+    row = res.index("Quest", "quest").get(quest_id)
     if row is None:
         return None
     if q is None:
@@ -772,7 +774,7 @@ def make_Quest(player_id, quest_id, q=None):
     q.quest_id = quest_id
     q.status = QuestStatus.QuestStatus_InProgress
     q.bonus_times = 1
-    group = _table("Quest", "condition_set_group").get(row["condition_set_group_i_d"])
+    group = res.index("Quest", "condition_set_group").get(row["condition_set_group_i_d"])
     if group is None:
         return None
     for phase in group["quest_condition_set"]:
@@ -809,15 +811,14 @@ def quest_event_index(quests, groups):
 
 def make_QuestNotice(session, conds, qn=None):
     """Apply one native event to the earliest unfinished condition group of each active objective."""
-    from private_dungeons import _table
     from private_first_quest import save, saved
     hits = set(conds)
     if not hits:
         return
     notice = qn if qn is not None else QuestNotice()
-    quests = _table("Quest", "quest")
-    groups = _table("Quest", "condition_set_group")
-    achieves = _table("Achieve", "achieve")
+    quests = res.index("Quest", "quest")
+    groups = res.index("Quest", "condition_set_group")
+    achieves = res.index("Achieve", "achieve")
     by_condition, successor = quest_event_index(quests, groups)
     # A single event can hit several phases or quests. Snapshot in authored order
     # before advancing anything, so newly unlocked steps need a later interaction.
@@ -883,8 +884,7 @@ def make_Achieve(session, scene):
     if Config.SKIP_QUESTS:
         return
     from private_story_entry import CONDITIONS as entry_conditions
-    from private_dungeons import _table
-    goals = [key for key, row in _table("Achieve","achieve").items()
+    goals = [key for key, row in res.index("Achieve","achieve").items()
              if row.get("new_achieve_condition") == 39 and row.get("param") == [scene]
              and key not in entry_conditions]
     notice = make_QuestNotice(session, goals)

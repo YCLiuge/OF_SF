@@ -1,7 +1,7 @@
 """Persist 1.1.12 exploration slots and transfer items into the character's ordinary inventory."""
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_dungeons import _table
+from utils.res_loader import res
 from utils import db
 
 
@@ -25,7 +25,7 @@ def initialize():
 
 
 def capacity():
-    return int(_table("GlobalConfig", "config", "key")["Player_BattleBag_Max_Count"]["values"][0])
+    return int(res.index("GlobalConfig", "config", "key")["Player_BattleBag_Max_Count"]["values"][0])
 
 
 def slots(player):
@@ -66,7 +66,7 @@ def append_slots(held, item, limit):
             entry.main_item.base_item.num = count
         added.append(entry)
         return entry
-    stack_limit = _table("Item","item")[info.item_id].get("stack_count") or 1
+    stack_limit = res.index("Item","item")[info.item_id].get("stack_count") or 1
     if remaining < 1:
         raise ValueError("Empty item in exploration rewards")
     if base and stack_limit > 1:
@@ -121,7 +121,7 @@ def publish(session, items, clear=False):
 
 def receive(session, items, response_items):
     """Apply a loot batch in the caller's gameplay transaction."""
-    tags = _table("Item", "item_tag", "new_tag")
+    tags = res.index("Item", "item_tag", "new_tag")
     pid = session.player_id
     outside = session.dungeon[0] or session.scene_id != 9999
     held = slots(pid)
@@ -197,8 +197,8 @@ def wear(session, req, rsp):
     kind = item.main_item.WhichOneof("item")
     if kind not in ("weapon","armor") or not char.equipment_presets:
         return pb.StatusCode_BAD_REQ
-    data = _table(kind.title(), kind).get(item.main_item.item_id)
-    actor = _table("Character","character").get(req.char_id, {})
+    data = res.index(kind.title(), kind).get(item.main_item.item_id)
+    actor = res.index("Character","character").get(req.char_id, {})
     if not data or data.get("new_weapon_system_type",0) != actor.get("new_weapon_system_type",0):
         return pb.StatusCode_BAD_REQ
     preset = next((p for p in char.equipment_presets if p.preset_index==char.in_use_equipment_preset_index),None)
@@ -246,7 +246,7 @@ def page(session, req, rsp, kind):
         info = pb.ItemDetail.FromString(data).main_item
         if info.WhichOneof("item") != kind:
             continue
-        if system and _table(kind.title(),kind).get(info.item_id,{}).get("new_weapon_system_type",0) != system:
+        if system and res.index(kind.title(),kind).get(info.item_id,{}).get("new_weapon_system_type",0) != system:
             continue
         entries.append(getattr(info,kind))
     rsp.total_num = len(entries)
@@ -255,4 +255,3 @@ def page(session, req, rsp, kind):
     rsp.end_index = min(start,len(entries)) + len(values)
     getattr(rsp, {"weapon":"weapons","armor":"armors","poster":"posters","pet":"pets"}[kind]).extend(values)
     return pb.StatusCode_OK
-

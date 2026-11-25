@@ -15,7 +15,7 @@ OUTPUT="OF_SF-PlayerPatch-1.1.12-Windows-x64.zip"
 MARKER=".of-player-patch.json"
 INDEX="player-files.json"
 CLIENT=("native_endpoint.py","client_media.py","native_launch.py","prepare_client.py","realm_addresses.py",
-        "private_account_api.py","private_channel_privacy.py","player_patch.py")
+        "private_account_api.py","private_channel_privacy.py","player_patch.py","realm_invitation.py")
 
 
 def build(repo, output, *, compiler=None):
@@ -30,7 +30,7 @@ def build(repo, output, *, compiler=None):
         subprocess.run([str(compiler),"/nologo","/utf8output","/target:winexe","/platform:x64","/optimize+",
                         "/out:"+str(exe),"/r:System.Windows.Forms.dll","/r:System.Drawing.dll",
                         "/r:System.Web.Extensions.dll",str(repo/"client_tools/sources/PlayerPatch.cs"),
-                        str(repo/"client_tools/sources/ImportWindow.cs")],check=True)
+                        str(repo/"client_tools/sources/ImportWindow.cs"),str(repo/"client_tools/sources/PrivateConnectionWindow.cs")],check=True)
         entries={TITLE:(exe,None),"玩家说明.md":(repo/"client_tools/PLAYER_PATCH.md",None)}
         entries.update({"client_tools/"+n:(repo/"client_tools"/n,None) for n in CLIENT})
         entries[TEMPLATE]=(repo/TEMPLATE,TEMPLATE_SHA256)

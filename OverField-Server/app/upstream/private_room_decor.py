@@ -1,6 +1,6 @@
 """Persistent decor attached to the original home's five native room anchors."""
 from private_channels import HOME, owner_for
-from private_dungeons import _table
+from utils.res_loader import res
 from private_garden_actions import publish
 from proto import net_pb2 as pb
 from utils import db
@@ -8,7 +8,7 @@ from utils import db
 
 def valid_slot(key, pos):
     return any(row.get("pos_i_d") == pos for row in
-               _table("HomeItem", "room_decor").get(key, {}).get("pos_decor_info", ()))
+               res.index("HomeItem", "room_decor").get(key, {}).get("pos_decor_info", ()))
 
 
 def owns_decor(player, key):
@@ -39,7 +39,7 @@ def set_decor(session, req, rsp):
     owner = session.player_id
     if session.dungeon[0] or session.scene_id != HOME or owner_for(session.channel_id) != owner:
         return pb.StatusCode_BAD_REQ
-    table = _table("HomeItem", "room_decor")
+    table = res.index("HomeItem", "room_decor")
     if not req.decor_list:
         return pb.StatusCode_BAD_REQ
     changed = {}

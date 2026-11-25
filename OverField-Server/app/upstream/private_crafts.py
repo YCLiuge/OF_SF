@@ -7,7 +7,7 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from utils import db
 from utils.pb_create import make_item
-from private_dungeons import _table
+from utils.res_loader import res
 from private_shop import balance, fixed_gift, in_window, now
 
 GROUP = {pb.LIFE_TYPE_Fishing: "Fishing", pb.LIFE_TYPE_Making: "Make", pb.LIFE_TYPE_Handicraft: "Handicraft", pb.LIFE_TYPE_Sewing: "Spin"}
@@ -16,7 +16,7 @@ MAX_COUNT = 0xffffffff
 
 def rows(kind, table):
     name = GROUP[kind]
-    return _table(name, name.lower() + "_" + table)
+    return res.index(name, name.lower() + "_" + table)
 
 
 def base(player, kind):
@@ -44,7 +44,7 @@ def book(session, req, rsp):
 
 def rewards(kind):
     if kind == pb.LIFE_TYPE_Gathering:
-        return {a["achieve_condition_i_d"]:a["reward_i_d"] for r in _table("LifeGather","life_gather_item").values()
+        return {a["achieve_condition_i_d"]:a["reward_i_d"] for r in res.index("LifeGather","life_gather_item").values()
                 for a in r.get("life_gather_achieve_rewards",())}
     if kind == pb.LIFE_TYPE_Fishing:
         return {goal["achieve_condition_i_d"]:goal["reward_i_d"] for fish in rows(kind,"info").values()
@@ -95,7 +95,7 @@ def achievements(session, req, rsp):
 
 def stack(player, template):
     item = balance(player, template)
-    if item is None and template in _table("Item", "item"):
+    if item is None and template in res.index("Item", "item"):
         item = make_item(template, 0, player)
     return item if isinstance(item, pb.ItemDetail) and item.main_item.WhichOneof("item") == "base_item" else None
 
@@ -144,7 +144,7 @@ def note_success(session, kind, recipe, life):
     db.conn.execute("""INSERT INTO player_kv VALUES(?,'life_book',?,1)
                        ON CONFLICT(player_id,ns,k) DO UPDATE SET v=CAST(v AS INTEGER)+1""",
                     (player, f"{kind}:{output}"))
-    conditions = _table("Achieve", "achieve")
+    conditions = res.index("Achieve", "achieve")
     active = rows(kind, "level")[life.level].get(group + "_level_achieve", ())
     daily = {a["achieve_condition_i_d"]: a for a in active}
     aids = set(daily)
@@ -161,13 +161,13 @@ def note_success(session, kind, recipe, life):
         elif event == 48:
             matches = kind == pb.LIFE_TYPE_Sewing
         elif event == 51:
-            matches = kind == pb.LIFE_TYPE_Sewing and _table("Item","item")[output]["new_bag_item_tag"] == pb.EBagItemTag_Material
+            matches = kind == pb.LIFE_TYPE_Sewing and res.index("Item","item")[output]["new_bag_item_tag"] == pb.EBagItemTag_Material
         elif event == 47:
             matches = kind == pb.LIFE_TYPE_Making
         elif event == 46:
             matches = kind == pb.LIFE_TYPE_Handicraft
         elif event == 49:
-            matches = kind == pb.LIFE_TYPE_Handicraft and _table("Item", "item")[output]["new_bag_item_tag"] == 8
+            matches = kind == pb.LIFE_TYPE_Handicraft and res.index("Item", "item")[output]["new_bag_item_tag"] == 8
         else:
             matches = False
         if not matches:
@@ -236,7 +236,7 @@ def claim(session, req, rsp):
     table = rewards(kind) if kind in GROUP or kind == pb.LIFE_TYPE_Gathering else {}
     if aid not in table:
         return pb.StatusCode_CFG_NOT_FOUND
-    threshold = _table("Achieve", "achieve")[aid].get("count_param", 1)
+    threshold = res.index("Achieve", "achieve")[aid].get("count_param", 1)
     if previous_count(player, aid) < threshold:
         return pb.StatusCode_FAIL
     if db.conn.execute("SELECT 1 FROM claimed_rewards WHERE player_id=? AND system='life_achieve' AND key=?",

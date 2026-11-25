@@ -6,7 +6,7 @@ import time
 from network.msg_id import MsgId
 from private_arcade_wallet import config
 from private_crafts import payments, save_pack
-from private_dungeons import _table
+from utils.res_loader import res
 from private_room_actions import distance
 from proto import net_pb2 as pb
 from utils import db
@@ -221,8 +221,8 @@ def start(s,req,rsp):
     if not beacon.can_start:return pb.StatusCode_MP_TEAM_NOT_READY
     peers = members_present(s,beacon)
     if set(peers)!=set(beacon.members):return pb.StatusCode_MP_MEMBERS_NOT_AROUND
-    entries = _table("TeamGameplay","sub_mode")[row[4]]["sub_mode_items"]
-    levels = _table("ScenesConfigAsset","MiniGameInfos","ID")
+    entries = res.index("TeamGameplay","sub_mode")[row[4]]["sub_mode_items"]
+    levels = res.index("ScenesConfigAsset","MiniGameInfos","ID")
     supported = [e["index"] for e in entries if e["index"] in levels]
     if not supported:return pb.StatusCode_CFG_NOT_FOUND
     level=random.choice(supported)
@@ -303,7 +303,7 @@ def periods():
 def allowances(player):
     keys={"d":"GameCredits_DayMax","w":"GameCredits_WeekMax","bd":"GameCredits_DayBonus",
           "bw":"GameCredits_WeekBonus","md":"GameCredits_DayMag","mw":"GameCredits_WeekMag"}
-    settings=_table("GlobalConfig","config","key")
+    settings=res.index("GlobalConfig","config","key")
     day,week=periods()
     used=dict(db.conn.execute("SELECT k,CAST(v AS INTEGER) FROM player_kv WHERE player_id=? AND ns='arcade_score' AND k IN (?,?)",
                               (player,"d:"+day,"w:"+week)))
@@ -351,7 +351,7 @@ def settle(team,state,stamp):
     if state["ended"]:return
     state["ended"]=True
     state["closed_at"]=stamp
-    data=_table("ScenesConfigAsset","MiniGameInfos","ID")[state["level"]]
+    data=res.index("ScenesConfigAsset","MiniGameInfos","ID")[state["level"]]
     duration=max(0,min(stamp-state["start"],data["Duration"]*1000))
     ranked=pb.MPPlayRoomRankInfo()
     if state["mode"]==pb.EMultiplayerPlayMode_DestroyObject:
@@ -447,7 +447,7 @@ def events(s,req,rsp):
                 ev.player_id not in (0,s.player_id) or ev.game_start_time not in (0,state["start"]) or
                 ev.play_mode not in (0,state["mode"])):
             return pb.StatusCode_BAD_REQ
-    level=_table("ScenesConfigAsset","MiniGameInfos","ID")[state["level"]]
+    level=res.index("ScenesConfigAsset","MiniGameInfos","ID")[state["level"]]
     if stamp>=state["start"]+1000*level["Duration"]:
         settle(team,state,stamp)
         return pb.StatusCode_MP_NOT_STARTING
@@ -484,7 +484,7 @@ def tick(s,stamp=None):
     if not state["start"]:
         if stamp>=state["opened"]+1000*config("TeamPlayForceStartWaitTime")[0]:close(s,team)
         return
-    duration=_table("ScenesConfigAsset","MiniGameInfos","ID")[state["level"]]["Duration"]
+    duration=res.index("ScenesConfigAsset","MiniGameInfos","ID")[state["level"]]["Duration"]
     if stamp>=state["start"]+1000*duration:
         settle(team,state,stamp)
         return

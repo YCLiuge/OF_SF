@@ -50,6 +50,19 @@ def worker(server,state,clients):
     configure(state,{"game_connections":clients})
     identity=LocalIdentity(state/"identity.sqlite3")
     host=LocalGameService(identity,state,server/"resources",port=0)
+    # Preserve only the synthetic message type and stack location if a worker closes a socket.
+    # LocalGameService normally converts handler exceptions to a privacy-safe disconnect reason.
+    handle=host._handle
+    def checked(session, message, packet, body):
+        try:
+            return handle(session,message,packet,body)
+        except Exception as err:
+            import traceback
+            trace=traceback.extract_tb(err.__traceback__)
+            print(f"Isolated realm rejected request {message}: {type(err).__name__} at "
+                  f"{Path(trace[-1].filename).name}:{trace[-1].lineno}",file=sys.stderr,flush=True)
+            raise
+    host._handle=checked
     host.start()
     def write(data):
         print(json.dumps(data),flush=True)
@@ -142,7 +155,10 @@ def player_clients(stack,port,tickets,prepare):
         def rpc(op,seq,**payload):
             sock.sendall(encode(getattr(MsgId,op+"Req"),getattr(pb,op+"Req")(**payload).SerializeToString(),seq))
             for _ in range(400):
-                head,body=receive(sock)
+                try:
+                    head,body=receive(sock)
+                except EOFError as err:
+                    raise RuntimeError(f"Connection closed during {op} for synthetic role #{index+1}") from err
                 if head.msg_id==getattr(MsgId,op+"Rsp") and head.packet_id==seq:
                     msg=getattr(pb,op+"Rsp").FromString(body)
                     assert msg.status==pb.StatusCode_OK

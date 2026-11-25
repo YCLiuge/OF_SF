@@ -6,7 +6,7 @@ from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
 from private_request import cached_mutation
 from private_crafts import payments, save_pack
-from private_dungeons import _table
+from utils.res_loader import res
 from proto import net_pb2 as pb
 from utils import db
 
@@ -18,10 +18,10 @@ def now_ms():
 class Campfires:
     def __init__(self, broadcast):
         self.broadcast = broadcast
-        config = _table("GlobalConfig", "config", "key")
+        config = res.index("GlobalConfig", "config", "key")
         lifetimes = dict(map(int, pair.split(":")) for pair in config["BonfireTime"]["values"])
         self.materials = {}
-        for row in _table("Expression", "expression").values():
+        for row in res.index("Expression", "expression").values():
             for group in row["expression_group_info"]:
                 action = group.get("action_i_d")
                 if action in lifetimes:

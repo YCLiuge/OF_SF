@@ -6,7 +6,7 @@ from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from private_crafts import base, payments, save_pack, stack, MAX_COUNT
-from private_dungeons import _table
+from utils.res_loader import res
 from private_story_objectives import cooked
 from utils import db
 from utils.pb_create import make_item
@@ -14,7 +14,7 @@ from utils.pb_create import make_item
 
 def prepare(session,req,rsp):
     pid=session.player_id
-    food=_table("Cooking","cook_food").get(req.food_id)
+    food=res.index("Cooking","cook_food").get(req.food_id)
     if not food:
         return pb.StatusCode_CFG_NOT_FOUND
     life=base(pid,pb.LIFE_TYPE_Cooking)

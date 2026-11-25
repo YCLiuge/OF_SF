@@ -189,6 +189,11 @@ def self_test():
                    "test_native_first_quest.py", "test_story_entry.py", "test_bottle_intro.py",
                    "test_native_mail.py", "test_native_manual.py", "test_native_recovery.py",
                    "test_native_story_objectives.py", "test_native_collection_queries.py", "test_native_character_skills.py", "test_native_closed_minigames.py",
+                   "test_native_encounter_gifts.py",
+                   "test_native_ground_loot.py",
+                   "test_native_secondary_password.py",
+                   "test_native_upstream_social.py",
+                   "test_native_resource_snapshot.py",
                    "test_native_field_gathering.py",
                    "test_native_head_collection.py", "test_login_inventory.py",
                    "test_native_import_identity.py", "test_native_import_resume.py",
@@ -262,6 +267,10 @@ def main():
     join.add_argument("--url",default="http://127.0.0.1:18881")
     join.add_argument("--profile", required=True, type=Path)
     join.add_argument("--trusted-vpn", action="store_true")
+    reporting=commands.add_parser("postgres-report",help="Refresh or verify a PostgreSQL reporting schema from a realm backup")
+    reporting.add_argument("operation",choices=("refresh","verify"))
+    reporting.add_argument("archive",type=Path)
+    reporting.add_argument("--psql",default="psql",help="Path to the PostgreSQL psql client")
     for name in ("backup","restore"):
         cmd=commands.add_parser(name)
         cmd.add_argument("archive",type=Path)
@@ -269,6 +278,10 @@ def main():
     realm_rules.parser(commands)
     args=parser.parse_args()
     state=args.state.resolve()
+    if args.command=="postgres-report":
+        from postgres_report import project
+        print(json.dumps(project(args.operation,args.archive,args.psql),ensure_ascii=False))
+        return
     if args.command=="gm":
         return realm_gm.command(state,args)
     if args.command=="admin":
@@ -318,4 +331,3 @@ if __name__=="__main__":
     except (ValueError,OSError,RuntimeError,sqlite3.Error) as error:
         print(str(error),file=sys.stderr)
         sys.exit(1)
-

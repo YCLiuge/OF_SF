@@ -26,7 +26,17 @@ def run(root,resources):
         return sock,pid
     def issue(code,quota,items,**extra):
         return owner("issue",code=code,quota=quota,rewards=[dict(item=k,quantity=q) for k,q in items],**extra)
-    issue("ONE",1,[(101,33)])
+    # A deployed realm may already have codes issued before the kind column existed.
+    with identity._write() as conn:
+        conn.execute("""CREATE TABLE realm_reward_codes
+                     (code TEXT PRIMARY KEY, rewards TEXT NOT NULL, quota INTEGER NOT NULL,
+                      expiry TEXT, enabled INTEGER NOT NULL) WITHOUT ROWID""")
+        conn.execute("INSERT INTO realm_reward_codes VALUES(?, ?, 1, NULL, 1)", ("ONE",'{"101":33}'))
+    assert owner("list")["codes"][0]["kind"]=="redemption"
+    issue("HEIR",1,[(101,7)],kind="inherit")
+    issue("GONE",0,[(101,8)],kind="inherit")
+    issue("LATE",0,[(101,8)],kind="inherit",expires_at="2001-01-01 00:00:00")
+    owner("withdraw",code="GONE")
     issue("FULL",0,[(101,5)])
     issue("OLD",0,[(101,1)],expires_at="2001-01-01 00:00:00")
     host.start()
@@ -66,15 +76,28 @@ def run(root,resources):
             owner("withdraw",code="FULL")
             assert call(b,"UseRedemptionCode",27,code="FULL").status==pb.StatusCode_REDEMPTION_CODE_NOT_EXIST
             assert any(r["code"]=="FULL" and not r["enabled"] for r in owner("list")["codes"])
+            unknown=pb.StatusCode_REDEMPTION_CODE_NOT_EXIST
+            for number, code in enumerate(("ONE","GONE","LATE","不存在"), 31):
+                result=call(a,"InheritCodeUse",number,code=code)
+                assert result.status==unknown and result.code_str==code and not result.rewards
+            assert call(a,"UseRedemptionCode",35,code="HEIR").status==unknown
+            before=wallet(pa,101)
+            claim=call(a,"InheritCodeUse",36,code="heir")
+            assert claim.status==pb.StatusCode_OK and claim.code_str=="heir"
+            assert len(claim.rewards)==1 and claim.rewards[0].main_item.base_item.num==7
+            assert call(a,"InheritCodeUse",36,code="heir")==claim
+            assert call(b,"InheritCodeUse",37,code="HEIR").status==pb.StatusCode_REDEMPTION_CODE_NUM_IS_MAX
+            assert wallet(pa,101)==before+7
         host.stop()
         host.start()
         s,uid=connect(users[0])
         with s:
             assert call(s,"UseRedemptionCode",30,code="one").status in (pb.StatusCode_REDEMPTION_CODE_USED,pb.StatusCode_REDEMPTION_CODE_NUM_IS_MAX)
-            assert uid==pa and wallet(uid,101)==5
+            assert call(s,"InheritCodeUse",38,code="HEIR").status==pb.StatusCode_REDEMPTION_CODE_USED
+            assert uid==pa and wallet(uid,101)==12
     finally:
         host.stop()
-    print("PASS operator-issued native codes, limit race, receipt replay, expiry, rollback, withdrawal and restart.")
+    print("PASS native redemption and inheritance codes, legacy migration, kind isolation, limit race, receipt replay, expiry, rollback, withdrawal and restart.")
 
 
 if __name__=="__main__":

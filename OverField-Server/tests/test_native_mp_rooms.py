@@ -87,6 +87,14 @@ def run(root,resources):
             with host.lock,db.conn:
                 for uid in (aa,bb,cc):
                     db.set_item_detail(uid,make_item(117,6,uid).SerializeToString(),117)
+                benched = 101003
+                db.add_character(bb,benched)
+            changed=ok(b,"MPSwapCharacter",character_id=benched)
+            assert changed.new_info.character.character_id==benched
+            for member in (a,c):
+                roster=ok(member,"MPTeamInfo").team_detail.members.members
+                assert roster[bb].player_info.character.character_id==benched
+            assert call(o,"MPSwapCharacter",character_id=benched).status==pb.StatusCode_MP_NOT_IN_TEAM
             # The largest native course has more objects than one connection\'s 128-frame outbox.
             with patch("private_mp_rooms.random.choice",return_value=10010106):
                 team,enter,started=open_course(a,b,c,o,(aa,bb,cc))

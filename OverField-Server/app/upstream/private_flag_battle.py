@@ -2,12 +2,12 @@
 from private_request import cache_after_commit, set_after_commit
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_dungeons import _table
+from utils.res_loader import res
 from utils import db
 from utils.pb_create import make_QuestNotice
 
 def public_battles(scene):
-    return {stage["relation_i_d"] for row in _table("Flag","flag").values()
+    return {stage["relation_i_d"] for row in res.index("Flag","flag").values()
             if row.get("scene_i_d")==scene and row.get("icon_i_d")==1
             for stage in row["flag_group_info"]
             if stage.get("new_mission_type",0)==pb.EMissionType_NormalBattle
@@ -15,13 +15,13 @@ def public_battles(scene):
 
 
 def scenic_spots(scene):
-    return {stage["relation_i_d"] for row in _table("Flag","flag").values()
+    return {stage["relation_i_d"] for row in res.index("Flag","flag").values()
             if row.get("scene_i_d")==scene and row.get("icon_i_d")==3
             for stage in row["flag_group_info"] if stage.get("new_mission_type")==pb.EMissionType_ScenicSpot}
 
 
 def finish_objectives(session, key):
-    goals = (aid for aid,row in _table("Achieve","achieve").items()
+    goals = (aid for aid,row in res.index("Achieve","achieve").items()
              if row.get("new_achieve_condition")==4 and row.get("param")==[key])
     notice = make_QuestNotice(session,goals)
     if notice:
@@ -32,7 +32,7 @@ def open_scenic(session,req,rsp):
     pid,scene,spot = session.player_id,session.scene_id,req.battle_id
     if session.dungeon[0] or spot not in scenic_spots(scene) or req.battle_state!=pb.Start:
         return pb.StatusCode_BAD_REQ
-    cfg = _table("Scenic","scenic").get(spot)
+    cfg = res.index("Scenic","scenic").get(spot)
     if not cfg or not cfg.get("first_reward_i_d"):
         return pb.StatusCode_CFG_NOT_FOUND
     first = db.conn.execute("INSERT OR IGNORE INTO player_kv(player_id,ns,k,v) VALUES(?,?,?,1)",
@@ -71,7 +71,7 @@ def rows(pid, scene):
 def fill(session, data):
     for key, in db.conn.execute("SELECT k FROM player_kv WHERE player_id=? AND ns=?",
                                 (session.player_id,f"scenic_spots:{session.scene_id}")):
-        cfg = _table("Scenic","scenic")[int(key)]
+        cfg = res.index("Scenic","scenic")[int(key)]
         data.flags.add(battle_id=int(key), type=pb.EMissionType_ScenicSpot, state=pb.Finish, finish_times=1,
                        voice_id=cfg.get("guide_voice",0))
     for key, amount in rows(session.player_id,session.scene_id):

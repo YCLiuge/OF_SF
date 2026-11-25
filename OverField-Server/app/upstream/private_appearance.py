@@ -2,7 +2,7 @@
 from network.msg_id import MsgId
 from private_request import handler
 from private_chat_text import chat_text
-from private_dungeons import _table
+from utils.res_loader import res
 from proto import net_pb2 as pb
 from server.scene_data import get_session
 from utils import db
@@ -14,7 +14,7 @@ def phone_case(player_id):
 
 
 def owned(player,item,tag):
-    if not item or _table("Item","item").get(item,{}).get("new_bag_item_tag")!=tag:
+    if not item or res.index("Item","item").get(item,{}).get("new_bag_item_tag")!=tag:
         return False
     raw=db.get_item_detail(player,item)
     if not raw:
@@ -25,7 +25,7 @@ def owned(player,item,tag):
 
 def change_sign(session,req,rsp):
     value=chat_text(req.sign)
-    limit=int(_table("GlobalConfig","config","key")["Player_Sign_Text_Cout"]["values"][0])
+    limit=int(res.index("GlobalConfig","config","key")["Player_Sign_Text_Cout"]["values"][0])
     if value is None or len(value.encode("utf-16-le"))//2>limit or not session.chat_guard.allows(value):
         return pb.StatusCode_BAD_REQ
     rsp.sign=value
@@ -60,7 +60,7 @@ def change_background(session,req,rsp):
 
 def change_case(session,req,rsp):
     key=req.phone_case
-    if key and (not _table("Phone","phone").get(key,{}).get("asset_path")
+    if key and (not res.index("Phone","phone").get(key,{}).get("asset_path")
                 or key!=7000 and not owned(session.player_id,key,pb.EBagItemTag_PhoneCase)):
         return pb.StatusCode_BAD_REQ
     db.conn.execute("INSERT OR REPLACE INTO player_kv VALUES(?,'player','phone_case',?)",(session.player_id,key))
@@ -100,8 +100,8 @@ WEAR_SLOTS=("hat","hair","clothes","ornament","pend_top","pend_chest","pend_pelv
 
 
 def valid_preset(player,char_id,preset):
-    sex=_table("Character","character").get(char_id,{}).get("new_sex_type")
-    fashion=_table("Fashion","fashion_info")
+    sex=res.index("Character","character").get(char_id,{}).get("new_sex_type")
+    fashion=res.index("Fashion","fashion_info")
     for part,slot in enumerate(WEAR_SLOTS):
         key=getattr(preset,slot)
         index=getattr(preset,slot+"_dye_scheme_index")

@@ -51,8 +51,8 @@ OPERATIONS = {
                                "resolved":{"type":"boolean"}},read_only=True),
     "reports.resolve": operation("any","将一条举报标记为已处理。",{"id":ID},("id",)),
     "codes.list": operation("any", "列出本服发行的兑换码、数量和有效期。", read_only=True),
-    "codes.issue": operation("any", "发行区服兑换码。quota 为总名额，0 代表不限，每个角色可领一次。",
-                             {"code":STRING,"quota":{"type":"integer","minimum":0,"maximum":10000000},
+    "codes.issue": operation("any", "发行区服奖励码。kind 选 redemption（普通）或 inherit（继承奖励）。quota 为总名额，0 代表不限，每个角色可领一次。",
+                             {"code":STRING,"kind":{"type":"string","enum":["redemption","inherit"]},"quota":{"type":"integer","minimum":0,"maximum":10000000},
                               "expires_at":EVENT_TIME,"rewards":{"type":"array","maxItems":16,"items":CODE_REWARD}},
                              ("code","quota","rewards")),
     "codes.withdraw": operation("any","停止此码后续兑换。",{"code":STRING},("code",)),
@@ -353,4 +353,3 @@ def command(state, args, request_stop):
     response = response_for(action)
     sys.stdout.buffer.write((json.dumps(response, ensure_ascii=True, allow_nan=False) + "\n").encode("ascii"))
     return 0 if response["ok"] else 1
-
