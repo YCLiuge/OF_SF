@@ -108,12 +108,12 @@ def run():
                     img=b64decode(box["image_png"],validate=True)
                     assert img.startswith(b"\x89PNG\r\n\x1a\n") and len(img)<20000
                     return dict(challenge_id=box["challenge_id"],answer=answers.get(timeout=1))
-                u="verify.test";form={"username":u,"password":"independent-test-pass"}
+                u="验证OwO";form={"username":u,"password":"independent-test-pass"}
                 for name in (u,"unknown.test"):
                     assert post("lookup",{"username":name})==(428,{"error":"captcha_required"})
                 assert post("register",form)==(428,{"error":"captcha_required"})
                 assert post("bind",form)==(428,{"error":"captcha_required"})
-                status,receipt=post("lookup",{"username":u,**solve(u,"lookup")})
+                status,receipt=post("lookup",{"username":u,**solve("验证ＯｗＯ","lookup")})
                 assert status==200 and receipt["exists"] is False
                 proof=receipt["account_proof"]
                 status,created=post("register",dict(form,account_proof=proof))

@@ -73,12 +73,12 @@ def source_location(snapshot,main):
 
 
 def projected_identity(snapshot):
-    """Only the game's role ID/name describe a character; channel/account identifiers are unrelated."""
+    """Read the public label from the account summary and the authenticated main role frames."""
     account = snapshot.get("account")
     account = account if isinstance(account, dict) else {}
     frames = list(documents(snapshot, "PlayerMainDataRsp"))
     source = {}
-    ids = [v for v in [account.get("playerId"), *(d.get("player_id") for d in frames)] if v is not None]
+    ids = [v for v in [account.get("playerLabel"), *(d.get("player_label") for d in frames)] if v is not None]
     if ids:
         parsed = [integer(v, 0xffffffff) for v in ids]
         source["uid"] = parsed[0] if parsed[0] and all(v == parsed[0] for v in parsed) else 0

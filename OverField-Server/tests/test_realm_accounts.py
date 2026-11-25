@@ -16,7 +16,49 @@ from test_game_realm import login,join
 from test_observed_initialization import call
 
 
+def check_login_rename(root):
+    from realm_accounts import initialize,register,login as password_login,rename_login,reserve_native,username_spelling
+    from realm_gm import resolve
+    authority=LocalIdentity(root/"mixed-logins.sqlite3")
+    initialize(authority)
+    old={"username":"owner.old","password":"local-fixture-password"}
+    wanted="云海OwO"
+    created=register(authority,dict(old,nickname=wanted),False)
+    slot=created["slot"]
+    present=reserve_native(authority,{"slot":slot,"ticket":created["ticket"]})
+    other=register(authority,dict(old,username="隔壁UP",nickname="隔壁玩家"),False)
+    def snapshot(db):
+        data=db.execute("SELECT slot,salt,verifier,n,r,p FROM realm_accounts WHERE slot=?",(slot,)).fetchone()
+        return (data,db.execute("SELECT * FROM profiles WHERE slot=?",(slot,)).fetchone(),
+                db.execute("SELECT * FROM realm_native_resume WHERE slot=?",(slot,)).fetchone(),
+                db.execute("SELECT * FROM tickets WHERE slot=? ORDER BY ticket_hash",(slot,)).fetchall())
+    with closing(sqlite3.connect(authority.path)) as db:
+        before=snapshot(db)
+        assert rename_login(authority,slot,old["username"],wanted)
+        assert not rename_login(authority,slot,old["username"],wanted)
+        assert snapshot(db)==before and before[2] and present["resume"]
+        assert db.execute("SELECT username FROM realm_accounts WHERE slot=?",(slot,)).fetchone()==(wanted,)
+        assert resolve(None,db,"云海ＯｗＯ",None)==slot
+        for invalid in ("短","白 月OwO","云海\u202eOwO","云海OwO\n","a"*41):
+            try:username_spelling(invalid)
+            except AccountError as error:assert error.code=="invalid_username"
+            else:raise AssertionError("Accepted unsupported account name")
+        for source,target,error_code in [(wanted,"隔壁uP","username_taken"),("错账号","另一个","account_changed")]:
+            try:rename_login(authority,slot,source,target)
+            except AccountError as error:assert error.code==error_code
+            else:raise AssertionError("Unexpected successful rename")
+        assert snapshot(db)==before
+        assert db.execute("SELECT username FROM realm_accounts WHERE slot=?",(other["slot"],)).fetchone()==("隔壁UP",)
+    assert password_login(authority,dict(old,username="云海ｏＷｏ"))["slot"]==slot
+    try:password_login(authority,old)
+    except AccountError as error:assert error.code=="invalid_credentials"
+    else:raise AssertionError("Retired login name accepted")
+    assert rename_login(authority,slot,wanted,old["username"])
+    assert password_login(authority,old)["nickname"]==wanted
+
+
 def run(root,resources):
+    check_login_rename(root)
     identity=LocalIdentity(root/"identity.sqlite3")
     legacy=identity.create_profile("此前角色")
     game=LocalGameService(identity,root,resources,port=0)

@@ -41,11 +41,10 @@ def arguments(commands):
 
 def resolve(game, identity, account, uid):
     if account is not None:
-        from realm_accounts import USER
-        if not USER.fullmatch(account):
-            raise ValueError("Invalid local account name")
+        from realm_accounts import username_key
+        key=username_key(account)
         has_accounts=identity.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='realm_accounts'").fetchone()
-        row=identity.execute("SELECT slot FROM realm_accounts WHERE username=?", (account.lower(),)).fetchone() if has_accounts else None
+        row=identity.execute("SELECT slot FROM realm_accounts WHERE username=? COLLATE NOCASE", (key,)).fetchone() if has_accounts else None
     else:
         if type(uid) is not int or not 0 < uid < 0xffffffff:
             raise ValueError("Invalid public UID")

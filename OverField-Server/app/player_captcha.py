@@ -9,7 +9,7 @@ from threading import Lock
 from time import monotonic
 import zlib
 
-from realm_accounts import AccountError, USER
+from realm_accounts import AccountError, username_key
 
 DIGITS = (
     ("01110","10001","00001","00010","00100","01000","11111"),
@@ -51,10 +51,7 @@ def picture(answer):
 
 
 def username(body):
-    user=body.get("username")
-    if not isinstance(user,str) or not USER.fullmatch(user):
-        raise AccountError(400,"invalid_username")
-    return user.lower()
+    return username_key(body.get("username"))
 
 
 class PlayerCaptcha:

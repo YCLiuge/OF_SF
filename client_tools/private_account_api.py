@@ -93,13 +93,17 @@ def import_backup(action, inp, config):
         except (OSError,KeyError,ValueError,TypeError,RuntimeError,zipfile.BadZipFile):
             return {"ok":False,"code":"invalid_backup","message":"无法读取全进度备份。请选择结果 ZIP、snapshot.json 或结果目录。"}
         data=form["data"]
-        if "pets" in data or "field_progress" in data:
+        if "pets" in data or "field_progress" in data or "uid" in data.get("identity", {}):
             status,region=request(config,"GET","/local/v1/region",max_bytes=32768)
             if status!=200 or region.get("realm")!=PRIVATE_REALM:
                 return {"ok":False,"code":"import_capabilities_unavailable","message":"无法读取所选区服的存档导入能力，请重新测试连接。"}
             features=region.get("save_import_features",[])
             if not isinstance(features,list) or any(not isinstance(feature,str) for feature in features):
                 return {"ok":False,"code":"import_capabilities_unavailable","message":"所选区服的存档导入能力格式无效，请联系服主。"}
+            identity = data.get("identity", {})
+            if "uid" in identity and "public_uid_label" in features:
+                data["identity"] = dict(identity)
+                data["identity"]["public_label"] = data["identity"].pop("uid")
             if "pets" in data and "pets" not in features:
                 pets=data.pop("pets")
                 omitted["旧服跳过的宠物明细"]=len(pets["entries"])

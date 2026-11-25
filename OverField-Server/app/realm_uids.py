@@ -1,4 +1,4 @@
-"""Public game UIDs. Old player rows keep their keys and all of their related save data."""
+"""Keep public role labels separate from native role IDs and historical aliases."""
 from collections import defaultdict
 from functools import lru_cache
 
@@ -11,6 +11,7 @@ FIRST=1000001
 INVALID=0xffffffff
 _legacy={}
 _reversed={}
+_split=frozenset()
 _TYPES={v:getattr(pb,k) for k,v in vars(MsgId).items() if type(v) is int and hasattr(pb,k)}
 _PLAYER_FIELDS={"player_id","player_label","from_player_id","target_player_id","join_player_id","to_player_id",
                 "reported_player_id","finished_player_list","friend_id","matched_player_id_lst","action_player_ids"}
@@ -21,6 +22,8 @@ def initialize(conn,first=1000001):
     FIRST=first
     conn.execute("""CREATE TABLE IF NOT EXISTS realm_public_uids(
         player_id INTEGER PRIMARY KEY,uid INTEGER NOT NULL UNIQUE CHECK(uid>0 AND uid<4294967295))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS realm_native_role_ids(
+        player_id INTEGER PRIMARY KEY)""")
     conn.execute("""CREATE TABLE IF NOT EXISTS private_import_uid_reservations(
         uid INTEGER PRIMARY KEY, player_id INTEGER NOT NULL UNIQUE)""")
     old={pid:uid for pid,uid in conn.execute("SELECT player_id,uid FROM realm_public_uids")}
@@ -39,11 +42,14 @@ def initialize(conn,first=1000001):
 
 
 def refresh(conn):
-    # The caller holds the game lock. Publish the two lookups only after a successful commit.
-    global _legacy, _reversed
+    # The caller holds the game lock; historical roles keep their established native aliases.
+    global _legacy, _reversed, _split
     rows=dict(conn.execute("SELECT player_id,uid FROM realm_public_uids"))
+    split=frozenset(pid for pid, in conn.execute(
+        "SELECT player_id FROM realm_native_role_ids INNER JOIN realm_public_uids USING(player_id) WHERE player_id>=?",(FIRST,)))
     _legacy=rows
     _reversed={uid:pid for pid,uid in rows.items()}
+    _split=split
 
 
 def _highest_local(conn):
@@ -69,7 +75,26 @@ def local_uid(uid):
     return uid if uid == 0 or (FIRST <= uid < INVALID and uid not in _legacy) else INVALID
 
 
+def wire_uid(pid):
+    return pid if pid in _split else public_uid(pid)
+
+
+def from_wire_uid(uid):
+    if uid in _split:
+        return uid
+    pid=local_uid(uid)
+    return INVALID if pid in _split else pid
+
+
+def wire_channel_id(label):
+    # The room registry stores public channel labels. Official rooms retain their numeric IDs.
+    owner=_reversed.get(label)
+    return owner if owner in _split else label
+
+
 _INTEGER_TYPES={F.TYPE_UINT32,F.TYPE_UINT64,F.TYPE_INT64,F.TYPE_INT32}
+_SCENE_CHANNELS={"PlayerLoginRsp","PlayerMainDataRsp","SceneData","ChangeSceneChannelRsp",
+                 "TransmitSceneRsp","SceneTransmitRsp","PlayerInfo","SystemNoticeData"}
 _EXTRA_FIELDS={
     "MPBeacon":{"owner_id","members"},
     "MPTeamMembers":{"leader","members"},
@@ -87,6 +112,7 @@ _GOMOKU_FIELDS={"first_player_id","player1_id","player2_id","winner_id","next_pl
 
 def _public_field(name,field):
     return (field in _PLAYER_FIELDS or field in _EXTRA_FIELDS.get(name,()) or field=="furniture_player_map"
+            or (field=="channel_id" and name in _SCENE_CHANNELS)
             or ("Gomoku" in name and field in _GOMOKU_FIELDS))
 
 
@@ -124,7 +150,7 @@ def _plans():
 
 
 def _translate(msg,outward):
-    convert=public_uid if outward else local_uid
+    convert=wire_uid if outward else from_wire_uid
     name=msg.DESCRIPTOR.name
     tracked=_plans().get(msg.DESCRIPTOR)
     if not tracked:
@@ -156,6 +182,11 @@ def _translate(msg,outward):
                     _translate(part,outward)
             else:
                 _translate(value,outward)
+        elif k=="player_label":
+            setattr(msg,k,public_uid(value) if outward else local_uid(value))
+        elif k=="channel_id" and name in _SCENE_CHANNELS:
+            if outward:
+                setattr(msg,k,wire_channel_id(value))
         elif (name,k)!=("FriendSearchReq","search_args"):
             if field.type in _INTEGER_TYPES:
                 if field.is_repeated:

@@ -29,6 +29,19 @@ def validate_source(value):
     return value
 
 
+def source_from_client(value):
+    # Old launchers put an internal playerId under uid. Only public_label identifies a HUD UID.
+    if type(value) is not dict:
+        raise ValueError("Invalid role identity")
+    normalized = dict(value)
+    if "public_label" in normalized and "uid" in normalized:
+        raise ValueError("Ambiguous role identity")
+    normalized.pop("uid", None)
+    if "public_label" in normalized:
+        normalized["uid"] = normalized.pop("public_label")
+    return validate_source(normalized)
+
+
 def choices(value):
     if type(value) is not dict or set(value)-{"uid_mode","nickname_mode","nickname"}:
         reject("invalid_import_identity",400)
@@ -92,8 +105,11 @@ def state(conn,slot,pid):
     alias=conn.execute("SELECT uid FROM realm_public_uids WHERE player_id=?",(pid,)).fetchone()
     pending=conn.execute("SELECT 1 FROM authority.realm_pending_names WHERE slot=?",(slot,)).fetchone()
     named=conn.execute("SELECT 1 FROM authority.realm_named_profiles WHERE slot=?",(slot,)).fetchone()
-    return {"alias":alias[0] if alias else None,"nickname":name,"key":key,"player_name":player,
+    result={"alias":alias[0] if alias else None,"nickname":name,"key":key,"player_name":player,
             "pending":bool(pending),"named":bool(named)}
+    if alias and conn.execute("SELECT 1 FROM realm_native_role_ids WHERE player_id=?",(pid,)).fetchone():
+        result["native_id"]=True
+    return result
 
 
 def display(conn,slot,pid):
@@ -103,8 +119,11 @@ def display(conn,slot,pid):
 
 def save_state(conn,slot,pid,target):
     conn.execute("DELETE FROM realm_public_uids WHERE player_id=?",(pid,))
+    conn.execute("DELETE FROM realm_native_role_ids WHERE player_id=?",(pid,))
     if target["alias"] is not None:
         conn.execute("INSERT INTO realm_public_uids(player_id,uid) VALUES(?,?)",(pid,target["alias"]))
+        if target.get("native_id"):
+            conn.execute("INSERT INTO realm_native_role_ids(player_id) VALUES(?)",(pid,))
     conn.execute("UPDATE authority.profiles SET nickname=?,name_key=? WHERE slot=?",
                  (target["nickname"],target["key"],slot))
     conn.execute("UPDATE players SET player_name=? WHERE player_id=?",(target["player_name"],pid))
@@ -124,6 +143,11 @@ def apply(conn,slot,pid,source,selected):
         if uid_status(conn,pid,uid)!="available":
             reject("import_uid_unavailable")
         result["alias"]=uid if uid!=pid else None
+        # Historical low role IDs share the range of public rooms; keep their native alias.
+        if result["alias"] is not None and pid>=realm_uids.FIRST:
+            result["native_id"]=True
+        else:
+            result.pop("native_id",None)
     # New/local retains the public ID selected by the realm; historical public mappings stay intact.
     name_mode=selected.get("nickname_mode","original" if "nickname" in source else "local")
     if name_mode!="local":

@@ -25,7 +25,7 @@ def synthetic():
     def packet(name,data):
         return {"name":name,"frames":[{"ok":True,"decoded":{"status":{"v":1},**data}}]}
     return {"format":"overfield-snapshot/1","phone":"DO-NOT-COPY","decoded":{
-        "main":packet("PlayerMainDataRsp",{"player_name":"旧服角色甲","account_type":9999,"player_id":4444444,
+        "main":packet("PlayerMainDataRsp",{"player_name":"旧服角色甲","account_type":9999,"player_id":3129754,"player_label":4444444,
             "level":20,"exp":322,"world_level":2,"team":{"char1":101001},
             "characters":[{"character_id":101001,"level":17,"max_level":20,"star":1,"exp":21,
                            "equipment_presets":[{"weapon":986654321}],"in_use_outfit_preset_index":2,
@@ -122,6 +122,7 @@ def run(root,resources):
         for name in ("a","b"):f.writestr(name+"/snapshot.json","{}")
     try:project_file(root/"ambiguous.zip");raise AssertionError("multiple snapshots accepted")
     except ValueError:pass
+    data["identity"]["public_label"] = data["identity"].pop("uid")
     credentials={"username":"import_test_a","password":"private-example-pass"}
     other={"username":"import_test_b","password":"private-example-pass"}
     state=root/"realm";state.mkdir()
@@ -201,7 +202,7 @@ def run(root,resources):
             native_hero=next(h for h in main.characters if h.character_id==101001)
             native_look=native_hero.outfit_presets[native_hero.in_use_outfit_preset_index]
             assert native_look.clothes_dye_scheme_index==1 and native_look.pend_top==4200744 and native_look.outfit_hide_info.hide_braid
-            assert main.level==20 and main.scene_id==9999 and main.player_name=="旧服角色甲" and main.player_id==4444444
+            assert main.level==20 and main.scene_id==9999 and main.player_name=="旧服角色甲" and main.player_id==pid and main.player_label==4444444
             assert not call("import-preview",{**auth,"data":data})[1]["eligible"]
             assert call("import-undo",auth)[0]==409
         b=call("login",other)[1]

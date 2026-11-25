@@ -22,16 +22,17 @@ def run(root,resources):
     high=4000123456
     raw=synthetic()
     original=raw["decoded"]["main"]["frames"][0]["decoded"]
-    original.update(player_id=high,player_name="星庭旧名")
-    raw["account"]={"playerId":high,"playerName":"星庭旧名","uid":"private-channel-id","username":"private-login"}
+    internal=7123456
+    original.update(player_id=internal,player_label=high,player_name="星庭旧名")
+    raw["account"]={"playerId":internal,"playerLabel":high,"playerName":"星庭旧名","uid":"private-channel-id","username":"private-login"}
     data=project(raw)
     assert data["identity"]=={"uid":high,"nickname":"星庭旧名"}
     conflict=deepcopy(raw)
-    conflict["account"].update(playerId=high-1,playerName="相异")
+    conflict["account"].update(playerLabel=high-1,playerName="相异")
     assert project(conflict)["identity"]=={"uid":0,"nickname":""}
     old=deepcopy(raw)
-    del old["account"]["playerId"],old["account"]["playerName"]
-    del old["decoded"]["main"]["frames"][0]["decoded"]["player_id"],old["decoded"]["main"]["frames"][0]["decoded"]["player_name"]
+    del old["account"]["playerLabel"],old["account"]["playerName"]
+    del old["decoded"]["main"]["frames"][0]["decoded"]["player_label"],old["decoded"]["main"]["frames"][0]["decoded"]["player_name"]
     assert "identity" not in project(old)
     password="test-only-import-password"
     def http(action,**values):
@@ -45,22 +46,28 @@ def run(root,resources):
         code,profile=http("login",username=user,password=password)
         assert code==200
         return profile
-    def preview(acct,src):
-        status,info=http("import-preview",import_ticket=acct["import_ticket"],data=src)
+    def preview(acct,src,legacy_client=False):
+        payload=deepcopy(src)
+        identity=payload.get("identity",{})
+        if "uid" in identity and not legacy_client:
+            identity["public_label"]=identity.pop("uid")
+        status,info=http("import-preview",import_ticket=acct["import_ticket"],data=payload)
         assert status==200 and info["eligible"]
         return info
     def apply(acct,info,choice=None):
         extra={"identity":choice} if choice is not None else {}
         return http("import-apply",import_ticket=acct["import_ticket"],preview_id=info["preview_id"],**extra)
-    def switch(sock,ch,packet):
-        answer=call(sock,"ChangeSceneChannel",packet,scene_id=9999,channel_label=ch)
-        assert answer.status==pb.StatusCode_OK
+    def switch(sock,ch,packet,owner=0):
+        answer=call(sock,"ChangeSceneChannel",packet,scene_id=9999,channel_label=ch,target_player_label=owner)
+        assert (answer.status,answer.channel_id,answer.channel_label)==(pb.StatusCode_OK,pid,ch)
+        assert answer.target_player_id==(pid if owner else 0)
         return next_msg(sock,MsgId.SceneDataNotice,pb.SceneDataNotice).data
 
     with world(root,resources) as (port,service):
         alpha=register("identity.alpha","本服原名")
         beta=register("identity.beta","备用角色")
         blocked=register("identity.reserved","保留名字")
+        assert preview(blocked,data,legacy_client=True)["identity"]["uid_status"]=="missing"
         x=preview(alpha,data);y=preview(beta,data)
         for candidate in (x,y):
             assert candidate["identity"]=={"uid":high,"nickname":"星庭旧名",
@@ -121,6 +128,9 @@ def run(root,resources):
         assert realm_uids.next_uid(db.conn)>previous
         assert http("import-undo",import_ticket=pending["import_ticket"])[1]["identity"]=={"uid":previous,"nickname":""}
         assert realm_uids.local_uid(previous)==legacy and realm_uids.next_uid(db.conn)>previous
+        restored=realm_uids.outgoing(pb.PlayerMainDataRsp(player_id=legacy,player_label=legacy,channel_id=previous))
+        assert (restored.player_id,restored.player_label,restored.channel_id)==(previous,previous,previous)
+        assert realm_uids.from_wire_uid(previous)==legacy
         inventory=pb.ItemDetail()
         assert realm_uids.outgoing(inventory) is inventory
         raw_args=pb.PlayerMainDataReq().SerializeToString()
@@ -128,31 +138,40 @@ def run(root,resources):
     with world(root,resources) as (port,service):
         account=relog(winner_user)
         s,info,uid=login(service.port,account["ticket"])
-        assert uid==high and info.player_name=="星庭旧名"
+        assert uid==pid and info.player_name=="星庭旧名"
         partner=relog(loser_user)
         peer,_,ordinary=login(service.port,partner["ticket"])
         assert 1000001<=ordinary<1000020
         with closing(s),closing(peer):
             main,scene=join(s)
-            assert main.player_id==main.player_label==high and main.player_name=="星庭旧名"
+            assert (main.player_id,main.player_label,main.player_name)==(pid,high,"星庭旧名")
             join(peer)
             search=call(peer,"FriendSearch",66,search_args=str(high))
-            assert search.status==pb.StatusCode_OK and search.data.player_id==high
+            assert search.status==pb.StatusCode_OK and search.data.player_id==pid
             assert call(peer,"FriendSearch",67,search_args=str(ordinary)).data.player_id==ordinary
             assert call(peer,"FriendSearch",68,search_args=str(pid)).status!=pb.StatusCode_OK
             with service.lock,db.conn:
                 db.set_players_info(pid,"birthday","2001-03-14")
-            assert call(peer,"OtherPlayerInfo",70,player_id=high).other_info.birthday=="2001-03-14"
-            assert switch(s,high,71).channel_id==high
-            visited=switch(peer,high,72)
-            assert visited.channel_label==high and any(p.player_id==high for p in visited.players)
+            profile=call(peer,"OtherPlayerInfo",70,player_id=search.data.player_id).other_info
+            assert (profile.player_id,profile.player_label,profile.birthday)==(pid,high,"2001-03-14")
+            assert call(peer,"OtherPlayerInfo",69,player_id=high).status!=pb.StatusCode_OK
+            home=switch(s,high,71)
+            assert (home.channel_id,home.channel_label)==(pid,high)
+            visited=switch(peer,high,72,owner=high)
+            assert (visited.channel_id,visited.channel_label)==(pid,high) and any(p.player_id==pid for p in visited.players)
             assert call(s,"SendChatMsg",73,type=DM,player_id=ordinary,text="归档问候").status==pb.StatusCode_OK
-            assert (DM,high,"归档问候") in texts(barrier(peer))
+            assert (DM,pid,"归档问候") in texts(barrier(peer))
             assert http("import-undo",import_ticket=account["import_ticket"])[0]==409
             assert http("register",username="identity.released",password=password,nickname=prior_name)[0]==201
         assert not db.conn.execute("SELECT 1 FROM private_import_identity WHERE slot=?",(account["slot"],)).fetchone()
         assert not db.conn.execute("SELECT 1 FROM authority.realm_import_name_reservations WHERE slot=?",(account["slot"],)).fetchone()
-    print("PASS scoped UID/name adoption, atomic competing imports, hidden ID isolation, fallback and pending name, undo/restart, original UID in native role/home/friend/chat/birthday.")
+    with world(root,resources) as (port,service):
+        owner,entry,again=login(service.port,relog(winner_user)["ticket"])
+        with closing(owner):
+            main,home=join(owner)
+            assert (again,entry.channel_id,main.player_id,main.channel_id,home.data.channel_id)==(pid,)*5
+            assert (main.player_label,main.channel_label,home.data.channel_label)==(high,)*3
+    print("PASS role label and native ID split, legacy aliases, competing imports, undo/restart, native login/role/home/search/chat/profile.")
 
 
 if __name__=="__main__":

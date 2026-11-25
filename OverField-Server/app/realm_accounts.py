@@ -9,13 +9,14 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 
 from local_identity import SLOT, PROFILE_KEY, _digest, _name
 from profile_issuance import authorizes_game_key
 
 PREFIX = "/local/v1/accounts/"
 ROUTES = {PREFIX+k for k in ("challenge","lookup","register","login","bind","launch","claim-gift","import-preview","import-apply","import-undo")}
-USER = re.compile(r"[A-Za-z0-9_.-]{3,40}\Z", re.ASCII)
+USER = re.compile(r"[A-Za-z0-9_.\-\u3400-\u4dbf\u4e00-\u9fff]{3,40}\Z")
 N, R, P = 32768, 8, 1
 SALT_SIZE = 16
 RESUME = re.compile(r"ofr_[A-Za-z0-9_-]{43}\Z", re.ASCII)
@@ -43,6 +44,9 @@ def initialize(identity):
             username TEXT PRIMARY KEY, slot TEXT NOT NULL UNIQUE REFERENCES profiles(slot) ON DELETE CASCADE,
             salt BLOB NOT NULL, verifier BLOB NOT NULL, n INTEGER NOT NULL,r INTEGER NOT NULL,p INTEGER NOT NULL
         ) WITHOUT ROWID""")
+        # Supported account letters are Latin ASCII and Han. SQLite NOCASE folds exactly
+        # the case-bearing characters of this alphabet, including within a mixed name.
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS realm_account_login ON realm_accounts(username COLLATE NOCASE)")
         db.execute("""CREATE TABLE IF NOT EXISTS realm_native_resume(
             slot TEXT PRIMARY KEY REFERENCES realm_accounts(slot) ON DELETE CASCADE,
             digest BLOB NOT NULL UNIQUE REFERENCES tickets(ticket_hash) ON DELETE CASCADE,
@@ -55,17 +59,30 @@ def initialize(identity):
             BEGIN DELETE FROM tickets WHERE slot=OLD.slot; END""")
 
 
-def credentials(body):
-    u,p = body.get("username"),body.get("password")
-    if not isinstance(u,str) or not USER.fullmatch(u):
+def username_spelling(value):
+    if not isinstance(value,str) or not 3 <= len(value) <= 40:
         raise AccountError(400,"invalid_username")
+    name=unicodedata.normalize("NFKC",value)
+    if not USER.fullmatch(name):
+        raise AccountError(400,"invalid_username")
+    return name
+
+
+def username_key(value):
+    return username_spelling(value).lower()
+
+
+def credentials(body):
+    user=username_spelling(body.get("username"))
+    p=body.get("password")
     if not isinstance(p,str) or not 8 <= len(p) <= 128:
         raise AccountError(400,"invalid_password")
     try:
         password = p.encode("utf8")
     except UnicodeError:
         raise AccountError(400,"invalid_password") from None
-    return u.lower(),password
+    # Preserve the legacy representation of ASCII-only accounts.
+    return (user.lower() if user.isascii() else user),password
 
 
 def nickname(text):
@@ -119,7 +136,7 @@ def register(identity,body,bind):
                 raise AccountError(401,"invalid_credentials")
             if db.execute("SELECT 1 FROM realm_accounts WHERE slot=?",(slot,)).fetchone():
                 raise AccountError(409,"profile_already_bound")
-        if db.execute("SELECT 1 FROM realm_accounts WHERE username=?",(user,)).fetchone():
+        if db.execute("SELECT 1 FROM realm_accounts WHERE username=? COLLATE NOCASE",(user,)).fetchone():
             raise AccountError(409,"username_taken")
         reserved=db.execute("""SELECT 1 FROM profiles WHERE name_key=? AND slot!=?
                           UNION ALL SELECT 1 FROM realm_import_name_reservations WHERE name_key=? AND slot!=? LIMIT 1""",
@@ -142,18 +159,35 @@ def login(identity,body):
         raise AccountError(400,"invalid_request")
     user,password=credentials(body)
     with closing(sqlite3.connect(identity.path)) as db:
-        row=db.execute("SELECT a.slot,a.salt,a.verifier,a.n,a.r,a.p FROM realm_accounts a WHERE a.username=?",(user,)).fetchone()
+        row=db.execute("SELECT a.slot,a.salt,a.verifier,a.n,a.r,a.p FROM realm_accounts a WHERE a.username=? COLLATE NOCASE",(user,)).fetchone()
     # Keep the same KDF cost for unknown names. Never run unbounded parameters from stored data.
     candidate=derive(password,row[1] if row else bytes(SALT_SIZE))
     if not hmac.compare_digest(candidate,row[2] if row else bytes(32)) or not row or row[3:]!=(N,R,P):
         raise AccountError(401,"invalid_credentials")
     with identity._write() as db:
-        current=db.execute("SELECT p.nickname FROM realm_accounts a JOIN profiles p ON p.slot=a.slot WHERE a.username=? AND a.slot=? AND a.verifier=?",
+        current=db.execute("SELECT p.nickname FROM realm_accounts a JOIN profiles p ON p.slot=a.slot WHERE a.username=? COLLATE NOCASE AND a.slot=? AND a.verifier=?",
                            (user,row[0],row[2])).fetchone()
         if not current:
             raise AccountError(401,"invalid_credentials")
         pending=db.execute("SELECT 1 FROM realm_pending_names WHERE slot=?",(row[0],)).fetchone()
         return ticket(identity,db,row[0],"" if pending else current[0])
+
+
+def rename_login(identity,slot,old_name,new_name):
+    """Host-only compare-and-set rename. Slot, password material and tickets keep their identity."""
+    old=username_key(old_name)
+    name=username_spelling(new_name)
+    with identity._write() as db:
+        row=db.execute("SELECT username FROM realm_accounts WHERE slot=?",(slot,)).fetchone()
+        if not row or row[0].lower() not in (old,name.lower()):
+            raise AccountError(409,"account_changed")
+        if row[0]==name:
+            return False
+        try:
+            db.execute("UPDATE realm_accounts SET username=? WHERE slot=? AND username=?",(name,slot,row[0]))
+        except sqlite3.IntegrityError:
+            raise AccountError(409,"username_taken") from None
+        return True
 
 
 def reserve_native(identity,body):
@@ -270,7 +304,7 @@ class AccountService:
                 self.captcha.verify(form,user,source,"lookup",True)
                 if set(form)!={"username"}:raise AccountError(400,"invalid_request")
                 with closing(sqlite3.connect(self.identity.path)) as db:
-                    exists=db.execute("SELECT 1 FROM realm_accounts WHERE username=?",(user,)).fetchone() is not None
+                    exists=db.execute("SELECT 1 FROM realm_accounts WHERE username=? COLLATE NOCASE",(user,)).fetchone() is not None
                 return self.captcha.lookup_proof(source,user,exists)
             if path==PREFIX+"launch":
                 return reserve_native(self.identity,body)

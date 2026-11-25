@@ -178,7 +178,7 @@ class ImportService:
             try:
                 if type(body["data"]) is not dict:raise ValueError("invalid import data")
                 projected=dict(body["data"])
-                source=role_identity.validate_source(projected.pop("identity",{}))
+                source=role_identity.source_from_client(projected.pop("identity",{}))
                 plan,counts=validate(projected)
                 if source:plan["identity"]=source
             except (ValueError,TypeError,KeyError):error(400,"invalid_import_data")

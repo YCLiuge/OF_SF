@@ -294,7 +294,7 @@ class _Connection(socketserver.BaseRequestHandler):
             (remote_player or session).chat_guard=ProtectedChat(req.sdk_uid,req.login_token,slot)
             host.stages.verified(True)
             del req, body
-            verified = pb.VerifyLoginTokenRsp(status=pb.StatusCode_OK, user_id=(remote_player.player_id if remote_player else realm_uids.public_uid(session.player_id)),
+            verified = pb.VerifyLoginTokenRsp(status=pb.StatusCode_OK, user_id=(remote_player.player_id if remote_player else realm_uids.wire_uid(session.player_id)),
                                               sdk_uid=reply_uid, account_type=reply_account, os=reply_os, is_server_open=True)
             self.request.sendall(encode(MsgId.VerifyLoginTokenRsp, verified.SerializeToString(), head.packet_id))
             if remote_player is not None:
@@ -331,7 +331,7 @@ class _Connection(socketserver.BaseRequestHandler):
             login = pb.PlayerLoginRsp(status=pb.StatusCode_OK, server_time_ms=int(time.time()*1000),
                                       region_name="private", player_name="" if session.needs_name else session.player_name,
                                       register_time=info[0], server_time_zone=info[1],
-                                      scene_id=session.scene_id, channel_id=session.channel_id)
+                                      scene_id=session.scene_id, channel_id=realm_uids.wire_channel_id(session.channel_id))
             self.request.sendall(encode(MsgId.PlayerLoginRsp, login.SerializeToString(), head.packet_id))
             session.start_sender()
             self.request.settimeout(120)
