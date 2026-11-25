@@ -11,11 +11,13 @@ from unittest.mock import patch
 import zipfile
 
 from local_identity import LocalIdentity
-from local_game_service import LocalGameService,pb
+from local_game_service import LocalGameService,MsgId,pb
+from local_game_wire import encode,receive
 from private_profiles import create_profile_server
 from save_import_data import project_file
 from test_private_profiles import request
-from test_game_realm import login,join
+from test_game_realm import login
+from test_observed_initialization import call as native_call
 from utils import db
 
 
@@ -56,6 +58,39 @@ def world(base,resources):
     try:yield api.server_port,game
     finally:
         api.shutdown();api.server_close();thread.join();game.stop()
+
+
+def read_inherited_role(client,catalog):
+    """Check the inventory and unlock lists actually delivered to the original client."""
+    client.sendall(encode(MsgId.PlayerMainDataReq,pb.PlayerMainDataReq().SerializeToString(),3))
+    stocked=set()
+    actions=set()
+    main=scene=None
+    for _ in range(300):
+        header,raw=receive(client)
+        if header.msg_id==MsgId.PlayerMainDataRsp:
+            main=pb.PlayerMainDataRsp.FromString(raw)
+        elif header.msg_id==MsgId.SceneDataNotice:
+            scene=pb.SceneDataNotice.FromString(raw)
+        elif header.msg_id==MsgId.PackNotice:
+            for detail in pb.PackNotice.FromString(raw).items:
+                item=detail.main_item
+                if (item.HasField("outfit") and item.outfit.outfit_id==item.item_id
+                        or item.HasField("base_item") and item.base_item.num>0):
+                    stocked.add(item.item_id)
+        elif header.msg_id==MsgId.AchieveActionUnLockNotice:
+            actions.update(pb.AchieveActionUnLockNotice.FromString(raw).action_id_lst)
+        elif header.msg_id==MsgId.ChatUnLockExpressionNotice:
+            assert set(pb.ChatUnLockExpressionNotice.FromString(raw).expression_id)==catalog.emoji
+            break
+    else:
+        raise AssertionError("Missing complete native collection notices")
+    assert main is not None and scene is not None and main.scene_id==scene.data.scene_id
+    assert actions==catalog.menu_actions
+    assert stocked.issuperset(catalog.items) and stocked.issuperset(catalog.head_stickers)
+    heads=native_call(client,"UnlockHeadList")
+    assert heads.status==pb.StatusCode_OK and set(heads.heads)==set(catalog.head_stickers)
+    return main,scene
 
 
 def run(root,resources):
@@ -159,7 +194,7 @@ def run(root,resources):
         assert info["eligible"] and call("import-apply",{**auth,"preview_id":info["preview_id"]})[0]==200
         client,info,_=login(game.port,new["ticket"])
         with closing(client):
-            main,scene=join(client)
+            main,scene=read_inherited_role(client,game.entitlements)
             assert main.pet_instance_id and main.pet_instance_id==next(owned_pets(pid)).instance_id
             visible=next(player for player in scene.data.players if player.player_id==main.player_id)
             assert (visible.pet_item_id,visible.pet_name)==(200001009,"雪团")
