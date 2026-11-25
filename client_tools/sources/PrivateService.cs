@@ -36,7 +36,7 @@ namespace OverField.PrivateLauncher {
                 case "invalid_profile":case "invalid_proof":return "档案所有权验证失败，请选择此私服导出的档案。";
                 case "profile_already_bound":case "already_bound":return "这个角色已绑定私服账号。";
                 case "invalid_nickname":return "游戏名须为 1 到 16 个可显示字符。";
-                case "invalid_username":return "账号须为 3 到 40 位，可用英文字母、数字、点、下划线和短横线。";
+                case "invalid_username":return "账号须为 3 到 40 位，可用汉字、英文字母、数字、点、下划线和短横线。";
                 case "invalid_password":return "密码须为 8 到 128 个字符。";
                 case "release_changed":return "区服发布已变更，请刷新版本后再保存。";
                 case "untrusted_release":return "该版本没有提供同一私服下可校验的更新文件。";
@@ -143,7 +143,7 @@ namespace OverField.PrivateLauncher {
             if(working)return;
             bool reg=action.SelectedIndex!=0,bind=action.SelectedIndex==2;
             string account=user.Text.Trim(),name=nickname.Text.Trim();
-            if(!Regex.IsMatch(account,@"^[A-Za-z0-9_.-]{3,40}$")){status.Text="账号须为 3–40 位英文、数字、点、下划线或短横线。";user.Focus();return;}
+            if(account.Length<3 || account.Length>40 || !Regex.IsMatch(account.Normalize(NormalizationForm.FormKC),@"\A[A-Za-z0-9_.\-\u3400-\u4dbf\u4e00-\u9fff]{3,40}\z")){status.Text="账号须为 3–40 位汉字、英文字母、数字、点、下划线或短横线。";user.Focus();return;}
             if(password.Text.Length==0 || (reg && (password.Text.Length<8 || password.Text.Length>128))){
                 status.Text="请输入私服密码；注册密码须为 8–128 个字符。";password.Focus();return;}
             if(reg && ((bind && String.IsNullOrWhiteSpace(name)) || StringInfo.ParseCombiningCharacters(name).Length>16)){
