@@ -220,6 +220,7 @@ def project(snapshot):
     stacks={}
     # The source can include private equipment instance IDs. Only anonymous catalog data leaves the machine.
     gear={}
+    durability={}
     for msg in ("PackNotice","GetAllCharacterEquipRsp","GetWeaponRsp","GetArmorRsp","GetPosterRsp","GetPetRsp"):
         for doc in documents(snapshot,msg):
             for obj in doc.get("items",[]):
@@ -231,6 +232,8 @@ def project(snapshot):
                     part=item.get(typ,{})
                     equipment=integer(part.get(typ+"_id"))
                     if equipment and type(part.get("instance_id")) is int:
+                        if typ=="weapon" and "durability" in part:
+                            durability[part["instance_id"]]=integer(part["durability"],0xffffffff)
                         gear[(typ,part["instance_id"])]=[{"weapon":1,"armor":2,"poster":3}[typ],equipment,*numbers(part,keys)]
     data["stacks"]=[[k,v] for k,v in sorted(stacks.items()) if v]
     ordered=sorted(gear,key=lambda key:(gear[key],key))
@@ -238,7 +241,14 @@ def project(snapshot):
     references={key:index+1 for index,key in enumerate(ordered)}
     data["team"]=numbers(main.get("team",{}),("char1","char2","char3"))
     data["loadouts"]=[]
+    fishing_rods=[]
     for actor in main.get("characters",()):
+        appearance=actor.get("character_appearance",{})
+        rod=appearance.get("fishing_rod_instance_id") if isinstance(appearance,dict) else None
+        if type(rod) is int:
+            ref=references.get(("weapon",rod))
+            if ref and rod in durability:
+                fishing_rods.append([integer(actor.get("character_id")),ref,durability[rod]])
         active=integer(actor.get("in_use_equipment_preset_index"),2)
         equipped=[]
         for plan in actor.get("equipment_presets",())[:3]:
@@ -251,6 +261,8 @@ def project(snapshot):
                     if pos<size and ref:slots[start+pos]=ref
             if any(slots):equipped.append([index,slots])
         if equipped:data["loadouts"].append([integer(actor.get("character_id")),active,equipped])
+    if fishing_rods:
+        data["fishing_rods"]=fishing_rods
     dye=snapshot.get("customisation",{}).get("dye",{})
     for outfit in dye.get("outfitsData",[]):
         records=[]

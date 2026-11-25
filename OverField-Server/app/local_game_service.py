@@ -268,8 +268,10 @@ class _Connection(socketserver.BaseRequestHandler):
                     reply_uid, reply_account, reply_os = slot, 0, 0
                 else:
                     if host.native_accounts:
-                        host.online_identity.verify_channel(req.sdk_uid,req.login_token,self.client_address[0])
-                        selected = host.native_accounts.claim(self.request)
+                        with host.stages.login_step("channel"):
+                            host.online_identity.verify_channel(req.sdk_uid,req.login_token,self.client_address[0])
+                        with host.stages.login_step("local_handoff"):
+                            selected = host.native_accounts.claim(self.request)
                         if host.remote_password:
                             remote_grant=selected
                             slot=selected.slot
@@ -279,7 +281,8 @@ class _Connection(socketserver.BaseRequestHandler):
                         slot = host.online_identity.authenticate(req.sdk_uid, req.login_token, self.client_address[0])
                     reply_uid, reply_account, reply_os = req.sdk_uid, req.account_type, req.os
                 if remote_grant:
-                    remote_player=remote_resources.enter_context(host.remote_password.connect(remote_grant))
+                    with host.stages.login_step("realm_connect"):
+                        remote_player=remote_resources.enter_context(host.remote_password.connect(remote_grant))
                 elif host.remote_realm:
                     remote_player=remote_resources.enter_context(host.remote_realm.connect(slot))
                 else:

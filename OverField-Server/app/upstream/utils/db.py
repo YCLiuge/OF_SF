@@ -1080,7 +1080,7 @@ def del_mail(
     )
 
 
-_STARTER_GATHER_INSTANCES = frozenset((1001001,1002001,1003001,1004001,1005001))
+_STARTER_GATHER_INSTANCES = frozenset((1001001,1002001,1003001,1004001,1005001,1006001))
 
 
 def get_instance_id(player_id, no_change=False, *, minimum=1):

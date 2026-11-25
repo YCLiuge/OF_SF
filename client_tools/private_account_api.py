@@ -93,7 +93,7 @@ def import_backup(action, inp, config):
         except (OSError,KeyError,ValueError,TypeError,RuntimeError,zipfile.BadZipFile):
             return {"ok":False,"code":"invalid_backup","message":"无法读取全进度备份。请选择结果 ZIP、snapshot.json 或结果目录。"}
         data=form["data"]
-        if "pets" in data or "field_progress" in data or "uid" in data.get("identity", {}):
+        if "pets" in data or "field_progress" in data or "fishing_rods" in data or "uid" in data.get("identity", {}):
             status,region=request(config,"GET","/local/v1/region",max_bytes=32768)
             if status!=200 or region.get("realm")!=PRIVATE_REALM:
                 return {"ok":False,"code":"import_capabilities_unavailable","message":"无法读取所选区服的存档导入能力，请重新测试连接。"}
@@ -104,6 +104,9 @@ def import_backup(action, inp, config):
             if "uid" in identity and "public_uid_label" in features:
                 data["identity"] = dict(identity)
                 data["identity"]["public_label"] = data["identity"].pop("uid")
+            if "fishing_rods" in data and "fishing_rods" not in features:
+                omitted["旧服跳过的鱼竿装备槽"]=len(data.pop("fishing_rods"))
+                compatibility.append("此区服可继承背包中的鱼竿，装备选择需进游戏后重新设置。")
             if "pets" in data and "pets" not in features:
                 pets=data.pop("pets")
                 omitted["旧服跳过的宠物明细"]=len(pets["entries"])

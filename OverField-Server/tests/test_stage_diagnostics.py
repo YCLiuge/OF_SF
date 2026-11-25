@@ -65,6 +65,26 @@ def run(root, resources):
         markers = list(map(json.loads, store.path.read_bytes().splitlines()))
         assert markers[:3] == [{"http":"health"},{"http":"hot_update"},{"http":"resources"}], markers
         assert {"verify":"rejected"} in markers and {"verify":"ok"} in markers
+        with store.login_step("local_handoff"):
+            pass
+        with store.login_step("SECRET_UID"):
+            pass
+        try:
+            with store.login_step("channel"):
+                raise ValueError("SECRET_TOKEN")
+        except ValueError:
+            pass
+        try:
+            with store.login_step("realm_connect"):
+                raise ValueError("SECRET_TOKEN") from TimeoutError("SECRET_PATH")
+        except ValueError:
+            pass
+        login_evidence=store.auth.read_bytes()
+        assert b"SECRET" not in login_evidence
+        steps=[json.loads(line)["login"] for line in login_evidence.splitlines()]
+        assert [(v["stage"],v["result"]) for v in steps]==[
+            ("local_handoff","ok"),("channel","not_confirmed"),("realm_connect","timeout")]
+        assert all(set(v)=={"time","stage","result","elapsed_ms"} and v["time"]>0 and v["elapsed_ms"]>=0 for v in steps)
         assert {"msg_id":1001} in markers and {"msg_id":1003} in markers
         assert markers.count({"tcp":"open"}) == markers.count({"tcp":"close"}) == 2
         allowed = {"http":{"health","hot_update","resources"}, "msg_id":{1001,1003,MsgId.PlayerMainDataReq,MsgId.TutorialReq,MsgId.OperateMailsReq},
@@ -83,6 +103,11 @@ def run(root, resources):
             store.message(1001)
         assert 0 < store.previous.stat().st_size <= MAX_BYTES and 0 < store.path.stat().st_size <= MAX_BYTES
         assert len(list(state.glob("stage-events*"))) == 2
+        assert store.auth.read_bytes()==login_evidence
+        for _ in range(250):
+            with store.login_step("channel"):
+                pass
+        assert 0<store.auth.stat().st_size<=MAX_BYTES and 0<store.old_auth.stat().st_size<=MAX_BYTES
     print("PASS static nativeBuild, diagnostics off by default, live HTTP + TCP stages, no identifiers, bounded rotation.")
 
 

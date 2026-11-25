@@ -55,7 +55,7 @@ def looks_for_actor(looks):
 
 def validate(data):
     from private_entitlements import CURRENCY_IDS
-    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals","pets","field_progress"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
+    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals","pets","field_progress","fishing_rods"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
         raise ValueError("invalid data format")
     for key,limit in ARRAY_LIMITS.items():
         rows(data[key],limit)
@@ -179,6 +179,22 @@ def validate(data):
     for key in ARRAY_LIMITS:
         if key!="gear":out[key]=list({entry[0]:entry for entry in out[key]}.values())
     actors={a[0] for a in out["heroes"]}
+    if "fishing_rods" in data:
+        rods={}
+        wear={}
+        for entry in rows(data["fishing_rods"],ARRAY_LIMITS["heroes"]):
+            actor,source_index,remaining=numbers(entry,3)
+            index=gear_index.get(source_index)
+            if actor not in actors or not index:continue
+            kind,template,*_=out["gear"][index-1]
+            cfg=_table("Weapon","weapon").get(template,{})
+            if kind!=1 or cfg.get("new_weapon_type")!=18 or cfg.get("new_weapon_system_type")!=6:continue
+            remaining=min(remaining,cfg["durability"])
+            if actor in rods or (index in wear and wear[index]!=remaining):
+                raise ValueError("conflicting fishing rod equipment")
+            rods[actor]=index
+            wear[index]=remaining
+        out["fishing_rods"]=[[actor,index,wear[index]] for actor,index in sorted(rods.items())]
     team=numbers(data.get("team",[0,0,0]),3)
     members=[i for i in team if i]
     out["team"]=team if members and team[0] and set(members)<=actors and len(members)==len(set(members)) else []
@@ -221,6 +237,7 @@ def validate(data):
                 selected[kind]=max(count,selected.get(kind,0))
         out["gather_totals"]=[[scene,kind,value] for kind,value in sorted(selected.items())]
     totals={"队长等级":out["player"][0],**{LABELS[k]:len(out[k]) for k in LABELS}}
+    if out.get("fishing_rods"):totals["探索员鱼竿"]=len(out["fishing_rods"])
     for kind,key,label in (("persistent","additional_quests","支线、委托及番外等一次性任务"),("history",HISTORY,"未激活的历史任务")):
         values=[record for ident,(category,record) in supplementary.items() if category==kind and ident not in ambiguous]
         if values:
@@ -321,6 +338,16 @@ def restore(pid,plan):
         if not item.instance_id:raise ValueError("catalog equipment instance unavailable")
         db.set_item_detail(pid,value.SerializeToString(),None,item.instance_id)
         instances.append(item.instance_id)
+    rods=plan.get("fishing_rods",())
+    for index,remaining in {index:remaining for _,index,remaining in rods}.items():
+        instance=instances[index-1]
+        detail=pb.ItemDetail.FromString(db.get_item_detail(pid,instance_id=instance))
+        detail.main_item.weapon.durability=remaining
+        db.set_item_detail(pid,detail.SerializeToString(),instance_id=instance)
+    for actor,index,_ in rods:
+        char=pb.Character.FromString(db.get_characters(pid,actor)[0])
+        char.character_appearance.fishing_rod_instance_id=instances[index-1]
+        db.set_character(pid,actor,char.SerializeToString())
     if plan.get("team"):
         db.set_players_info(pid,"team",tuple(plan["team"]))
         db.set_players_info(pid,"character_id",plan["team"][0])

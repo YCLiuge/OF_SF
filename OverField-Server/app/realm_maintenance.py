@@ -382,6 +382,8 @@ class SelectedFeed:
 
 
 def native_notices(feed,origin=""):
+    # Unity selects a named image widget by this height. The PC notice prefab has three sizes.
+    image_heights=(232,432,732)
     entries=list(feed["notices"])
     release=feed["release"]
     if release:
@@ -391,7 +393,8 @@ def native_notices(feed,origin=""):
     for e in entries:
         def block(order,text="",image=None):
             return dict(orderId=order,title="",subtitle="",text=text,imageUrl=(origin+"/private-game"+image["url"] if image else ""),
-                        imageHeight=(image["height"] if image else 0),jumpType=0,jumpValue="",inGameJumpType=0,inGameJumpValue=0)
+                        imageHeight=(min(image_heights,key=lambda height:abs(height-image["height"])) if image else 0),
+                        jumpType=0,jumpValue="",inGameJumpType=0,inGameJumpValue=0)
         blocks=[block(1,e["content"])]
         blocks.extend(block(i,image=image) for i,image in enumerate(e.get("images",[]),2))
         result.append(dict(oriNoticeId=e["id"],noticeId=e["id"],type=0,isMaintenance=False,title=e["title"],

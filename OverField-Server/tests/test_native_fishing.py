@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from local_game_service import LocalGameService,MsgId,pb
 from local_identity import LocalIdentity
+from local_game_wire import receive
 from private_crafts import base
 from private_dungeons import _table,progress
 import private_fishing as fishing
@@ -65,6 +66,65 @@ def catch_catalog():
         assert sum(boosted[f] for f in selected) > sum(normal[f] for f in selected)
 
 
+def legacy_rod_login(host, roles, ask):
+    """Exercise the original client's main-data, inventory and equip sequence on a high-ID old save."""
+    template = 1006001
+    hero, empty, custom, recruited = 101001, 101002, 101003, 101004
+    ident = roles.create_profile("旧档钓手")
+    sock, _, player = login(host.port, roles.issue_ticket(*ident))
+    with sock:
+        with host.lock, db.conn:
+            unequipped = db.add_character(player, empty)
+            unequipped.character_appearance.fishing_rod_instance_id = 0
+            db.set_character(player, empty, unequipped.SerializeToString())
+            selected = db.add_character(player, custom)
+            upgraded = make_item(1006002, 1, player)
+            upgraded_id = upgraded.main_item.weapon.instance_id
+            selected.character_appearance.fishing_rod_instance_id = upgraded_id
+            db.set_item_detail(player, upgraded.SerializeToString(), instance_id=upgraded_id)
+            db.set_character(player, custom, selected.SerializeToString())
+            # In old imports a different owned weapon may legitimately occupy the template number.
+            occupied = make_item(1002001, 1, player)
+            occupied.main_item.weapon.instance_id = template
+            db.set_item_detail(player, occupied.SerializeToString(), instance_id=template)
+            db.get_instance_id(player, minimum=template + 50)
+            db.conn.execute("INSERT INTO player_kv VALUES(?,'fishing_rod_wear',?,?)", (player, str(template), 17))
+        main, _ = ask(sock, "PlayerMainData")
+        slots = {char.character_id: char.character_appearance.fishing_rod_instance_id for char in main.characters}
+        rod_id = slots[hero]
+        assert rod_id > template and slots[empty] == 0 and slots[custom] == upgraded_id
+        delivered = {}
+        for _ in range(100):
+            header, data = receive(sock)
+            if header.msg_id == MsgId.SceneDataNotice:
+                break
+            if header.msg_id == MsgId.PackNotice:
+                for detail in pb.PackNotice.FromString(data).items:
+                    if detail.main_item.HasField("weapon"):
+                        w = detail.main_item.weapon
+                        delivered[w.instance_id] = (w.weapon_id, w.durability)
+        assert delivered[rod_id] == (template, _table("Weapon", "weapon")[template]["durability"] - 17)
+        assert delivered[template][0] == 1002001 and delivered[upgraded_id][0] == 1006002
+        assert ask(sock, "CharacterGatherWeaponUpdate", character_id=hero, weapon_id=rod_id)[0].status == pb.StatusCode_OK
+        with host.lock, db.conn:
+            # A subsequent character award must resolve to a usable shared rod in that same packet.
+            from private_gacha import award
+            delta, notice = pb.ItemDetail(), pb.PackNotice()
+            award(player, recruited, delta, notice)
+            assert delta.main_item.character.character_appearance.fishing_rod_instance_id == rod_id
+            assert sum(pb.ItemDetail.FromString(b).main_item.weapon.weapon_id == template
+                       for b in db.get_item_detail(player, table="items_s")) == 1
+    fresh, _, same_player = login(host.port, roles.issue_ticket(*ident))
+    with fresh:
+        assert same_player == player
+        repeat, _ = ask(fresh, "PlayerMainData")
+        saved = next(c for c in repeat.characters if c.character_id == hero)
+        assert saved.gather_weapon == saved.character_appearance.fishing_rod_instance_id == rod_id
+        with host.lock:
+            rebuilt = pb.ItemDetail.FromString(db.get_item_detail(player, instance_id=rod_id))
+            assert rebuilt.main_item.weapon.durability == delivered[rod_id][1]
+
+
 def run(root,resources):
     roles=LocalIdentity(root/"identity.sqlite3")
     a_role,b_role=[roles.create_profile(n) for n in ("钓手甲","钓手乙")]
@@ -79,7 +139,11 @@ def run(root,resources):
         return rpc(s,n,next(seq),**f)
     def opened(ident):
         sock,_,pid=login(host.port,roles.issue_ticket(*ident))
-        join_after_intro(sock)
+        main,_=join_after_intro(sock)
+        leader=next(char for char in main.characters if char.character_id==main.team.char1)
+        rod_id=leader.character_appearance.fishing_rod_instance_id
+        equip=ask(sock,"CharacterGatherWeaponUpdate",character_id=leader.character_id,weapon_id=rod_id)[0]
+        assert rod_id and equip.status==pb.StatusCode_OK, (rod_id,equip.status)
         return sock,pid
     def cast(s,**args):
         return ask(s,"Fishing",**({"fishing_pond_id":1001,"fishing_rod_id":1006001,"fishing_box_id":5021001}|args))[0]
@@ -99,6 +163,7 @@ def run(root,resources):
     with (patch("private_fishing.monotonic",side_effect=lambda:clock[0]),patch("private_shop.now",side_effect=lambda:date[0])):
         host.start()
         try:
+            legacy_rod_login(host, roles, ask)
             a,pid=opened(a_role)
             b,other=opened(b_role)
             with a,b:

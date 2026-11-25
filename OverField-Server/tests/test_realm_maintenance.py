@@ -79,7 +79,12 @@ class Tests(unittest.TestCase):
                 blocks=data[1]["content"]
                 self.assertEqual([r["orderId"] for r in blocks],[1,2,3])
                 self.assertEqual(blocks[1]["imageUrl"],d.origin+"/private-game"+image_route)
-                self.assertEqual((blocks[0]["text"],blocks[2]["imageHeight"]),("更新正文",1))
+                self.assertEqual((blocks[0]["text"],blocks[0]["imageHeight"],blocks[2]["imageHeight"]),("更新正文",0,232))
+                for height,expected in ((232,232),(432,432),(500,432),(732,732),(1020,732),(1612,732)):
+                    image=dict(images[0],height=height)
+                    sample={"notices":[dict(rich,images=[image])],"release":None}
+                    self.assertEqual(native_notices(sample)[0]["content"][1]["imageHeight"],expected)
+                    self.assertEqual(image["height"],height)
                 class Channels:
                     @contextmanager
                     def open(self,p):

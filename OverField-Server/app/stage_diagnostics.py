@@ -1,4 +1,5 @@
 """Bounded, optional stage markers for a single private realm."""
+from contextlib import contextmanager
 import json
 import os
 import threading
@@ -26,6 +27,8 @@ class StageDiagnostics:
         self.old_failures = state / "stage-failures.previous.jsonl"
         self.operations = state / "stage-operations.jsonl"
         self.old_operations = state / "stage-operations.previous.jsonl"
+        self.auth = state / "stage-login.jsonl"
+        self.old_auth = state / "stage-login.previous.jsonl"
         self.lock = threading.Lock()
         self.enabled = os.environ.get("OF_STAGE_DIAGNOSTICS") == "1"
         if self.enabled:
@@ -90,6 +93,32 @@ class StageDiagnostics:
     def verified(self, accepted):
         if self.enabled:
             self._write("verify", "ok" if accepted else "rejected")
+
+    @contextmanager
+    def login_step(self, stage):
+        # Separate retention keeps movement and heartbeats from evicting launch diagnostics.
+        if not self.enabled or stage not in ("channel", "local_handoff", "realm_connect"):
+            yield
+            return
+        start = time.monotonic()
+        result = "ok"
+        try:
+            yield
+        except Exception as error:
+            cause = error.__cause__ or error
+            if isinstance(cause, TimeoutError):
+                result = "timeout"
+            elif isinstance(cause, (OSError, EOFError)):
+                result = "transport"
+            elif isinstance(error, ValueError):
+                result = "not_confirmed"
+            else:
+                result = "error"
+            raise
+        finally:
+            elapsed = max(0, min(600000, int((time.monotonic() - start) * 1000)))
+            self._write("login", {"time": int(time.time()), "stage": stage,
+                        "result": result, "elapsed_ms": elapsed}, self.auth, self.old_auth)
 
     def gameplay_reward(self, template, amount):
         if self.enabled:

@@ -89,9 +89,9 @@ def tick(session):
         session.send(MsgId.GatherSceneLimitRecoveryNotice,out,0)
 
 
-def upgrade_tools(player, chars):
+def upgrade_tools(player, chars, new_items=None):
     """The old realm wrote starter templates into equipment slots without issuing weapon instances."""
-    starters = {slot:template for slot,template in STARTER.items() if TOOLS.get(slot) in (4,5,6,7,8)}
+    starters = {slot:template for slot,template in STARTER.items() if slot in TOOLS}
     missing = [(actor,slot,template) for actor in chars for slot,template in starters.items()
                if getattr(actor.character_appearance,slot) == template]
     if not missing:
@@ -118,12 +118,19 @@ def upgrade_tools(player, chars):
     for actor,slot,template in missing:
         if template not in owned:
             detail = make_item(template,1,player)
+            if slot == "fishing_rod_instance_id":
+                # A cast with a template-only rod used to save its wear outside the inventory.
+                wear = db.conn.execute("SELECT v FROM player_kv WHERE player_id=? AND ns='fishing_rod_wear' AND k=?",
+                                       (player,str(template))).fetchone()
+                detail.main_item.weapon.durability = max(0,weapons[template]["durability"]-(int(wear[0]) if wear else 0))
             key = detail.main_item.weapon.instance_id
             # Older clients and saves already reference this number as a UUID. Reserve it only if
             # the player's normal allocator has never reached it and no equipment owns the slot.
             if template not in reserved and high_water < template:
                 detail.main_item.weapon.instance_id = key = template
             db.set_item_detail(player,detail.SerializeToString(),instance_id=key)
+            if new_items is not None:
+                new_items.add().CopyFrom(detail)
             owned[template] = key
         key = owned[template]
         if key == template:

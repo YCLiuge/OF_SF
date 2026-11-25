@@ -122,6 +122,10 @@ def run(root,resources):
     complete_data=project_file(full_zip)
     complete_data["identity"]["public_label"]=complete_data["identity"].pop("uid")
     assert len(complete_data["pets"]["entries"])==3 and sum(p["active"] for p in complete_data["pets"]["entries"])==1
+    rod_id=998123456
+    fixture["decoded"]["main"]["frames"][0]["decoded"]["characters"][0]["character_appearance"]={"fishing_rod_instance_id":rod_id}
+    fixture["decoded"]["pack"]["frames"][0]["decoded"]["items"].append({"main_item":{"item_id":1006005,
+        "weapon":{"weapon_id":1006005,"instance_id":rod_id,"level":25,"star":1,"durability":321}}})
     (folder/"snapshot.json").write_text(json.dumps(fixture),encoding="utf8")
     (folder/"private-server-import.json").write_text("DO-NOT-COPY",encoding="utf8")
     archive=root/"export.zip"
@@ -130,7 +134,7 @@ def run(root,resources):
     data=project_file(archive)
     assert all(project_file(p)==data for p in (folder,folder/"snapshot.json",folder/"private-server-import.json"))
     assert data["identity"] == {"uid":4444444,"nickname":"旧服角色甲"}
-    assert not any(secret in json.dumps(data) for secret in ("DO-NOT-COPY","986654321","986654322"))
+    assert not any(secret in json.dumps(data) for secret in ("DO-NOT-COPY","986654321","986654322",str(rod_id)))
     with zipfile.ZipFile(root/"ambiguous.zip","w") as f:
         for name in ("a","b"):f.writestr(name+"/snapshot.json","{}")
     try:project_file(root/"ambiguous.zip");raise AssertionError("multiple snapshots accepted")
@@ -181,6 +185,10 @@ def run(root,resources):
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,5012011)).main_item.base_item.num==53
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,101)).main_item.base_item.num==1000000
         hero=pb.Character.FromString(db.get_characters(pid,101001)[0])
+        imported_rod=hero.character_appearance.fishing_rod_instance_id
+        assert imported_rod and imported_rod!=rod_id
+        weapon=pb.ItemDetail.FromString(db.get_item_detail(pid,instance_id=imported_rod)).main_item.weapon
+        assert (weapon.weapon_id,weapon.durability)==(1006005,321)
         selected=hero.outfit_presets[hero.in_use_outfit_preset_index]
         assert (selected.preset_index,selected.pend_top,selected.pend_up_face)==(2,4200744,4011044),selected
         assert selected.pend_down_face==4200045 and selected.clothes_dye_scheme_index==1

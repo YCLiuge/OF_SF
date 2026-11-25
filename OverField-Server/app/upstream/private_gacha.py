@@ -243,6 +243,8 @@ def apply_award(pid, item_id, delta, notice, balances, recruit):
                   *(config.get("orn_i_d") or [])} - {None, 0}
     missing = [template for template in outfit_ids if not db.get_item_detail(pid, template)]
     char = db.add_character(pid, item_id, delta.main_item.character)
+    from private_field_gathering import upgrade_tools
+    upgrade_tools(pid, [char], notice.items)
     delta.main_item.is_new = True
     notice.items.add().CopyFrom(delta)
     notice.items.add().ParseFromString(db.get_item_detail(pid, instance_id=char.equipment_presets[0].weapon))
