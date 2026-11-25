@@ -4,7 +4,8 @@ import json
 import sqlite3
 
 from local_identity import _name
-from social_query import name_key
+from social_query import name_digest
+from player_name_index import find as find_name
 import realm_uids
 
 
@@ -71,8 +72,7 @@ def nickname_status(conn,slot,pid,name):
         LIMIT 1""",(key,slot,key,slot)).fetchone()
     if reserved:
         return "taken"
-    if conn.execute("SELECT 1 FROM players WHERE private_name_key(player_name)=? AND player_id!=? LIMIT 1",
-                    (name_key(name),pid)).fetchone():
+    if find_name(conn,name_digest(name),exclude=pid) is not None:
         return "taken"
     return "available"
 

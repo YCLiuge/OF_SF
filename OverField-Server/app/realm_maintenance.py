@@ -1,4 +1,5 @@
 """Owner-published native announcements, image assets and verified realm releases."""
+from collections import OrderedDict
 from contextlib import closing, contextmanager
 import hashlib
 import http.client
@@ -10,6 +11,7 @@ import sqlite3
 import stat
 from tempfile import NamedTemporaryFile
 from threading import Lock
+from weakref import WeakValueDictionary
 import time
 from state_lock import exclusive_state, is_link_or_reparse
 import notice_images
@@ -71,13 +73,94 @@ def checked_feed(raw):
     return {"notices":values, "release":checked_release(raw["release"]) if raw["release"] is not None else None}
 
 
+class _ReleaseVerification:
+    def __init__(self):
+        self.hash_lock = Lock()
+        self.admin_reads = Lock()
+        self.stamp = None
+        self.matches_digest = False
+        self.admin_owner = None
+        self.database_stamp = None
+
+
+# One last verified file per realm. Store neither package bytes nor an open descriptor.
+_verifiers = OrderedDict()
+_active_verifiers = WeakValueDictionary()
+_verifier_lock = Lock()
+_MAX_VERIFIERS = 32
+
+
+def _realm_verifier(directory):
+    with _verifier_lock:
+        entry = _active_verifiers.get(directory)
+        if entry is None:
+            entry = _ReleaseVerification()
+            _active_verifiers[directory] = entry
+        _verifiers[directory] = entry
+        _verifiers.move_to_end(directory)
+        if len(_verifiers) > _MAX_VERIFIERS:
+            _verifiers.popitem(last=False)
+        return entry
+
+
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    # Windows stat().st_ctime is creation time. Query NTFS change time on the
+    # opened handle so an equal-size edit followed by restoring mtime is detected.
+    class _FileBasicInfo(ctypes.Structure):
+        _fields_ = [("creation", ctypes.c_longlong), ("access", ctypes.c_longlong),
+                    ("write", ctypes.c_longlong), ("change", ctypes.c_longlong),
+                    ("attributes", wintypes.DWORD)]
+
+    _basic_info = ctypes.WinDLL("kernel32", use_last_error=True).GetFileInformationByHandleEx
+    _basic_info.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.POINTER(_FileBasicInfo), wintypes.DWORD)
+    _basic_info.restype = wintypes.BOOL
+
+
+def _file_stamp(stream, info, digest):
+    if not info.st_ino:
+        return None
+    if os.name == "nt":
+        basic = _FileBasicInfo()
+        handle = msvcrt.get_osfhandle(stream.fileno())
+        if not _basic_info(handle, 0, ctypes.byref(basic), ctypes.sizeof(basic)) or not basic.change:
+            return None
+        changed = basic.change
+    else:
+        changed = info.st_ctime_ns
+    return (digest, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, changed)
+
+
+def _database_stamp(path):
+    info = path.stat()
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def admin_feed(state):
+    from local_identity import LocalIdentity
+    database = state/"identity.sqlite3"
+    if not database.is_file():
+        return {"notices": [], "release": None}
+    verifier = _realm_verifier(state.resolve()/"release-files")
+    # Readers in the same admin process take turns holding the existing
+    # cross-process restore/publication lock instead of reporting a false conflict.
+    with verifier.admin_reads, exclusive_state(state, purpose="profiles"):
+        if verifier.admin_owner is None or _database_stamp(database) != verifier.database_stamp:
+            owner = Maintenance(LocalIdentity(database))
+            verifier.database_stamp = _database_stamp(database)  # initialization may migrate an old store
+            verifier.admin_owner = owner
+        return verifier.admin_owner.feed()
+
+
+
 class Maintenance:
     def __init__(self, identity):
         self.dbfile=identity.path
         self.data=self.dbfile.parent
         self.blobs=self.data/"release-files"
-        self.digest_lock=Lock()
-        self.verified=None
         with closing(sqlite3.connect(self.dbfile)) as db, db:
             for sql in SCHEMA:db.execute(sql)
 
@@ -224,14 +307,21 @@ class Maintenance:
         if is_link_or_reparse(path.lstat()) or not stat.S_ISREG(path.stat().st_mode):raise ValueError("Release file changed")
         stream=path.open("rb")
         try:
-            entry=os.fstat(stream.fileno())
-            stamp=(digest,entry.st_dev,entry.st_ino,entry.st_size,entry.st_mtime_ns,entry.st_ctime_ns)
-            with self.digest_lock:
-                if self.verified!=stamp:
-                    if entry.st_size!=r["size"] or hashlib.file_digest(stream,"sha256").hexdigest()!=digest:
-                        raise ValueError("Published file failed SHA-256 verification")
+            verifier = _realm_verifier(self.blobs)
+            with verifier.hash_lock:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size != r["size"]:
+                    raise ValueError("Published file failed size verification")
+                stamp = _file_stamp(stream, info, digest)
+                if stamp is None or verifier.stamp != stamp:
+                    matches = hashlib.file_digest(stream, "sha256").hexdigest() == digest
+                    current = os.fstat(stream.fileno())
+                    if current.st_size != r["size"] or _file_stamp(stream, current, digest) != stamp:
+                        raise ValueError("Published file changed during verification")
                     stream.seek(0)
-                    self.verified=stamp
+                    verifier.stamp, verifier.matches_digest = stamp, matches
+                if not verifier.matches_digest:
+                    raise ValueError("Published file failed SHA-256 verification")
         except BaseException:
             stream.close();raise
         return stream

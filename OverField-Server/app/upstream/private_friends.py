@@ -3,6 +3,7 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from server.scene_data import online_session
 from social_query import NAME_KEY, name_key, search_key
+import player_name_index
 from utils import db
 from utils.pb_create import make_PlayerBriefInfo
 from utils.res_loader import res
@@ -12,6 +13,7 @@ def setup():
     from private_wishes import setup as setup_wishes
     setup_wishes()
     db.conn.create_function("private_name_key",1,name_key,deterministic=True)
+    player_name_index.setup(db.conn)
 
 
 def peer_exists(player):
@@ -55,11 +57,9 @@ def search(session,req,rsp):
         if not peer_exists(pid):
             return pb.StatusCode_FRIEND_SEARCH_FAIL
     else:
-        found=db.conn.execute("""SELECT player_id FROM private_slots JOIN players USING(player_id)
-            WHERE private_name_key(player_name)=? LIMIT 1""",(key,)).fetchone()
-        if not found:
+        pid=player_name_index.find(db.conn,bytes.fromhex(key.removeprefix("~ofn1-")),friends=True)
+        if pid is None:
             return pb.StatusCode_FRIEND_SEARCH_FAIL
-        pid=found[0]
     make_PlayerBriefInfo(pid,rsp.data)
     rsp.friend_status=state(session.player_id,pid)
     return pb.StatusCode_OK

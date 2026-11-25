@@ -149,6 +149,10 @@ def run(root, resources):
             assert stored(uid) is None
             # A failed disk checkpoint must leave the most recent frame available to retry.
             with host.lock:
+                # A scene refresh may replace the live actor between the network
+                # event and a checkpoint. Save the last accepted movement.
+                live = member.scene_player.team.char1
+                live.pos.x, live.rot.y = -9876, -9877
                 db.conn.execute("CREATE TEMP TRIGGER fail_pose BEFORE INSERT ON private_poses BEGIN SELECT RAISE(ABORT,'test'); END")
                 try:
                     host._flush_poses()
@@ -162,6 +166,8 @@ def run(root, resources):
             while stored(uid) is None and time.monotonic() < deadline:
                 time.sleep(0.02)
             assert stored(uid) == (40, 82)
+            with host.lock:
+                live.pos.x, live.rot.y = 40, 82
 
             movement(a, pos=41)
             switch(a, 2)

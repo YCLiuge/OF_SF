@@ -1,14 +1,17 @@
 """Live HTTP, CLI state, original 1.1.12 bulletin shape and fixed-origin verified releases."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import socket
 import struct
 from tempfile import TemporaryDirectory
-from threading import Thread
+from threading import Barrier, Thread
+from unittest.mock import patch
 import unittest
 import zlib
 from local_identity import LocalIdentity
@@ -95,6 +98,76 @@ class Tests(unittest.TestCase):
                     owner.withdraw(b)
                     self.assertEqual(http(proxy_port,"GET","/private-game"+image_route)[0],404)
                     self.assertRaises(ValueError,owner.edit_notice,b,title="已撤回")
+
+    def test_shared_release_verification_and_withdrawal(self):
+        from realm_admin import execute
+        from state_lock import StateBusy, exclusive_state
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp); state=root/"realm"; state.mkdir()
+            identity=LocalIdentity(state/"identity.sqlite3")
+            owner=Maintenance(identity)
+            payload=b"package-a"*4096; archive=root/"build.zip"; archive.write_bytes(payload)
+            first=owner.publish(archive,"1.2.0",hashlib.sha256(payload).hexdigest(),"v1")
+            service=create_profile_server(identity,port=0)
+            thread=Thread(target=service.serve_forever,kwargs={"poll_interval":0.02},daemon=True)
+            thread.start()
+            def public():
+                code,_,raw=http(service.server_port,"GET","/private/maintenance")
+                self.assertEqual(code,200)
+                return json.loads(raw)["release"]
+            def admin():
+                return execute(state,"maintenance.list",{},None)["release"]
+            try:
+                count=8; start=Barrier(count)
+                def query(number):
+                    start.wait(5)
+                    return (admin if number%2 else public)()
+                with patch("hashlib.file_digest",wraps=hashlib.file_digest) as hashed:
+                    with ThreadPoolExecutor(max_workers=count) as workers:
+                        self.assertEqual(list(workers.map(query,range(count))),[first]*count)
+                    self.assertEqual(hashed.call_count,1)
+                    with owner.open_release(first["sha256"])[0] as stream:
+                        self.assertEqual(stream.read(),payload)
+                    self.assertEqual(hashed.call_count,1)
+                    with exclusive_state(state,purpose="profiles"):
+                        self.assertRaises(StateBusy,admin)
+                    file=owner.blobs/first["sha256"]; original=file.stat()
+                    file.write_bytes(b"x"*len(payload))
+                    os.utime(file,ns=(original.st_atime_ns,original.st_mtime_ns))
+                    self.assertIsNone(admin()); self.assertIsNone(public())
+                    self.assertRaises(ValueError,owner.open_release,first["sha256"])
+                    self.assertEqual(hashed.call_count,2)
+                    replacement=root/"fixed";replacement.write_bytes(payload)
+                    os.utime(replacement,ns=(original.st_atime_ns,original.st_mtime_ns))
+                    os.replace(replacement,file)
+                    self.assertEqual(public(),first); self.assertEqual(admin(),first)
+                    self.assertEqual(hashed.call_count,3)
+                    # A metadata-only size change must also fail on a previous hash hit.
+                    self.assertRaises(ValueError,owner.verified_stream,{**first,"size":first["size"]+1})
+                    archive.write_bytes(b"package-b"*4096)
+                    second=owner.publish(archive,"1.3.0",hashlib.sha256(archive.read_bytes()).hexdigest(),"v2")
+                    self.assertEqual(admin(),second); self.assertEqual(public(),second)
+                    self.assertEqual(hashed.call_count,4)
+                    self.assertRaises(FileNotFoundError,owner.open_release,first["sha256"])
+                    with owner.open_release(second["sha256"])[0] as already_open:
+                        owner.withdraw_release()
+                        self.assertIsNone(admin()); self.assertIsNone(public())
+                        self.assertRaises(FileNotFoundError,owner.open_release,second["sha256"])
+                        self.assertEqual(already_open.read(),archive.read_bytes())
+                    self.assertEqual(hashed.call_count,4)
+            finally:
+                service.shutdown();service.server_close();thread.join()
+
+    def test_bounded_realm_verifiers(self):
+        import realm_maintenance as maintenance
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            # A referenced in-flight verifier remains the same even after its LRU slot is evicted.
+            active=maintenance._realm_verifier(root/"first")
+            for i in range(maintenance._MAX_VERIFIERS+1):
+                maintenance._realm_verifier(root/str(i))
+            self.assertEqual(len(maintenance._verifiers),maintenance._MAX_VERIFIERS)
+            self.assertIs(maintenance._realm_verifier(root/"first"),active)
 
     def test_publication(self):
         with TemporaryDirectory() as tmp:

@@ -43,7 +43,7 @@ OF_SF 是适配国服 TapTap PC 1.1.12 的区服服务端，支持 Windows x64 �
 
 ## 开发与许可
 
-服务端使用 Python、原生 Protobuf 和 SQLite WAL，Windows 完整启动器使用 .NET 10。协议与部分玩法源自 byzp/of-ps，OF_SF 自行维护账号、事务、频道广播、存档迁移和运维入口。构建时从已有发行包导入对应版本的运行时及游戏资源。[架构与性能实测](tools/BUILD.md#登录聊天与移动的实测) · [源码构建](tools/BUILD.md) · [上游起始提交](https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513) · [运行时与来源](OverField-Server/docs/RUNTIME.txt)
+服务端使用 Python、原生 Protobuf 和 SQLite WAL，Windows 完整启动器使用 .NET 10。协议与部分玩法源自 byzp/of-ps，OF_SF 自行维护账号、事务、频道广播、存档迁移和运维入口。构建时从已有发行包导入对应版本的运行时及游戏资源。[本轮性能审查](OverField-Server/docs/性能审查.md) · [架构与性能实测](tools/BUILD.md#登录聊天与移动的实测) · [源码构建](tools/BUILD.md) · [上游起始提交](https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513) · [运行时与来源](OverField-Server/docs/RUNTIME.txt)
 
 上游及其修改部分附 [AGPL-3.0](OverField-Server/LICENSE-of-ps.txt)，仓库原有 [GPL-3.0](LICENSE) 保留。
 

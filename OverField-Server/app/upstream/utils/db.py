@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from config import Config
 from utils.res_loader import res
+from utils.achievement_schema import repair_achievement_schema
 from proto.net_pb2 import (
     Character,
     EEquipType,
@@ -243,8 +244,7 @@ def init():
             achieve_id INTEGER NOT NULL,
             achieve_blob BLOB NOT NULL,
             PRIMARY KEY (player_id, achieve_id),
-            FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE,
-            FOREIGN KEY(achieve_id) REFERENCES players(player_id) ON DELETE CASCADE
+            FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS instance (
@@ -343,6 +343,8 @@ def init():
         INSERT OR IGNORE INTO users (id, username, password, user_token) VALUES (1000000, "", "", "");
     """
     )
+    repair_achievement_schema(conn)
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def init_player(player_id):

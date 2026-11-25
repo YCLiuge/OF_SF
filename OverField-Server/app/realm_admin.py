@@ -10,7 +10,7 @@ from zipfile import BadZipFile
 
 import migrate
 from local_identity import LocalIdentity
-from realm_maintenance import Maintenance
+from realm_maintenance import Maintenance, admin_feed
 import realm_rules
 import realm_gacha
 import realm_events
@@ -278,13 +278,11 @@ def run(state, name, data, request_stop):
         return {"archive": str(migrate.backup(state, data["archive"]))}
     if name == "state.restore":
         return {"state": str(migrate.restore(data["archive"], state))}
-    if name == "maintenance.list" and not (state / "identity.sqlite3").is_file():
-        return {"notices": [], "release": None}
+    if name == "maintenance.list":
+        return admin_feed(state)
     with exclusive_state(state, purpose="profiles"):
         state.mkdir(parents=True, exist_ok=True)
         owner = Maintenance(LocalIdentity(state / "identity.sqlite3"))
-        if name == "maintenance.list":
-            return owner.feed()
         if name in ("notice.publish", "notice.edit"):
             paths = [Path(p) for p in data["images"]] if "images" in data else None
             if name == "notice.publish":

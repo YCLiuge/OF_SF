@@ -9,7 +9,6 @@ import secrets
 import sqlite3
 import threading
 import time
-import unicodedata
 
 from local_identity import SLOT, PROFILE_KEY, _digest, _name
 from profile_issuance import authorizes_game_key
@@ -82,8 +81,8 @@ def matches_played(identity,slot,key):
     with closing(sqlite3.connect(game.as_uri()+"?mode=ro",uri=True,timeout=2)) as db:
         if not db.execute("SELECT 1 FROM sqlite_schema WHERE name='private_slots'").fetchone():
             return False
-        rows = db.execute("SELECT p.player_name,s.slot FROM players p LEFT JOIN private_slots s ON s.player_id=p.player_id WHERE p.player_name IS NOT NULL AND p.player_name!=''")
-        return any(other != slot and unicodedata.normalize("NFKC",name.strip()).casefold()==key for name,other in rows)
+        from player_name_index import played_by_other
+        return played_by_other(db,slot,key)
 
 
 def register(identity,body,bind):

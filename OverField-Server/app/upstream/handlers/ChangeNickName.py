@@ -4,6 +4,7 @@ from datetime import date
 import sqlite3
 
 from local_identity import _name
+from player_name_index import blocks_rename
 from network.msg_id import MsgId
 from network.packet_handler import PacketHandler, packet_handler
 from proto import net_pb2 as pb
@@ -27,8 +28,7 @@ class Handler(PacketHandler):
             occupied=db.conn.execute("""SELECT 1 FROM authority.profiles WHERE name_key=? AND slot!=?
                 UNION ALL SELECT 1 FROM authority.realm_import_name_reservations WHERE name_key=? AND slot!=? LIMIT 1""",
                 (key,session.slot,key,session.slot)).fetchone()
-            legacy=db.conn.execute("SELECT player_name FROM players WHERE player_id!=? AND player_name!=''",(session.player_id,))
-            if occupied or any(_name(other)[1]==key for (other,) in legacy):
+            if occupied or blocks_rename(db.conn,session.player_id,name):
                 rsp.status=pb.StatusCode_DUPLICATED_NAME
             else:
                 db.conn.execute("UPDATE authority.profiles SET nickname=?,name_key=? WHERE slot=?",(name,key,session.slot))

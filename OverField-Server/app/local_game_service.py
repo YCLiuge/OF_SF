@@ -31,6 +31,20 @@ _log = logging.getLogger("overfield.local.game")
 _runtime_owner = Lock()
 
 
+class _PoseCheckpoint:
+    __slots__ = ("player", "scene", "visit", "position", "rotation")
+
+    def __init__(self, player, scene, visit):
+        self.player, self.scene, self.visit = player, scene, visit
+        self.position, self.rotation = pb.Vector3(), pb.Vector3()
+
+    def parameters(self):
+        pos, rot = self.position.SerializeToString(), self.rotation.SerializeToString()
+        if self.visit is None:
+            return self.player, self.scene, pos, rot
+        return pos, rot, self.player, self.scene, self.visit
+
+
 class Session:
     def __init__(self, sock, slot, pid, name):
         self.sock=sock
@@ -46,6 +60,7 @@ class Session:
         self.vehicle_seat=None
         self.vehicle_riders={}
         self.pos={}
+        self.pose_checkpoint=None
         self.drop_items={}
         self.color_data=[None,None,pb.PosColor()]
         self.fishing=False
@@ -673,21 +688,31 @@ class LocalGameService:
                 peer.publish()
 
     def _movement(self,s,rec):
-        if not (rec.HasField("pos") or rec.HasField("rot")):
+        moved, turned = rec.HasField("pos"), rec.HasField("rot")
+        if not (moved or turned):
             return
-        lead = s.dungeon_lead if s.dungeon[0] else s.scene_player.team.char1
-        if rec.HasField("pos"):
-            lead.pos.CopyFrom(rec.pos)
-        if rec.HasField("rot"):
-            lead.rot.CopyFrom(rec.rot)
-        pos,rot = lead.pos.SerializeToString(),lead.rot.SerializeToString()
-        if s.dungeon[0]:
-            self.pending_dungeon_poses[s.player_id]=(pos,rot,s.player_id,s.dungeon[0],s.dungeon_visit)
+        dungeon = s.dungeon[0]
+        lead = s.dungeon_lead if dungeon else s.scene_player.team.char1
+        position, rotation = lead.pos, lead.rot
+        if moved:
+            position.CopyFrom(rec.pos)
+        if turned:
+            rotation.CopyFrom(rec.rot)
+        if dungeon:
+            pending, scene, visit = self.pending_dungeon_poses, dungeon, s.dungeon_visit
         else:
-            if s.scene_id not in s.pos:
-                s.pos[s.scene_id]=pb.Vector3()
-            s.pos[s.scene_id].CopyFrom(lead.pos)
-            self.pending_poses[s.player_id]=(s.player_id,s.scene_id,pos,rot)
+            pending, scene, visit = self.pending_poses, s.scene_id, None
+        # Keep a snapshot independent of the live actor. The scene-entry code also
+        # reads its position; either consumer can outlive a character replacement.
+        snapshot = s.pose_checkpoint
+        if snapshot is None or snapshot.scene != scene or snapshot.visit != visit:
+            snapshot = _PoseCheckpoint(s.player_id, scene, visit)
+            s.pose_checkpoint = snapshot
+            if not dungeon:
+                s.pos[scene] = snapshot.position
+        pending[s.player_id] = snapshot
+        snapshot.position.CopyFrom(position)
+        snapshot.rotation.CopyFrom(rotation)
 
     def _flush_poses(self,player_id=None):
         if not self.pending_poses and not self.pending_dungeon_poses:
@@ -699,9 +724,9 @@ class LocalGameService:
         with db.conn:
             for pending,sql in tables:
                 if player_id is None and pending:
-                    db.conn.executemany(sql,pending.values())
+                    db.conn.executemany(sql,map(_PoseCheckpoint.parameters,pending.values()))
                 elif player_id in pending:
-                    db.conn.execute(sql,pending[player_id])
+                    db.conn.execute(sql,pending[player_id].parameters())
         for pending,_ in tables:
             if player_id is None:
                 pending.clear()

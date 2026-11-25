@@ -184,13 +184,13 @@ def self_test():
     for key in list(env):
         if key.startswith(("OF_REMOTE_","OF_QUICKSDK_")):
             env.pop(key)
-    for script in ("test_realm_admin.py", "test_realm_admin_http.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py",
+    for script in ("test_achievement_schema.py", "test_realm_admin.py", "test_realm_admin_http.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py",
                    "test_game_realm.py", "test_game_archive.py", "test_game_dungeon.py","test_dungeon_updates.py","test_native_appearance.py","test_native_activity_rewards.py",
                    "test_native_first_quest.py", "test_story_entry.py", "test_bottle_intro.py",
                    "test_native_mail.py", "test_native_manual.py", "test_native_recovery.py",
                    "test_native_story_objectives.py", "test_native_collection_queries.py", "test_native_character_skills.py", "test_native_closed_minigames.py",
                    "test_native_activity_fragments.py", "test_native_field_supplies.py",
-                   "test_native_encounter_gifts.py",
+                   "test_native_encounter_gifts.py","test_nickname_index.py",
                    "test_native_ground_loot.py",
                    "test_native_secondary_password.py",
                    "test_native_upstream_social.py",
@@ -235,7 +235,7 @@ def self_test():
                    "test_native_home_visibility.py", "test_native_bless_tree.py", "test_native_bless_ladder.py", "test_native_events.py",
                    "test_native_recruit_entry.py", "test_native_gacha_rewards.py", "test_native_badge_tree.py", "test_native_battle_pass.py", "test_native_newcomer.py",
                    "test_profile_issuance.py","test_explore_dispatch.py"):
-        extras = [] if script in ("test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py","test_player_captcha.py") else ["--resources", str(ROOT/"resources")]
+        extras = [] if script in ("test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py","test_player_captcha.py","test_nickname_index.py") else ["--resources", str(ROOT/"resources")]
         subprocess.run([sys.executable, "-B", str(tests/script), *extras], env=env, check=True)
 
 
