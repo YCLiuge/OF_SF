@@ -86,10 +86,13 @@ def publish(session,change):
     broadcast(session, change)
 
 
-def broadcast(session, change):
+def broadcast(session, change, outfit_update=None):
     notice=pb.ServerSceneSyncDataNotice(status=pb.StatusCode_OK)
     record=notice.data.add(player_id=session.player_id).server_data.add(action_type=change)
     record.player.CopyFrom(session.scene_player)
+    if outfit_update is not None:
+        slot,outfit=outfit_update
+        getattr(record.player.team,slot).outfit_preset.CopyFrom(outfit)
     for other in get_session():
         if (other.scene_id,other.channel_id,other.dungeon[0])==(session.scene_id,session.channel_id,session.dungeon[0]):
             other.send(MsgId.ServerSceneSyncDataNotice,notice,0)
@@ -157,6 +160,13 @@ def modify_outfit(session,req,rsp):
     if worn() != before:
         from private_newcomer import record
         record(session, 127)
-    if req.char_id in db.get_players_info(player,"team")[0]:
-        publish(session,pb.SceneActionType_UPDATE_FASHION)
+    # The team snapshot also carries live poses, equipment and active buffs.
+    for slot in ("char1","char2","char3"):
+        member=getattr(session.scene_player.team,slot)
+        if member.char_id==req.char_id:
+            from utils.pb_create import active_outfit,make_SceneCharacterOutfitPreset
+            outfit=make_SceneCharacterOutfitPreset(player,active_outfit(character))
+            session.commit_callbacks.append((member.outfit_preset.CopyFrom,(outfit,)))
+            broadcast(session,pb.SceneActionType_UPDATE_FASHION,(slot,outfit))
+            break
     return pb.StatusCode_OK

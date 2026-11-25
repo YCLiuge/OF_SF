@@ -268,11 +268,11 @@ def run(root,resources,certs):
             assert observed[0]==encode(MsgId.VerifyLoginTokenReq,fresh.SerializeToString(),1)
 
             grant=proxy.reserve(signed["slot"],signed["ticket"])
-            class LocalSeat:
-                current=grant
-                def claim(self,_sock):
-                    seat,self.current=self.current,None
-                    return seat
+            from native_account_seats import NativeAccountSeats
+            test_exe=front/"launcher.exe"
+            seats=NativeAccountSeats(local,test_exe)
+            seats.remote=proxy
+            seats.pending[21]=(73,grant,time.monotonic()+300)
             class LocalChannel:
                 def verify_channel(self,uid,token,peer):
                     assert (uid,token,peer)==("synthetic-only-uid","synthetic-only-proof","127.0.0.1")
@@ -280,15 +280,36 @@ def run(root,resources,certs):
             local_game=LocalGameService(local,front,resources,port=0)
             local_game.remote_password=proxy
             local_game.online_identity=LocalChannel()
-            local_game.native_accounts=LocalSeat()
+            local_game.native_accounts=seats
             local_game.start()
             try:
-                with socket.create_connection(("127.0.0.1",local_game.port),timeout=9) as client:
-                    req=pb.VerifyLoginTokenReq(sdk_uid="synthetic-only-uid",login_token="synthetic-only-proof",
-                                               device_uuid="synthetic-front-device",channel_code="synthetic-channel-name")
-                    client.sendall(encode(MsgId.VerifyLoginTokenReq,req.SerializeToString(),1))
-                    head,body=receive(client)
-                    assert head.msg_id==MsgId.VerifyLoginTokenRsp and pb.VerifyLoginTokenRsp.FromString(body).user_id==1000001
+                from contextlib import ExitStack
+                with ExitStack() as native:
+                    native.enter_context(patch("native_account_seats.connection_pid",return_value=21))
+                    native.enter_context(patch("native_account_seats.process_info",return_value=(test_exe,7,73)))
+                    with socket.create_connection(("127.0.0.1",local_game.port),timeout=9) as first:
+                        verify=pb.VerifyLoginTokenReq(sdk_uid="synthetic-only-uid",login_token="synthetic-only-proof",
+                            device_uuid="synthetic-front-device",channel_code="synthetic-channel-name")
+                        first.sendall(encode(MsgId.VerifyLoginTokenReq,verify.SerializeToString(),1))
+                        assert pb.VerifyLoginTokenRsp.FromString(receive(first)[1]).user_id==1000001
+                        first.sendall(encode(MsgId.PlayerLoginReq,b"",2))
+                        assert pb.PlayerLoginRsp.FromString(receive(first)[1]).status==pb.StatusCode_OK
+                        assert join(first)[0].player_id==1000001
+                    for _ in range(80):
+                        with closing(sqlite3.connect(remote/"identity.sqlite3")) as db:
+                            ready=db.execute("SELECT reconnect_until FROM realm_native_resume WHERE slot=?",(grant.slot,)).fetchone()
+                        if seats.disconnected_owner and ready and ready[0]>0:break
+                        time.sleep(.05)
+                    assert seats.disconnected_owner and ready and ready[0]>0
+                    # Verify the actual player's next socket goes through the same native seat and TLS tunnel.
+                    current=socket.create_connection(("127.0.0.1",local_game.port),timeout=9)
+                    try:
+                        current.sendall(encode(MsgId.VerifyLoginTokenReq,verify.SerializeToString(),1))
+                        assert pb.VerifyLoginTokenRsp.FromString(receive(current)[1]).user_id==1000001
+                    except BaseException:
+                        current.close()
+                        raise
+                with current as client:
                     fields=pb.PlayerLoginReq(device_model="synthetic-front-model",analysis_distinct_id="synthetic-analytics")
                     client.sendall(encode(MsgId.PlayerLoginReq,fields.SerializeToString(),2))
                     head,body=receive(client)
@@ -335,9 +356,47 @@ def run(root,resources,certs):
           "SKIP TLS certificate handshake (OpenSSL generator unavailable); transport and gameplay regressions passed.")
 
 
+async def managed_terminator(root):
+    import os
+    import sys
+    from player_gateway_terminator import Terminator
+    identity=root/"frpc-process.id"
+    try:
+        Terminator("0.0.0.0",identity)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Managed plaintext listener allowed an external binding")
+    if sys.platform!="win32":
+        return
+    from player_gateway_terminator import start_time
+    class Probe:
+        async def accept(self,reader,writer):
+            writer.write(b"verified")
+            await player_gateway.close(writer)
+    server=await player_gateway.listen_terminated(Probe(),"127.0.0.1",0,identity)
+    async with server:
+        async def result():
+            reader,writer=await asyncio.open_connection(*server.sockets[0].getsockname())
+            try:
+                return await asyncio.wait_for(reader.read(),2)
+            finally:
+                await player_gateway.close(writer)
+        assert await result()==b""
+        identity.write_text(f"{os.getpid()} 1","ascii")
+        assert await result()==b""
+        identity.write_text(f"1 {start_time(os.getpid())}","ascii")
+        assert await result()==b""
+        identity.write_text(f"{os.getpid()} {start_time(os.getpid())}","ascii")
+        assert await result()==b"verified"
+        identity.unlink()
+        assert await result()==b""
+
+
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--resources",type=Path,required=True)
     with TemporaryDirectory() as tmp:
         root=Path(tmp)
+        asyncio.run(managed_terminator(root))
         run(root,parser.parse_args().resources,certificates(root))

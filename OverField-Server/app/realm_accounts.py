@@ -18,6 +18,9 @@ ROUTES = {PREFIX+k for k in ("challenge","lookup","register","login","bind","lau
 USER = re.compile(r"[A-Za-z0-9_.-]{3,40}\Z", re.ASCII)
 N, R, P = 32768, 8, 1
 SALT_SIZE = 16
+RESUME = re.compile(r"ofr_[A-Za-z0-9_-]{43}\Z", re.ASCII)
+RESUME_TTL = 8 * 3600
+RESUME_GRACE = 120
 
 
 IMPORT_ROUTES = {PREFIX+k for k in ("import-preview","import-apply","import-undo")}
@@ -40,6 +43,16 @@ def initialize(identity):
             username TEXT PRIMARY KEY, slot TEXT NOT NULL UNIQUE REFERENCES profiles(slot) ON DELETE CASCADE,
             salt BLOB NOT NULL, verifier BLOB NOT NULL, n INTEGER NOT NULL,r INTEGER NOT NULL,p INTEGER NOT NULL
         ) WITHOUT ROWID""")
+        db.execute("""CREATE TABLE IF NOT EXISTS realm_native_resume(
+            slot TEXT PRIMARY KEY REFERENCES realm_accounts(slot) ON DELETE CASCADE,
+            digest BLOB NOT NULL UNIQUE REFERENCES tickets(ticket_hash) ON DELETE CASCADE,
+            game_digest BLOB NOT NULL, reconnect_until INTEGER NOT NULL DEFAULT 0
+        ) WITHOUT ROWID""")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS realm_password_changed AFTER UPDATE OF verifier
+            ON realm_accounts WHEN NEW.verifier!=OLD.verifier BEGIN
+            DELETE FROM tickets WHERE slot=NEW.slot; END""")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS realm_password_removed AFTER DELETE ON realm_accounts
+            BEGIN DELETE FROM tickets WHERE slot=OLD.slot; END""")
 
 
 def credentials(body):
@@ -145,20 +158,57 @@ def login(identity,body):
 
 def reserve_native(identity,body):
     from local_identity import TICKET
-    if set(body)!={"slot","ticket"} or not isinstance(body["slot"],str) or not SLOT.fullmatch(body["slot"]) or not isinstance(body["ticket"],str) or not TICKET.fullmatch(body["ticket"]):
+    slot=body.get("slot")
+    fields=set(body)-{"slot"}
+    if not isinstance(slot,str) or not SLOT.fullmatch(slot) or fields not in ({"ticket"},{"resume"}):
         raise AccountError(401,"invalid_credentials")
-    slot,now=body["slot"],int(identity._clock())
-    digest=_digest(body["ticket"])
+    field=next(iter(fields))
+    value=body[field]
+    if not isinstance(value,str) or not (TICKET if field=="ticket" else RESUME).fullmatch(value):
+        raise AccountError(401,"invalid_credentials")
+    now=int(identity._clock())
+    digest=_digest(value)
     with identity._write() as db:
-        valid=db.execute("SELECT 1 FROM tickets t JOIN realm_accounts a ON a.slot=t.slot WHERE t.ticket_hash=? AND t.slot=? AND t.expires>? AND NOT EXISTS(SELECT 1 FROM realm_launch_tickets n WHERE n.digest=t.ticket_hash)",(digest,slot,now)).fetchone()
-        if not valid:
-            raise AccountError(401,"invalid_credentials")
+        if field=="ticket":
+            valid=db.execute("SELECT 1 FROM tickets t JOIN realm_accounts a ON a.slot=t.slot WHERE t.ticket_hash=? AND t.slot=? AND t.expires>? AND NOT EXISTS(SELECT 1 FROM realm_launch_tickets n WHERE n.digest=t.ticket_hash)",(digest,slot,now)).fetchone()
+            if not valid:
+                raise AccountError(401,"invalid_credentials")
+            expires=now+RESUME_TTL
+        else:
+            row=db.execute("""SELECT t.expires,r.reconnect_until FROM realm_native_resume r JOIN tickets t ON t.ticket_hash=r.digest
+                WHERE r.slot=? AND r.digest=? AND t.expires>?""",(slot,digest,now)).fetchone()
+            if not row:
+                raise AccountError(401,"invalid_credentials")
+            if row[1]==0:
+                raise AccountError(409,"game_session_active")
+            if row[1]<=now:
+                raise AccountError(401,"invalid_credentials")
+            expires=row[0]
+        db.execute("DELETE FROM tickets WHERE ticket_hash=(SELECT game_digest FROM realm_native_resume WHERE slot=?)",(slot,))
+        db.execute("DELETE FROM tickets WHERE ticket_hash=(SELECT digest FROM realm_native_resume WHERE slot=?)",(slot,))
         db.execute("DELETE FROM tickets WHERE ticket_hash=? OR expires<=?",(digest,now))
+        # One rotating secret per role. It cannot be used as a native gameplay ticket.
+        resume="ofr_"+secrets.token_urlsafe(32)
+        resume_digest=_digest(resume)
+        db.execute("INSERT INTO tickets VALUES(?,?,?)",(resume_digest,slot,expires))
         value="oft_"+secrets.token_urlsafe(32)
         hashed=_digest(value)
         db.execute("INSERT INTO tickets VALUES(?,?,?)",(hashed,slot,now+300))
         db.execute("INSERT INTO realm_launch_tickets VALUES(?)",(hashed,))
-        return {"realm":"overfield-local-v1","slot":slot,"ticket":value,"expires_in":300}
+        db.execute("INSERT INTO realm_native_resume(slot,digest,game_digest) VALUES(?,?,?)",(slot,resume_digest,hashed))
+        return {"realm":"overfield-local-v1","slot":slot,"ticket":value,"expires_in":300,"resume":resume}
+
+
+def end_native_session(identity,slot,game_digest,*,logout):
+    with identity._write() as db:
+        if db.execute("SELECT 1 FROM sqlite_schema WHERE name='realm_native_resume'").fetchone():
+            if logout:
+                db.execute("""DELETE FROM tickets WHERE ticket_hash=(
+                    SELECT digest FROM realm_native_resume WHERE slot=? AND game_digest=?)""",(slot,game_digest))
+            else:
+                db.execute("""UPDATE realm_native_resume SET reconnect_until=?
+                    WHERE slot=? AND game_digest=? AND reconnect_until=0""",
+                    (int(identity._clock())+RESUME_GRACE,slot,game_digest))
 
 
 class AccountService:

@@ -20,6 +20,35 @@ from test_game_dispatch import http, listening
 
 
 class EditorTests(TestCase):
+    def test_only_disconnected_authenticated_process_can_resume_within_grace(self):
+        client=Path("launcher.exe")
+        seats=NativeAccountSeats(None,client)
+        first=RemoteLogin("one","ticket-1",resume_token="secret-1")
+        second=RemoteLogin("one","ticket-2",resume_token="secret-2")
+        calls=[]
+        seats.remote=SimpleNamespace(resume=lambda grant:(calls.append(grant) or second))
+        seats.pending[21]=(73,first,300)
+        owner=[21,73]
+        with patch("native_account_seats.connection_pid",side_effect=lambda _:owner[0]), \
+             patch("native_account_seats.process_info",side_effect=lambda _:(client,7,owner[1])), \
+             patch("native_account_seats.time.monotonic",return_value=100) as clock:
+            grant=seats.claim(None)
+            with self.assertRaises(ValueError):seats.claim(None)
+            grant.on_disconnect()
+            for foreign in ([22,73],[21,74]):
+                owner[:]=foreign
+                with self.assertRaises(ValueError):seats.claim(None)
+            self.assertFalse(calls)
+            owner[:]=[21,73]
+            renewed=seats.claim(None)
+            self.assertEqual(renewed.ticket,"ticket-2")
+            self.assertEqual(calls,[first])
+            with self.assertRaises(ValueError):seats.claim(None)
+            renewed.on_disconnect()
+            clock.return_value=221
+            with self.assertRaises(ValueError):seats.claim(None)
+            self.assertEqual(calls,[first])
+
     def test_disconnected_player_is_offered_password_login_once(self):
         client=Path("launcher.exe")
         seats=NativeAccountSeats(None,client)

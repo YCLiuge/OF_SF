@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from local_game_service import LocalGameService,MsgId,pb
+from local_game_wire import encode
 from local_identity import LocalIdentity
 from test_game_realm import join,login,next_msg
 from test_observed_initialization import call
@@ -25,19 +26,31 @@ def run(root,resources):
         b,other,_=connect(1)
         with a,b:
             original=next(c for c in initial.characters if c.character_id==101001)
+            move=pb.PlayerSceneRecordReq()
+            record=move.data.char_recorder_data_lst.add(char_id=101001)
+            record.pos.CopyFrom(pb.Vector3(x=9143,y=810,z=-14732))
+            record.rot.CopyFrom(pb.Vector3(y=3902))
+            a.sendall(encode(MsgId.PlayerSceneRecordReq,move.SerializeToString(),15))
+            next_msg(a,MsgId.PlayerSceneSyncDataNotice,pb.PlayerSceneSyncDataNotice)
             preset=pb.OutfitPreset()
             preset.CopyFrom(original.outfit_presets[1])
             preset.clothes=4011023
-            assert call(a,"OutfitPresetUpdate",char_id=101001,preset=preset).status==pb.StatusCode_OK
+            preset.pend_top,preset.pend_chest,preset.pend_pelvis=4200744,4012014,4200634
+            preset.pend_up_face,preset.pend_down_face=4011044,4200045
+            preset.pend_left_foot,preset.pend_right_foot=4200036,4200037
+            saved=call(a,"OutfitPresetUpdate",char_id=101001,preset=preset)
+            assert saved.status==pb.StatusCode_OK and saved.char_id==101001 and saved.preset==preset
             assert call(a,"OutfitPresetSwitch",char_id=101001,use_preset_index=1).status==pb.StatusCode_OK
             hide=pb.OutfitHideInfo(hide_orn=True,hide_braid=True)
             assert call(a,"OutfitHideSwitch",char_id=101001,hide_info=hide).status==pb.StatusCode_OK
             # A peer receives the equipped template, selected dye and current hide switches.
             for _ in range(8):
                 sync=next_msg(b,MsgId.ServerSceneSyncDataNotice,pb.ServerSceneSyncDataNotice)
-                scene=[rec.player.team.char1.outfit_preset for p in sync.data if p.player_id==owner
+                scene=[rec.player.team.char1 for p in sync.data if p.player_id==owner
                        for rec in p.server_data if rec.action_type==pb.SceneActionType_UPDATE_FASHION]
-                if any(s.clothes==4011023 and s.hide_info==hide for s in scene):break
+                assert all(char.pos==record.pos and char.rot==record.rot for char in scene)
+                if any(char.outfit_preset.clothes==4011023 and char.outfit_preset.hide_info==hide
+                       and char.outfit_preset.pend_right_foot==4200037 for char in scene):break
             else:raise AssertionError("Other player did not see equipped clothes and switches")
             for bad in (dict(clothes=500),dict(preset_index=99),dict(hair=4011023),
                         dict(hair=4011022),dict(clothes_dye_scheme_index=99)):
@@ -73,6 +86,9 @@ def run(root,resources):
             char=next(c for c in main.characters if c.character_id==101001)
             worn=char.outfit_presets[char.in_use_outfit_preset_index]
             assert worn.clothes==4011023 and worn.outfit_hide_info==hide
+            assert (worn.pend_top,worn.pend_chest,worn.pend_pelvis,worn.pend_up_face,
+                    worn.pend_down_face,worn.pend_left_foot,worn.pend_right_foot)==(
+                        4200744,4012014,4200634,4011044,4200045,4200036,4200037)
             assert (main.sign,main.phone_background,main.phone_case)==("在罗塔花园等你",8001,7001)
             assert main.appearance==app
             assert untouched.sign=="" and not untouched.appearance.avatar_frame and untouched.phone_case==0

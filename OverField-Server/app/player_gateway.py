@@ -191,12 +191,26 @@ async def listen(gate, host, port, context):
     return await asyncio.start_server(gate.accept, host, port, ssl=context, ssl_handshake_timeout=7, limit=8192)
 
 
+async def listen_terminated(gate,host,port,identity_file):
+    from player_gateway_terminator import Terminator
+    terminator=Terminator(host,identity_file)
+    async def accept(reader,writer):
+        if not terminator.accepts(writer.get_extra_info("peername"),writer.get_extra_info("sockname")):
+            await close(writer)
+            return
+        await gate.accept(reader,writer)
+    return await asyncio.start_server(accept,host,port,limit=8192)
+
+
 def arguments(commands):
     cmd = commands.add_parser("player-gateway", help="Serve player accounts and game sessions over authenticated TLS")
     cmd.add_argument("--listen", default="0.0.0.0")
     cmd.add_argument("--port", type=int, default=18443)
-    cmd.add_argument("--cert", type=Path, required=True)
-    cmd.add_argument("--key", type=Path, required=True)
+    source=cmd.add_mutually_exclusive_group(required=True)
+    source.add_argument("--cert",type=Path)
+    source.add_argument("--local-terminator-identity",type=Path,
+                        help="Windows only: trusted frpc process ID and creation FILETIME in an operator-protected file")
+    cmd.add_argument("--key", type=Path)
     cmd.add_argument("--max-connections", type=int, default=128)
 
 
@@ -208,11 +222,15 @@ def run(args, endpoints):
         raise ValueError("The player gateway needs a separate port in 1..65535")
     if not 1 <= args.max_connections <= 2048:
         raise ValueError("Choose 1..2048 simultaneous gateway connections")
-    context = tls(args.cert,args.key)
+    if bool(args.cert)!=bool(args.key):
+        raise ValueError("Supply both the TLS certificate and its key")
+    context = tls(args.cert,args.key) if args.cert else None
     gate = Gate(endpoints["http_port"],endpoints["game_port"],args.max_connections,player_gateway_peer.load(args.state))
 
     async def serve():
-        async with await listen(gate,host,args.port,context) as server:
+        opening=(listen(gate,host,args.port,context) if context else
+                 listen_terminated(gate,host,args.port,args.local_terminator_identity))
+        async with await opening as server:
             print(f"OF_SF player gateway listening on {host}:{args.port}",flush=True)
             await server.serve_forever()
     try:

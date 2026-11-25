@@ -51,6 +51,9 @@ def seal_native_entry(conn,slot):
 
 def snapshot(conn,pid):
     result={}
+    from save_import_quests import HISTORY
+    for key,raw in conn.execute("SELECT k,v FROM player_kv WHERE player_id=? AND ns=?",(pid,HISTORY)):
+        result[HISTORY,int(key)]=raw
     from save_import_field import snapshot as snapshot_field
     snapshot_field(conn,pid,result)
     for table,(key,col) in BLOBS.items():
@@ -75,6 +78,13 @@ def snapshot(conn,pid):
 
 
 def restore_prior(conn,pid,table,key,value):
+    from save_import_quests import HISTORY
+    if table==HISTORY:
+        if value is None:
+            conn.execute("DELETE FROM player_kv WHERE player_id=? AND ns=? AND k=?",(pid,HISTORY,str(key)))
+        else:
+            conn.execute("INSERT OR REPLACE INTO player_kv(player_id,ns,k,v) VALUES(?,?,?,?)",(pid,HISTORY,str(key),value))
+        return
     if table.startswith("field_"):
         from save_import_field import undo
         return undo(conn,pid,table,key,value)

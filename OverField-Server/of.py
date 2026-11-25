@@ -199,7 +199,7 @@ def self_test():
                    "test_native_head_collection.py", "test_login_inventory.py",
                    "test_native_import_identity.py", "test_native_import_resume.py",
                    "test_native_prayer_conversion.py", "test_native_prayer_tasks.py",
-                   "test_native_save_import.py",
+                   "test_native_save_import.py","test_native_import_quests.py",
                    "test_native_archive_editions.py", "test_native_blessing_calendar.py",
                    "test_native_local_gm.py", "test_native_player_gateway.py", "test_player_captcha.py",
                    "test_native_season_reopening.py", "test_native_treasure_dig.py",

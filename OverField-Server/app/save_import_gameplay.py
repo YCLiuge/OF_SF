@@ -111,6 +111,10 @@ def validate(data):
     legal={step for _,_,steps in story_catalog().values() for step in steps}
     condition_sets={}
     inferred=defaultdict(list)
+    from save_import_quests import HISTORY, activity_quests, classify
+    active_events=activity_quests()
+    supplementary={}
+    ambiguous=set()
     for qid in legal:
         phases=groups.get(quests[qid].get("condition_set_group_i_d"),{}).get("quest_condition_set",())
         ids=frozenset(k for p in phases for k in p.get("achieve_condition_i_d",()))
@@ -123,8 +127,24 @@ def validate(data):
         cs=[numbers(c,3) for c in rows(conditions,64)]
         ids=frozenset(c[0] for c in cs)
         if not key and len(inferred.get(ids,()))==1:key=inferred[ids][0]
-        if key not in legal or state not in (1,2,3) or ids!=condition_sets[key] or len(ids)!=len(cs):continue
+        if not key or key not in quests or state not in (1,2,3) or len(ids)!=len(cs):continue
+        if key not in condition_sets:
+            phases=groups.get(quests[key].get("condition_set_group_i_d"),{}).get("quest_condition_set",())
+            condition_sets[key]=frozenset(cid for phase in phases for cid in phase.get("achieve_condition_i_d",()))
+        if ids!=condition_sets[key]:continue
         if any(st>3 for _,st,_ in cs):continue
+        if key not in legal:
+            if not cs or any(cid not in achieve for cid,_,_ in cs):continue
+            kind=classify(quests[key],active_events)
+            record=[key,state,count,cs]
+            # Retail exports can retain several past completions even on a template whose
+            # current limit is one. A nonterminal replay needs its original reset context.
+            if kind=="persistent" and count>1 and state!=pb.QuestStatus_Finish:kind="history"
+            if kind=="persistent":
+                record[3]=[[cid,st,min(n,achieve[cid].get("count_param",1))] for cid,st,n in cs]
+            if key in supplementary and supplementary[key]!=(kind,record):ambiguous.add(key)
+            else:supplementary[key]=(kind,record)
+            continue
         cs=[[cid,st,min(n,achieve.get(cid,{}).get("count_param",1))] for cid,st,n in cs]
         out["quests"].append([key,state,min(count,max(1,quests[key].get("limit_num",1))),cs])
     chapters=_table("Story","story_chapter")
@@ -201,6 +221,11 @@ def validate(data):
                 selected[kind]=max(count,selected.get(kind,0))
         out["gather_totals"]=[[scene,kind,value] for kind,value in sorted(selected.items())]
     totals={"队长等级":out["player"][0],**{LABELS[k]:len(out[k]) for k in LABELS}}
+    for kind,key,label in (("persistent","additional_quests","支线、委托及番外等一次性任务"),("history",HISTORY,"未激活的历史任务")):
+        values=[record for ident,(category,record) in supplementary.items() if category==kind and ident not in ambiguous]
+        if values:
+            out[key]=values
+            totals[label]=len(values)
     if "field_progress" in data:
         from save_import_field import validate as validate_field
         restored = validate_field(data["field_progress"], out.get("progress_location", {}).get("scene"))
@@ -215,7 +240,7 @@ def validate(data):
         totals["可恢复宠物"]=len(pets["entries"])
         totals["缺少可用明细的宠物"]=pets["total"]-len(pets["entries"])
     if out.get("gather_totals"):totals["场景采集记录"]=len(out["gather_totals"])
-    skipped=sum(len(data[k])-len(out[k]) for k in LABELS)
+    skipped=sum(len(data[k])-len(out[k]) for k in LABELS)-len(out.get("additional_quests",()))-len(out.get(HISTORY,()))
     totals["穿搭预设"]=sum(len(h[6]) for h in out["heroes"])
     totals["已编队人数"]=sum(bool(i) for i in out["team"])
     totals["装备预设"]=sum(len(presets) for _,_,presets in out["loadouts"])
@@ -326,6 +351,8 @@ def restore(pid,plan):
         by_id={i:(st,n) for i,st,n in conditions}
         for c in q.conditions:c.status,c.progress=by_id[c.condition_id]
         db.set_quest(pid,key,q.SerializeToString())
+    from save_import_quests import add_missing
+    add_missing(db.conn,pid,plan)
     for key,stories in plan["chapters"]:
         chapter=pb.Chapter(chapter_id=key,rewarded_story_ids=stories)
         db.set_chapter(pid,key,chapter.SerializeToString())

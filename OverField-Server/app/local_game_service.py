@@ -242,6 +242,7 @@ class _Connection(socketserver.BaseRequestHandler):
     def handle(self):
         session=None
         remote_player=None
+        private_game_digest=None
         remote_resources=ExitStack()
         host=self.server.owner
         host.stages.connection(True)
@@ -260,6 +261,8 @@ class _Connection(socketserver.BaseRequestHandler):
                     if host.remote_password:
                         raise ValueError("Use the private launcher to select the remote account")
                     slot = host.identity.resolve_ticket(req.login_token)
+                    from local_identity import _digest
+                    private_game_digest=_digest(req.login_token)
                     if req.sdk_uid and req.sdk_uid != slot:
                         raise ValueError("wrong private profile")
                     reply_uid, reply_account, reply_os = slot, 0, 0
@@ -342,6 +345,9 @@ class _Connection(socketserver.BaseRequestHandler):
                 try:
                     host._handle(session,header.msg_id,header.packet_id,body)
                     if session.logout_requested:
+                        if private_game_digest is not None:
+                            from realm_accounts import end_native_session
+                            end_native_session(host.identity,slot,private_game_digest,logout=True)
                         # Flush the native reply in FIFO order before normal leave/save cleanup.
                         try:
                             session.outbox.put(None, timeout=1)
@@ -379,6 +385,9 @@ class _Connection(socketserver.BaseRequestHandler):
             if session is not None:
                 session.disconnect()
                 host._leave(session)
+                if private_game_digest is not None and not session.logout_requested:
+                    from realm_accounts import end_native_session
+                    end_native_session(host.identity,slot,private_game_digest,logout=False)
                 if session.writer is not None:session.writer.join()
 
 

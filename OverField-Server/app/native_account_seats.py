@@ -82,6 +82,8 @@ class NativeAccountSeats:
         self.picker=None
         self.last_owner=None
         self.disconnected_owner=None
+        self.resume_grant=None
+        self.resume_until=0
 
     @classmethod
     def configured(cls,identity,bind):
@@ -124,29 +126,49 @@ class NativeAccountSeats:
                             raise ValueError("Not a password account")
                 self.pending[pid]=(born,slot,now+300)
                 self.last_owner=self.disconnected_owner=None
+                self.resume_grant=None
         except (ValueError,OSError):
             raise AccountError(403,"invalid_native_handoff") from None
 
     def claim(self,sock):
         pid=connection_pid(sock)
         exe,_,born=process_info(pid)
+        owner=(pid,born)
         with self.lock:
+            now=time.monotonic()
             entry=self.pending.get(pid)
-            if not entry or exe!=self.client or born!=entry[0] or entry[2]<=time.monotonic():
-                if self.picker and exe==self.client and self.disconnected_owner==(pid,born):
+            if entry and exe==self.client and born==entry[0] and entry[2]>now:
+                del self.pending[pid]
+                grant=entry[1]
+            elif exe==self.client and self.disconnected_owner==owner:
+                grant=None
+                if self.resume_grant and now<self.resume_until:
                     try:
-                        if self.picker.enter(sock,reconnect=True):
-                            self.disconnected_owner=None
-                    except OSError:
-                        pass
+                        grant=self.remote.resume(self.resume_grant)
+                    except OSError as failure:
+                        raise ValueError("Private reconnect temporarily unavailable") from failure
+                    except ValueError:
+                        pass  # A server-expired or replaced session needs a normal login.
+                self.resume_grant=None
+                if grant is None:
+                    if self.picker:
+                        try:
+                            if self.picker.enter(sock,reconnect=True):
+                                self.disconnected_owner=None
+                        except OSError:
+                            pass
+                    raise ValueError("Private session needs a fresh login")
+                self.disconnected_owner=None
+            else:
                 raise ValueError("No matching private account launch")
-            del self.pending[pid]
-            if self.remote and self.picker:
-                self.last_owner=(pid,born)
-                return replace(entry[1],on_disconnect=partial(self._disconnected,self.last_owner))
-            return entry[1]
+            if self.remote and (self.picker or grant.resume_token):
+                self.last_owner=owner
+                return replace(grant,on_disconnect=partial(self._disconnected,owner,grant))
+            return grant
 
-    def _disconnected(self,owner):
+    def _disconnected(self,owner,grant):
         with self.lock:
             if self.last_owner==owner:
                 self.disconnected_owner=owner
+                self.resume_grant=grant if grant.resume_token else None
+                self.resume_until=time.monotonic()+120
