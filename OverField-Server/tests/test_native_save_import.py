@@ -1,4 +1,4 @@
-"""Personal CN v1.5 backup projection, transactional ownership and native save visibility."""
+"""Personal CN v1.5/v1.9 backups, transactional ownership and native save visibility."""
 import argparse
 from contextlib import closing,contextmanager
 from copy import deepcopy
@@ -109,6 +109,19 @@ def run(root,resources):
     fixture["decoded"]["pack"]["frames"][0]["decoded"]["items"].append({"main_item":{"item_id":pet["item_id"],"pet":pet}})
     fixture["decoded"]["pet_page"]=record("GetPetRsp",{"total_num":3,"pets":[pet]})
     fixture["decoded"]["pet_capacity"]=record("PetWarehouseLimitNotice",{"warehouse_limit":125})
+    # The v1.9 tool emits three flat ZIP members. A full pet page can repeat the pet from PackNotice.
+    complete=deepcopy(fixture)
+    complete["tool"]="backup.js v1.2"
+    page=[dict(pet,instance_id=pet["instance_id"]+i,size=pet["size"]+i) for i in range(3)]
+    complete["decoded"]["pet_page"]=record("GetPetRsp",{"total_num":3,"end_index":3,"pets":page})
+    full_zip=root/"complete-export.zip"
+    with zipfile.ZipFile(full_zip,"w",zipfile.ZIP_DEFLATED) as f:
+        f.writestr("SUMMARY.md","Fixture")
+        f.writestr("snapshot.json",json.dumps(complete))
+        f.writestr("private-server-import.json","DO-NOT-COPY")
+    complete_data=project_file(full_zip)
+    complete_data["identity"]["public_label"]=complete_data["identity"].pop("uid")
+    assert len(complete_data["pets"]["entries"])==3 and sum(p["active"] for p in complete_data["pets"]["entries"])==1
     (folder/"snapshot.json").write_text(json.dumps(fixture),encoding="utf8")
     (folder/"private-server-import.json").write_text("DO-NOT-COPY",encoding="utf8")
     archive=root/"export.zip"
@@ -206,10 +219,19 @@ def run(root,resources):
             assert not call("import-preview",{**auth,"data":data})[1]["eligible"]
             assert call("import-undo",auth)[0]==409
         b=call("login",other)[1]
+        second_auth={"import_ticket":b["import_ticket"]}
+        status,full_info=call("import-preview",{**second_auth,"data":complete_data})
+        assert status==200 and full_info["counts"]["可恢复宠物"]==3 and not full_info["counts"].get("缺少可用明细的宠物",0)
+        full_claim={**second_auth,"preview_id":full_info["preview_id"],
+                    "identity":{"uid_mode":"new","nickname_mode":"local"}}
+        for _ in range(2):
+            assert call("import-apply",full_claim)[0]==200
+        other_player=db.conn.execute("SELECT player_id FROM private_slots WHERE slot=?",(b["slot"],)).fetchone()[0]
+        assert sorted(p.size for p in owned_pets(other_player))==sorted(p["size"] for p in page)
         with closing(login(game.port,b["ticket"])[0]):pass
         assert not call("import-preview",{"import_ticket":b["import_ticket"],"data":data})[1]["eligible"]
         assert db.conn.execute("SELECT sealed FROM private_import_receipt WHERE slot=?",(a["slot"],)).fetchone()[0]==1
-    print("PASS: v1.5 ZIP/folder/file projection, account isolation, read-only preview, atomic rollback, retry, expiry, restart, undo and native progress.")
+    print("PASS v1.5/v1.9 ZIP/folder/file import, partial and full pet pages, account isolation, preview, rollback, retry, expiry, restart, undo and native progress.")
 
 
 def check_gateway(root,resources):
