@@ -25,6 +25,7 @@ from realm_maintenance import MAX_FEED, checked_feed
 
 PRIVATE_REALM="overfield-local-v1"
 OPERATIONS={"register":"/local/v1/accounts/register","login":"/local/v1/accounts/login",
+            "challenge":"/local/v1/accounts/challenge","lookup":"/local/v1/accounts/lookup",
             "bind":"/local/v1/accounts/bind","maintenance":"/private/maintenance",
             "gifts":"/private/gifts","claim-gift":"/local/v1/accounts/claim-gift"}
 
@@ -283,6 +284,24 @@ def handle(inp):
         status,server=request(config,"GET","/local/v1/region")
     if status!=200 or server.get("realm")!=PRIVATE_REALM:
         raise ValueError("所选地址未提供兼容的私服账号服务。")
+    if action in ("challenge","lookup"):
+        if "captcha_lookup_v1" not in (server.get("account_features") or []):
+            return {"ok":False,"code":"unsupported_lookup","message":"这个版本的区服支持直接登录，暂不支持检查账号。"}
+        keys = ("username","purpose") if action=="challenge" else ("username","challenge_id","answer")
+        status, doc = request(config,"POST",OPERATIONS[action],{k:inp.get(k,"") for k in keys},max_bytes=131072)
+        if status!=200:
+            return refusal(status,doc)
+        if action=="challenge":
+            challenge_id, image = doc.get("challenge_id"), doc.get("image_png")
+            if not isinstance(challenge_id,str) or not 1<=len(challenge_id)<=256 or not isinstance(image,str) or len(image)>120000:
+                raise ValueError("私服验证码格式无效。")
+            png=base64.b64decode(image,validate=True)
+            if not png.startswith(b"\x89PNG\r\n\x1a\n") or len(png)<33 or not (0<int.from_bytes(png[16:20],"big")<=1024 and 0<int.from_bytes(png[20:24],"big")<=256):
+                raise ValueError("私服验证码图片格式无效。")
+            return {"ok":True,"challenge_id":challenge_id,"image_png":image}
+        if type(doc.get("exists")) is not bool or not isinstance(doc.get("account_proof"),str) or not 1<=len(doc["account_proof"])<=512:
+            raise ValueError("私服账号查询结果无效。")
+        return {"ok":True,"exists":doc["exists"],"account_proof":doc["account_proof"]}
     if action in IMPORT_OPS:
         return import_backup(action,inp,config)
     if action=="gifts":
@@ -320,6 +339,8 @@ def handle(inp):
             desc,data=read_response(client.getresponse(),digest)
         return {"ok":True,"image":base64.b64encode(data).decode("ascii")}
     form={"username":inp.get("username",""),"password":inp.get("password","")}
+    if action in ("register","login"):
+        form.update({k:inp[k] for k in ("challenge_id","answer","account_proof") if inp.get(k)})
     if action in ("register","bind"):
         form["nickname"]=inp.get("nickname","")
     if action=="bind":form.update(proof(inp.get("profile","")))

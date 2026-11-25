@@ -30,6 +30,8 @@ class RealmRules:
     activity_fragment_percent:int=20
     activity_fragment_quantity:int=0
     ordinary_ground_drop_percent:int=20
+    dungeon_star_reward_id:int=0
+    enable_collapse_rooms:int=0
 
     def validated(self):
         numbers=[value for k,value in asdict(self).items() if k!="public_furniture_scope"]
@@ -45,6 +47,8 @@ class RealmRules:
             raise ValueError("Choose a monster gift chance between 0 and 100 percent")
         if self.starter_teachable_actions not in (0,1):
             raise ValueError("Choose 1 for permanent starter actions or 0 to learn teachable actions")
+        if self.enable_collapse_rooms not in (0,1):
+            raise ValueError("Choose 1 to offer optional collapse rooms, or 0 to close them")
         if not 1<=self.public_min<=self.public_max<self.uid_start<0xffffffff:
             raise ValueError("Public channels must be positive, nonempty and below the first private home UID")
         if not 1<=self.world_min<=self.world_max:

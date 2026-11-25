@@ -206,7 +206,7 @@ def remove_member(team,player):
 
 
 def remove_team(team):
-    for name in ("private_mp_invites","private_mp_kicks","private_mp_members"):
+    for name in ("private_mp_invites","private_mp_kicks","private_mp_members","mp_collapse_queue"):
         db.conn.execute("DELETE FROM "+name+" WHERE team=?",(team,))
     db.conn.execute("DELETE FROM private_mp_teams WHERE id=?",(team,))
 
@@ -310,5 +310,8 @@ def on_login(session):
     if row:
         notice=pb.PlayerMPGameNotice(status=pb.StatusCode_OK)
         detail(session,notice.m_p_team,row,roster(row[0]))
-        rooms.restore_member(session,row,notice)
+        eliminated = rooms.restore_member(session,row,notice)
         session.send(MsgId.PlayerMPGameNotice,notice,0)
+        for pid in eliminated:
+            session.send(MsgId.CollapseFailNotice,
+                         pb.CollapseFailNotice(status=pb.StatusCode_OK, player_id=pid), 0)

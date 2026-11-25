@@ -199,6 +199,8 @@ class Handler(PacketHandler):
         # 视为完成登录，同步场景玩家并广播加入事件
         if session.logged_in == False:
             session.logged_in = True
+            from private_action_challenge import restore as restore_challenge
+            restore_challenge(session)
             from private_mp_teams import on_login as mp_login
             mp_login(session)
             from private_wishes import deliver

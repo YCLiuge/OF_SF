@@ -2,6 +2,7 @@
 import argparse
 from itertools import count
 from pathlib import Path
+from dataclasses import replace
 from tempfile import TemporaryDirectory
 
 from local_game_service import LocalGameService,pb
@@ -47,9 +48,26 @@ def run(root,resources):
             assert ask(p,"DungeonOperate").status==pb.StatusCode_OK
             timed=ask(p,"DungeonOperate",operate_type=1)
             assert timed.status==pb.StatusCode_OK and 0<timed.consume_time<100000 and timed.star==3
+            assert ask(p,"DungeonStarReward",dungeon_id=did).status==pb.StatusCode_MODULE_CLOSE
+            with host.lock:
+                for session in host.active.values():
+                    session.realm_rules=replace(session.realm_rules,dungeon_star_reward_id=101)
+            assert ask(p,"DungeonStarReward",dungeon_id=did).status==pb.StatusCode_DungeonCantReward
+            assert ask(p,"DungeonStarReward",dungeon_id=777777).status==pb.StatusCode_CFG_NOT_FOUND
             assert ask(p,"DungeonOperate",operate_type=1)==timed
             assert not ask(q,"AbyssAllServerRank",season_id=sid).rank_list
             assert ask(p,"DungeonFinish").status==pb.StatusCode_OK
+            assert ask(q,"DungeonStarReward",dungeon_id=did).status==pb.StatusCode_DungeonCantReward
+            with host.lock:
+                session=next(s for s in host.active.values() if s.player_id==pid)
+                session.realm_rules=replace(session.realm_rules,dungeon_star_reward_id=999999998)
+            assert ask(p,"DungeonStarReward",dungeon_id=did).status==pb.StatusCode_CFG_NOT_FOUND
+            with host.lock:
+                session.realm_rules=replace(session.realm_rules,dungeon_star_reward_id=101)
+            prize=ask(p,"DungeonStarReward",dungeon_id=did)
+            assert prize.status==pb.StatusCode_OK and len(prize.rewards)==1
+            assert prize.rewards[0].main_item.item_id==102 and prize.rewards[0].main_item.base_item.num==10
+            assert ask(p,"DungeonStarReward",dungeon_id=did).status==pb.StatusCode_REPEAT_GET_REWARD
             reward=ask(p,"AbyssQuestReward",season_id=sid,condition_id=aid)
             assert reward.status==pb.StatusCode_OK and reward.rewards
             assert ask(p,"AbyssQuestReward",season_id=sid,condition_id=aid).status==pb.StatusCode_REPEAT_GET_REWARD
@@ -101,6 +119,7 @@ def run(root,resources):
         p,same=enter(player)
         with p:
             assert same==pid
+            assert ask(p,"DungeonStarReward",dungeon_id=did).status==pb.StatusCode_REPEAT_GET_REWARD
             saved=ask(p,"AbyssInfo").abyss_info.season_info[sid].dungeon_info
             assert saved[did].finish_time==timed.consume_time and len(saved[double].abyss_teams)==2
     finally:

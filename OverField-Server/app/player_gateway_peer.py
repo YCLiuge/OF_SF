@@ -38,11 +38,18 @@ def signature(key, path, body, stamp, source):
     return hmac.digest(key,data.encode("ascii"),"sha256").hex()
 
 
-def sign(key, address, path, body):
+PROXY_LOOPBACKS=("127.0.0.1","::1")
+
+
+def source_id(key,address):
     address=ipaddress.ip_address(address)
     if isinstance(address,ipaddress.IPv6Address) and address.ipv4_mapped:
         address=address.ipv4_mapped
-    source=hmac.digest(key,b"limit-source\0"+address.packed,"sha256").hex()
+    return hmac.digest(key,b"limit-source\0"+address.packed,"sha256").hex()
+
+
+def sign(key, address, path, body):
+    source=source_id(key,address)
     stamp=str(int(time.time()))
     return ".".join((stamp,source,signature(key,path,body,stamp,source)))
 

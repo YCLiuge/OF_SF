@@ -201,7 +201,7 @@ def self_test():
                    "test_native_prayer_conversion.py", "test_native_prayer_tasks.py",
                    "test_native_save_import.py",
                    "test_native_archive_editions.py", "test_native_blessing_calendar.py",
-                   "test_native_local_gm.py", "test_native_player_gateway.py",
+                   "test_native_local_gm.py", "test_native_player_gateway.py", "test_player_captcha.py",
                    "test_native_season_reopening.py", "test_native_treasure_dig.py",
                    "test_native_vehicle_seats.py",
                    "test_native_character_appearance.py", "test_native_fashion_gacha.py",
@@ -235,7 +235,7 @@ def self_test():
                    "test_native_home_visibility.py", "test_native_bless_tree.py", "test_native_bless_ladder.py", "test_native_events.py",
                    "test_native_recruit_entry.py", "test_native_gacha_rewards.py", "test_native_badge_tree.py", "test_native_battle_pass.py", "test_native_newcomer.py",
                    "test_profile_issuance.py","test_explore_dispatch.py"):
-        extras = [] if script in ("test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py") else ["--resources", str(ROOT/"resources")]
+        extras = [] if script in ("test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py","test_player_captcha.py") else ["--resources", str(ROOT/"resources")]
         subprocess.run([sys.executable, "-B", str(tests/script), *extras], env=env, check=True)
 
 

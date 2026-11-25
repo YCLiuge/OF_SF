@@ -70,8 +70,8 @@ if __name__ == "__main__":
     with TemporaryDirectory() as tmp:
         run(Path(tmp), args.resources)
     if args.client:
-        from game_dispatch import Assets, PATCH
+        from game_dispatch import Assets
         assets = Assets(args.client)
-        assert assets.select_plaza({**STAGE, "opens_at":"2020-01-01 00:00:00", "closes_at":"2070-01-01 00:00:00"}) != PATCH
-        assert assets.select_plaza({}) == PATCH
+        assert assets.select_plaza({**STAGE, "opens_at":"2020-01-01 00:00:00", "closes_at":"2070-01-01 00:00:00"}) != assets.patch
+        assert assets.select_plaza({}) == assets.patch
         print("PASS stock client resource repack for sign-in, recall and pass season with original manifest restoration.")

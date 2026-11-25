@@ -1,8 +1,7 @@
 """Optional acceptance against an operator's OF_SF TLS gateway using a fresh QA character."""
 import argparse
 from collections import Counter
-from contextlib import closing, contextmanager
-from http.client import HTTPConnection
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import secrets
@@ -14,16 +13,7 @@ from proto import net_pb2 as pb
 from remote_password import RemotePassword
 from test_game_realm import next_msg
 from test_native_gacha import call
-
-
-def account(channels, action, body, expected=200):
-    with channels.open(18881) as stream, closing(HTTPConnection("127.0.0.1",18881,timeout=12)) as http:
-        http.sock = stream
-        http.request("POST","/local/v1/accounts/"+action,json.dumps(body).encode(),
-                     {"Content-Type":"application/json","Connection":"close"})
-        response = http.getresponse()
-        assert response.status==expected, (action,response.status)
-        return json.loads(response.read(8192))
+from public_qa_accounts import account
 
 
 @contextmanager

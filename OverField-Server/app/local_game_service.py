@@ -597,6 +597,13 @@ class LocalGameService:
             body = prepare(self.lock, s, body, packet_id)
         # Channel admission is transactional in the scene-switch handler.
         with self.lock:
+            if (getattr(s, "action_challenge", False) and
+                    msg_id not in (MsgId.UnfreezePlayerActionReq, MsgId.PlayerPingReq)):
+                pair = self.failure_replies.get(msg_id)
+                if pair:
+                    s.send(pair[2], pair[1](status=pb.StatusCode_PLAYER_OPERATION_LOCKED), packet_id)
+                    self._publish_pending()
+                return
             if msg_id in (MsgId.ChangeSceneChannelReq, MsgId.DungeonEnterReq, MsgId.DungeonExitReq, MsgId.DungeonRepeatEnterReq):
                 # Scene construction reads committed poses, including switches to this same scene.
                 self._flush_poses(s.player_id)

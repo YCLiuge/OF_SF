@@ -31,35 +31,9 @@ py -3 tools/package_server.py --base "D:\OverField\IsolatedInstaller\OverField-O
 
 Linux 使用相同参数，将 `py -3` 换成 `python3`。包内源码取自 Git 跟踪文件的当前工作区内容。新增源文件须先执行 `git add`。输出包含服务端、校验后的资源及运行时。旧基包若缺少新增玩法使用的游戏表，工具会从本地仓库的同名资源路径读取，并与已提交的源数据摘要逐项核对。输出在同目录写入 `.sha256`。玩家存档、账号库、日志与本机配置保存在各自的运行目录。
 
-## 重打玩家补丁
+## Windows 登陆器
 
-在 Windows x64 上先按上文导入 Windows 依赖、客户端地址模板和国服资源，再运行以下命令。补丁使用系统自带的 .NET Framework 编译器，玩家机器可直接使用包内运行时。
-
-```powershell
-py -3 tools/package_player_patch.py --output dist/OF_SF-PlayerPatch-1.1.12-Windows-x64.zip
-py -3 tools/test_compact_player.py
-py -3 tools/test_player_patch.py --archive dist/OF_SF-PlayerPatch-1.1.12-Windows-x64.zip
-```
-
-## 生成可公开分享的朋友包
-
-从校验通过的通用 ZIP 生成，构建过程只需该 ZIP 和它的 SHA-256。连接资料通过独立邀请在玩家本机导入。
-
-```powershell
-$baseZip = "dist/OF_SF-PlayerPatch-1.1.12-Windows-x64.zip"
-$baseHash = ((Get-Content -LiteralPath "$baseZip.sha256" -Raw).Trim() -split '\s+')[0]
-$friendsZip = "dist/OF_SF-Friends-1.1.12-Windows-x64.zip"
-py -3 tools/package_friends_patch.py --source $baseZip --sha256 $baseHash --output $friendsZip
-py -3 tools/test_friends_patch.py --source $baseZip --friends $friendsZip
-```
-
-服主可在已配置好的玩家补丁目录中，使用随包运行时从本机设置导出独立明文邀请。请把输出指定到自己的私有文件夹，通过单独渠道发给获准加入的人。邀请只包含区服地址和可选的公开 CA，不能代替玩家的账号密码。
-
-```powershell
-.\OverField-Server\runtime-win64\python.exe -B .\client_tools\realm_invitation.py export --output "$env:LOCALAPPDATA\我的区服.ofinvite"
-```
-
-若需实际验证区服 TLS，可在测试命令后添加 `--invitation <私有邀请文件> --check-connection`。
+Windows 登陆器由独立仓库维护，构建方法、原画输入及玩家包验证见 [OF_SF_Launcher](https://github.com/YCLiuge/OF_SF_Launcher)。
 
 ## 复测频道移动
 

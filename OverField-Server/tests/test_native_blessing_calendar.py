@@ -129,18 +129,19 @@ def inspect_bundle(blob):
 
 
 def client_resource(client):
-    from game_dispatch import Assets, PATCH
-    from plaza_assets import _fields, OFF_END, OFF_START, SHEETS, STOCK_BUNDLE
+    from game_dispatch import Assets,PATCH_BUNDLES
+    from plaza_assets import _fields, OFF_END, OFF_START,KNOWN_BUNDLES
     assets=Assets(client)
     assert not assets.private_copy, "Use a read-only reference installation for this check"
-    with assets.open_stock(STOCK_BUNDLE+".bundle") as src:
+    stock_bundle=PATCH_BUNDLES[assets.patch]
+    with assets.open_stock(stock_bundle+".bundle") as src:
         base=inspect_bundle(src.read())
     version=assets.select_plaza({"blessings":TREES["trees"]})
-    assert version!=PATCH
+    assert version!=assets.patch
     name=next(f for f in assets.plaza_versions[version] if f.endswith(".bundle"))
     with assets.open(name) as src:
         variant=inspect_bundle(src.read())
-    begin,size=SHEETS["BlessingTree"]
+    begin,size=KNOWN_BUNDLES[stock_bundle][0]["BlessingTree"]
     assert base[:begin]==variant[:begin] and base[begin+size:]==variant[begin+size:]
     original,changed=base[begin:begin+size],variant[begin:begin+size]
     assert original!=changed
@@ -162,7 +163,7 @@ def client_resource(client):
         for field,value in enumerate(window,2):
             a,b=seen[tree][field]
             expected[a:b]=value.encode()
-    assert expected==changed and assets.select_plaza({})==PATCH
+    assert expected==changed and assets.select_plaza({})==assets.patch
     print("PASS stock 1.1.12 client resource delivery, two selected date pairs, all other bytes unchanged and original manifest restored.")
 
 

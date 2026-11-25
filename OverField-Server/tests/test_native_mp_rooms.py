@@ -1,6 +1,7 @@
 """Three native TCP players finish both national PC team courses with a fourth player on another channel."""
 import argparse
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -22,7 +23,7 @@ def run(root,resources):
     host.start()
     seq=100
     tracked=("MPPlayRoomEventNotice","MPRoomEnterNotice","MPPlayRoomSettlementNotice","SceneMPBeaconNotice",
-             "MPBeaconCanStartNotice","MPRoomAssignHostNotice","MPRoomDismissNotice","MPPlayRoomExitNotice",
+             "MPBeaconCanStartNotice","MPRoomAssignHostNotice","MPRoomDismissNotice","MPPlayRoomExitNotice","CollapseFailNotice",
              "SceneDataNotice","PlayerMPGameNotice")
     classes={getattr(MsgId,n):getattr(pb,n) for n in tracked}
     collected={}
@@ -135,6 +136,35 @@ def run(root,resources):
                     ok(sock,"MPPlayRoomEvent",events=[pb.MPPlayRoomEvent(event_type=7,id=i) for i in range(1,count+1)])
                 ranks=history(b,"MPPlayRoomSettlementNotice")[-1].rank
                 assert ranks.star==3 and {r.player_id for r in ranks.magic_platform}=={aa,bb,cc}
+            for sock in (a,b,c):ok(sock,"MPPlayRoomExit")
+            def select(sock, text="/collapse"):
+                return call(sock,"SendChatMsg",type=pb.ChatChannel_Default,text=text)
+            assert select(a).status==pb.StatusCode_MODULE_CLOSE
+            with host.lock:
+                for peer in host.active.values():
+                    peer.realm_rules=replace(peer.realm_rules,enable_collapse_rooms=1)
+            assert select(o).status==pb.StatusCode_MP_NOT_IN_TEAM
+            assert select(b).status==pb.StatusCode_MP_TEAM_NOT_LEADER
+            assert select(a).status==pb.StatusCode_OK
+            assert select(a,"/collapse cancel").status==pb.StatusCode_OK
+            assert select(a).status==pb.StatusCode_OK
+            ok(a,"MPBeaconAction",action=3)
+            team,entered,started=open_course(a,b,c,o,(aa,bb,cc))
+            assert entered.game_mode_info.game_mode==pb.EMultiplayerPlayMode_Collapse
+            assert entered.game_mode_info.gameplay_id in (10060101,10060102)
+            assert not entered.room_info.HasField("magic_platform")
+            assert call(o,"CollapseFail").status==pb.StatusCode_PLAYER_NOT_IN_MP_ROOM
+            with patch("private_mp_rooms.millis",return_value=started+10000):
+                ok(b,"CollapseFail")
+                ok(b,"CollapseFail")
+                assert [e.player_id for e in history(a,"CollapseFailNotice")]==[bb]
+                assert not history(o,"CollapseFailNotice")
+            with patch("private_mp_rooms.millis",return_value=started+60000):
+                ok(c,"PlayerPing")
+                settled=history(a,"MPPlayRoomSettlementNotice")[-1]
+                assert settled.gameplay_id==entered.game_mode_info.gameplay_id and not settled.rewards
+                assert {r.player_id:r.count for r in settled.rank.collapse_object}=={aa:1,bb:0,cc:1}
+                assert call(c,"CollapseFail").status==pb.StatusCode_MP_NOT_STARTING
             for sock in (a,b,c):ok(sock,"MPPlayRoomExit")
             ok(a,"ChangeSceneChannel",scene_id=9999,channel_label=2)
             assert rooms.beacon_for(team) is None

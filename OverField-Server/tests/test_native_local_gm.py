@@ -18,7 +18,8 @@ def run(root,resources):
     identity=LocalIdentity(root/"identity.sqlite3")
     service=LocalGameService(identity,root,resources,port=0)
     seq=count(40)
-    NOTICES.update({getattr(MsgId,n):getattr(pb,n) for n in ("PackNotice","ChatMsgNotice","GmNotice","ReceiveMailNotice")})
+    NOTICES.update({getattr(MsgId,n):getattr(pb,n) for n in
+                    ("PackNotice","ChatMsgNotice","GmNotice","ReceiveMailNotice","FreezePlayerActionNotice")})
     def ask(sock,name,**fields):
         return rpc(sock,name,next(seq),**fields)
     def filtered(frames,kind):
@@ -45,6 +46,16 @@ def run(root,resources):
             assert not operator(root,"grant",uid=aid)["changed"]
             assert gm(a,"whoami")[0].result.endswith(str(aid))
             assert gm(a,"online")[0].result=="本服在线 2 人"
+            assert gm(b,f"challenge {aid}")[0].status==pb.StatusCode_FAIL
+            assert gm(a,f"challenge {bid}")[0].status==pb.StatusCode_OK
+            challenge=filtered(observe(b),pb.FreezePlayerActionNotice)[0].verification_code
+            assert 100<=challenge<=999 and not filtered(observe(a),pb.FreezePlayerActionNotice)
+            assert ask(a,"UnfreezePlayerAction",verification_code=challenge)[0].status==pb.StatusCode_BAD_REQ
+            assert ask(b,"GetMails")[0].status==pb.StatusCode_PLAYER_OPERATION_LOCKED
+            assert ask(b,"UnfreezePlayerAction",verification_code=0)[0].status==pb.StatusCode_PLAYER_OPERATION_LOCKED
+            assert ask(b,"UnfreezePlayerAction",verification_code=challenge)[0].status==pb.StatusCode_OK
+            assert ask(b,"UnfreezePlayerAction",verification_code=challenge)[0].status==pb.StatusCode_BAD_REQ
+            assert ask(b,"GetMails")[0].status==pb.StatusCode_OK
             assert gm(b,"give 101 9")[0].status==pb.StatusCode_FAIL
             assert gm(b,"announce unauthorized text")[0].status==pb.StatusCode_FAIL
             assert gm(a,"grant 1000002")[0].status==pb.StatusCode_BAD_REQ
@@ -91,6 +102,7 @@ def run(root,resources):
             assert sum(r["command"]=="mail" and r["outcome"]=="ok" for r in commands)==1
             assert sum(r["command"]=="announce" and r["outcome"]=="ok" for r in commands)==1
             assert history["denied"] and "ofk_" not in str(history) and "unauthorized text" not in str(history)
+            assert gm(b,f"challenge {bid}")[0].status==pb.StatusCode_OK
             b.close()
             # Grants and actor binding remain valid without an online moderator or recipient.
             operator(root,"grant",uid=aid)
@@ -103,6 +115,9 @@ def run(root,resources):
         sock,_,uid=login(service.port,user["ticket"])
         with sock:
             join(sock)
+            resumed=filtered(observe(sock),pb.FreezePlayerActionNotice)[0].verification_code
+            assert gm(sock,"whoami")[0].status==pb.StatusCode_PLAYER_OPERATION_LOCKED
+            assert ask(sock,"UnfreezePlayerAction",verification_code=resumed)[0].status==pb.StatusCode_OK
             assert gm(sock,"whoami")[0].result.endswith(str(uid))
             inbox=ask(sock,"GetMails")[0]
             assert sorted(m.content for m in inbox.mails if m.sender=="区服管理")==sorted(["活动通知","离线通知"])

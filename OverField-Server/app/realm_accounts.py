@@ -15,7 +15,7 @@ from local_identity import SLOT, PROFILE_KEY, _digest, _name
 from profile_issuance import authorizes_game_key
 
 PREFIX = "/local/v1/accounts/"
-ROUTES = {PREFIX+k for k in ("register","login","bind","launch","claim-gift","import-preview","import-apply","import-undo")}
+ROUTES = {PREFIX+k for k in ("challenge","lookup","register","login","bind","launch","claim-gift","import-preview","import-apply","import-undo")}
 USER = re.compile(r"[A-Za-z0-9_.-]{3,40}\Z", re.ASCII)
 N, R, P = 32768, 8, 1
 SALT_SIZE = 16
@@ -170,8 +170,11 @@ class AccountService:
         self.imports=ImportService()
         initialize(identity)
         self.identity=identity
-        from player_gateway_peer import prepare
+        from player_captcha import PlayerCaptcha
+        self.captcha=PlayerCaptcha()
+        from player_gateway_peer import prepare,source_id,PROXY_LOOPBACKS
         self.gateway_peer_key=prepare(identity)
+        self.shared_sources=frozenset(source_id(self.gateway_peer_key,address) for address in PROXY_LOOPBACKS)
         self.workers=threading.BoundedSemaphore(3)
         self.lock=threading.Lock()
         self.attempts=OrderedDict()
@@ -181,13 +184,17 @@ class AccountService:
             raise AccountError(403,"secure_transport_required")
         if path==PREFIX+"register" and not open_registration:
             raise AccountError(403,"registration_closed")
+        action=path.removeprefix(PREFIX)
         now=time.monotonic()
         bucket, limit = peer, 30
+        shared=gateway_source in self.shared_sources
         if gateway_source is not None:
-            action = path.removeprefix(PREFIX)
-            family = action if action in ("register", "login") else "other"
+            family = action if action in ("challenge","lookup","register","login") else "other"
             bucket = (gateway_source, family)
-            limit = 6 if family == "register" else 30
+            if shared:
+                limit=120 if family in ("challenge","lookup","register") else 240
+            else:
+                limit=6 if family=="register" else 30
         with self.lock:
             if bucket not in self.attempts and len(self.attempts)>=4096:
                 self.attempts=OrderedDict((k,v) for k,v in self.attempts.items() if v and v[-1]>=now-60)
@@ -203,13 +210,38 @@ class AccountService:
                 raise AccountError(429,"rate_limited")
             hits.append(now)
         try:
+            public=gateway_source is not None or not ipaddress.ip_address(peer).is_loopback
+            source=gateway_source or peer
+            if action=="challenge":
+                return self.captcha.issue(body,source,shared=shared)
+            if action=="lookup":
+                from player_captcha import username
+                form=dict(body)
+                user=username(form)
+                self.captcha.verify(form,user,source,"lookup",True)
+                if set(form)!={"username"}:raise AccountError(400,"invalid_request")
+                with closing(sqlite3.connect(self.identity.path)) as db:
+                    exists=db.execute("SELECT 1 FROM realm_accounts WHERE username=?",(user,)).fetchone() is not None
+                return self.captcha.lookup_proof(source,user,exists)
             if path==PREFIX+"launch":
                 return reserve_native(self.identity,body)
             if path==PREFIX+"claim-gift":
                 return self.gifts.claim(body)
             if path in IMPORT_ROUTES:
                 return self.imports.request(path.removeprefix(PREFIX),body)
-            result=login(self.identity,body) if path==PREFIX+"login" else register(self.identity,body,path==PREFIX+"bind")
+            from player_captcha import username
+            user=username(body)
+            form=dict(body)
+            signing_in=action=="login"
+            required=public and (not signing_in or self.captcha.login_challenge(source,user,shared=shared))
+            self.captcha.verify(form,user,source,"login" if signing_in else "register",required)
+            try:
+                result=login(self.identity,form) if signing_in else register(self.identity,form,action=="bind")
+            except AccountError as error:
+                if signing_in and public and error.code=="invalid_credentials":
+                    self.captcha.failed(source,user)
+                raise
+            if signing_in and public:self.captcha.succeeded(source,user)
             if self.gifts.game is not None:
                 result.update(self.gifts.issue(result["slot"]))
             if self.imports.game is not None:

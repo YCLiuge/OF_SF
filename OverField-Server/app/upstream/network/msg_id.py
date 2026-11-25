@@ -732,3 +732,4 @@ class MsgId:
     GomokuOnlineSettlementNotice = 4620
     CollapseFailReq = 4700
     CollapseFailRsp = 4701
+    CollapseFailNotice = 4702

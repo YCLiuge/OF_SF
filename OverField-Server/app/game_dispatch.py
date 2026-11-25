@@ -15,12 +15,15 @@ from local_picker import LABEL as PICKER_LABEL, LocalPicker
 
 BUILD = "2026-10-21-14-05-50"
 PATCH = "2026-11-07-22-39-35"
+NOVEMBER_PATCH = "2026-11-25-10-44-03"
+PATCH_BUNDLES={PATCH:"e49d461782ed9bf3309d2c35662e132a", NOVEMBER_PATCH:"4479579c8fb33fb720ec2dadebe34778"}
 VERSION = BUILD + "_" + PATCH
 PREFIX = "PackageManifest_DefaultPackage"
 PACKAGE = "DefaultPackage"
 MANIFEST_SHA = {
     BUILD: "cb7dd3bb6e9ed0702ceb3c1ca96f43998d4af904327ba4c349224947d976f8be",
     PATCH: "8c467ba267e06ffa4cd6e3dcb2326a6afc403c7f5e1c2dc18bcc1e83410204d9",
+    NOVEMBER_PATCH:"7c1d25a4b2efcc802a45e841cf95ae8438f317d68dd1e37ce2c6eee8ab707de6",
 }
 ROUTES = {"/dispatch/get_login_url_list", "/dispatch/client_hot_update", "/dispatch/region_info",
           "/dispatch/get_notice_list", "/dispatch/get_notice_url_list"}
@@ -69,6 +72,17 @@ def _issued_manifest(version, manifests, stock):
         return False
 
 
+def _stock_patch(installed,manifests,stock,private_copy):
+    allowed={v.encode():v for v in PATCH_BUNDLES}
+    if installed in allowed:return allowed[installed]
+    if private_copy and _issued_manifest(installed,manifests,stock):
+        receipt=stock/(PREFIX+"_"+installed.decode("ascii")+".base")
+        # Existing issued packages predate the receipt and used the November 7 manifest.
+        base=receipt.read_bytes().strip() if receipt.exists() else PATCH.encode()
+        if base in allowed:return allowed[base]
+    raise ValueError("The expected active resource patch is unavailable")
+
+
 class Assets:
     """Expose the original installed client files required by this specific active manifest."""
 
@@ -82,20 +96,18 @@ class Assets:
         self._meta = {}
         self.plaza_lock = Lock()
         self.plaza_config = {}
-        self.plaza_version = PATCH
         self.plaza_versions = {}
         self.stock = self.root / ".of-plaza-stock"
         self.private_copy = (self.root / ".of-private-client.json").is_file()
         version_file = cache / "ManifestFiles" / (PREFIX + ".version")
         installed = version_file.read_bytes().strip()
-        if installed != PATCH.encode() and not (
-                self.private_copy and _issued_manifest(installed, version_file.parent, self.stock)):
-            raise ValueError("The expected active resource patch is unavailable")
+        self.patch=_stock_patch(installed,version_file.parent,self.stock,self.private_copy)
+        self.plaza_version=self.patch
         self._meta[version_file.name] = (version_file, _hash(version_file, "sha256"))
         active = None
-        for version, base in [(BUILD, streaming), (PATCH, cache / "ManifestFiles")]:
+        for version, base in [(BUILD, streaming), (self.patch, cache / "ManifestFiles")]:
             manifest = base / f"{PREFIX}_{version}.bytes"
-            if not manifest.exists() and version == PATCH and self.private_copy:
+            if not manifest.exists() and version == self.patch and self.private_copy:
                 manifest = self.stock / manifest.name
             checksum = manifest.with_suffix(".hash")
             blob = manifest.read_bytes()
@@ -105,7 +117,7 @@ class Assets:
                 raise ValueError("Original manifest hash file mismatch")
             self._meta[manifest.name] = (manifest, MANIFEST_SHA[version])
             self._meta[checksum.name] = (checksum, _hash(checksum, "sha256"))
-            if version == PATCH:
+            if version == self.patch:
                 active = blob
         self._bundles = {}
         missing = 0
@@ -119,7 +131,7 @@ class Assets:
             patch = cache / "CacheFiles" / name[:2] / name / "__data"
             packaged = streaming / (name + ".bundle")
             candidates = [patch, packaged]
-            if self.private_copy and name == "e49d461782ed9bf3309d2c35662e132a":
+            if self.private_copy and name == PATCH_BUNDLES[self.patch]:
                 candidates.append(self.stock / (name + ".bundle"))
             for path in candidates:
                 try:
@@ -138,20 +150,21 @@ class Assets:
         self.from_cache = cached_count
 
     def select_plaza(self, config):
-        from plaza_assets import STOCK_BUNDLE, build
+        from plaza_assets import build
         from realm_blessings import validate_plan
         config = validate_plan(config, active_only=True)
         with self.plaza_lock:
             if config == self.plaza_config:
                 return self.plaza_version
             if config:
-                manifest_name = PREFIX + "_" + PATCH + ".bytes"
-                bundle_name = STOCK_BUNDLE + ".bundle"
+                manifest_name = PREFIX + "_" + self.patch + ".bytes"
+                stock_bundle=PATCH_BUNDLES[self.patch]
+                bundle_name = stock_bundle + ".bundle"
                 with self.open_stock(manifest_name) as src:
                     manifest = src.read()
                 with self.open_stock(bundle_name) as src:
                     bundle = src.read()
-                version, files = build(manifest, bundle, config, PATCH, PREFIX)
+                version, files = build(manifest, bundle, config, self.patch, PREFIX)
                 if self.private_copy:
                     self.stock.mkdir(exist_ok=True)
                     if self.stock.resolve().parent != self.root:
@@ -162,7 +175,7 @@ class Assets:
                     issued = f"{PREFIX}_{version}"
                     receipt = hashlib.sha256(files[issued + ".bytes"]).hexdigest().encode()
                     for name, content in ((manifest_name, manifest), (manifest_name[:-6]+".hash", hashlib.md5(manifest).hexdigest().encode()),
-                                          (bundle_name, bundle), (issued+".sha256", receipt)):
+                                          (bundle_name, bundle), (issued+".base",self.patch.encode()), (issued+".sha256", receipt)):
                         target = self.stock / name
                         if target.is_file() and _hash(target,"sha256") == hashlib.sha256(content).hexdigest():
                             continue
@@ -174,15 +187,15 @@ class Assets:
                         finally:
                             temporary.unlink(missing_ok=True)
                     # Continue serving the verified baseline even if a running player prunes its old cache.
-                    self._meta[manifest_name] = (self.stock / manifest_name, MANIFEST_SHA[PATCH])
+                    self._meta[manifest_name] = (self.stock / manifest_name, MANIFEST_SHA[self.patch])
                     hash_name = manifest_name[:-6] + ".hash"
                     self._meta[hash_name] = (self.stock / hash_name, _hash(self.stock / hash_name,"sha256"))
-                    self._bundles[bundle_name] = (self.stock / bundle_name, len(bundle), STOCK_BUNDLE)
+                    self._bundles[bundle_name] = (self.stock / bundle_name, len(bundle), stock_bundle)
                 self.plaza_versions[version] = files
                 if len(self.plaza_versions) > 2:
                     del self.plaza_versions[next(iter(self.plaza_versions))]
             else:
-                version = PATCH
+                version = self.patch
             self.plaza_version = version
             self.plaza_config = config
             return version
@@ -250,7 +263,7 @@ class GameDispatch:
             return 200, {"data": rows, "serverTime": time.time_ns() // 1_000_000}
         if route == "/dispatch/get_login_url_list":
             return 200, {"LoginUrlList": [{"loginUrl": self.origin, "name": self.region_name}]}
-        version = VERSION
+        version = BUILD+"_"+getattr(self.assets,"plaza_version",PATCH)
         if route in ("/dispatch/region_info", "/dispatch/client_hot_update") and self.assets and self.maintenance:
             if hasattr(self.maintenance, "plaza") and hasattr(self.assets, "select_plaza"):
                 import http.client, sqlite3

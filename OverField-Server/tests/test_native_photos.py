@@ -215,15 +215,12 @@ def run(root, resources):
 
 
 def verify_mounted_calendar(client):
-    from game_dispatch import PACKAGE
-    stem = plaza_assets.STOCK_BUNDLE
-    base = client / "launcher_Data"
-    stock = base / "yoo" / PACKAGE / "CacheFiles" / stem[:2] / stem / "__data"
-    if not stock.is_file():
-        stock = base / "StreamingAssets" / "yoo" / PACKAGE / (stem+".bundle")
+    from game_dispatch import Assets,PATCH_BUNDLES
+    assets=Assets(client)
+    stem=PATCH_BUNDLES[assets.patch]
     opens, closes = "2027-03-01 00:00:00", "2027-04-01 00:00:00"
-    payload,_ = plaza_assets.updated_bundle(stock.read_bytes(),dict(theme=3,activities=[8011],arcade=0,
-                                                                 opens_at=opens,closes_at=closes))
+    with assets.open_stock(stem+".bundle") as stock:
+        payload,_ = plaza_assets.updated_bundle(stock.read(),dict(theme=3,activities=[8011],arcade=0,opens_at=opens,closes_at=closes))
     header = payload.index(b"\0",payload.index(b"\0",12)+1)+1
     _,info_size,_,flags = struct.unpack_from(">QIII",payload,header)
     assert flags & 63 == 0
@@ -237,7 +234,7 @@ def verify_mounted_calendar(client):
         node.extend(plaza_assets._lz4(source,size) if mode else source)
         cursor+=packed
     def row(sheet,chosen):
-        off,size=plaza_assets.SHEETS[sheet]
+        off,size=plaza_assets.KNOWN_BUNDLES[stem][0][sheet]
         for group,start,end in plaza_assets._fields(node,off,off+size):
             if group==1:
                 for _,a,b in plaza_assets._fields(node,start,end):

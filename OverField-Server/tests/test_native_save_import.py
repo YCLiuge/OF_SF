@@ -203,8 +203,13 @@ def check_gateway(root,resources):
         data=project(synthetic())
         assert post("import-preview",{},declared=2*1024*1024+1)[0]==413
         assert all(post(a,{},declared=2049)[0]==413 for a in ("import-apply","import-undo","login"))
-        accounts=[post("register",{"username":"gateway_import_"+s,"password":"example-private-pass",
-                                   "nickname":"import"+s})[1] for s in ("a","b")]
+        accounts=[]
+        for suffix in ("a","b"):
+            fields={"username":"gateway_import_"+suffix,"password":"example-private-pass","nickname":"import"+suffix}
+            assert post("register",fields)==(428,{"error":"captcha_required"})
+            status,receipt=request(port,"POST","/local/v1/accounts/register",fields)
+            assert status==201
+            accounts.append(receipt)
         a,b=({"import_ticket":v["import_ticket"]} for v in accounts)
         assert post("import-preview",{"import_ticket":accounts[1]["ticket"],"data":data})[0]==401
         # A JSON body above the ordinary account limit is accepted only on the preview route.

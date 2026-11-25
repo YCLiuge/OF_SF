@@ -8,7 +8,6 @@ from local_game_wire import encode, receive
 from local_identity import LocalIdentity
 from test_game_realm import login, join
 from test_native_gacha import call
-from unsupported_requests import CLOSED_MINIGAMES
 from utils import db
 
 
@@ -24,7 +23,7 @@ def run(root,resources):
     game=LocalGameService(identity,root,resources,port=0)
     game.start()
     try:
-        assert CLOSED_MINIGAMES=={n for n,_,_,_ in EXAMPLES} and pb.StatusCode_MODULE_CLOSE==30
+        assert not game.realm_rules.enable_collapse_rooms and pb.StatusCode_MODULE_CLOSE==30
         sock,_,pid=login(game.port,identity.issue_ticket(*slot))
         with sock:
             join(sock)

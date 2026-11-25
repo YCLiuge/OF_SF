@@ -222,6 +222,34 @@ def objectives(session, req, rsp):
     return pb.StatusCode_OK
 
 
+def claim_star_reward(session, req, rsp):
+    """Claim the configured three-star prize for a server-timed, completed stage."""
+    pid, did = session.player_id, req.dungeon_id
+    stage = config(did)
+    if not stage:
+        return pb.StatusCode_CFG_NOT_FOUND
+    data = load(pid, did)
+    if data.star_reward == pb.Reward:
+        return pb.StatusCode_REPEAT_GET_REWARD
+    limit = stage.get("star_timer3", 0)
+    reward_id = stage.get("star_reward_i_d") or session.realm_rules.dungeon_star_reward_id
+    if not limit or not reward_id:
+        return pb.StatusCode_MODULE_CLOSE
+    # A ranked time exists only when this player finished the very same timed visit.
+    # Older imports can contain a clear count and an epoch timestamp without a timed result.
+    best = db.conn.execute(
+        "SELECT MIN(elapsed) FROM pc_abyss_scores WHERE player=? AND dungeon=? AND elapsed>0",
+        (pid, did)).fetchone()[0]
+    if best is None or best >= limit * 1000:
+        return pb.StatusCode_DungeonCantReward
+    from private_activity_rewards import deliver_once
+    status = deliver_once(session, "dungeon_star", did, reward_items(pid, reward_id), rsp.rewards)
+    if status == pb.StatusCode_OK:
+        data.star_reward = pb.Reward
+        save(pid, data)
+    return status
+
+
 def monster(session, req, rsp):
     did,pid=session.dungeon[0],session.player_id
     if not did:

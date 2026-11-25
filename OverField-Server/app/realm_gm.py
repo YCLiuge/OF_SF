@@ -9,6 +9,9 @@ from state_lock import exclusive_state
 
 
 def setup(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS private_action_challenges (
+        player INTEGER PRIMARY KEY, code INTEGER NOT NULL, expires INTEGER NOT NULL,
+        attempts INTEGER NOT NULL)""")
     conn.execute("""CREATE TABLE IF NOT EXISTS gm_grants (
         slot TEXT PRIMARY KEY, generation INTEGER NOT NULL UNIQUE) WITHOUT ROWID""")
     conn.execute("""CREATE TABLE IF NOT EXISTS gm_audit (

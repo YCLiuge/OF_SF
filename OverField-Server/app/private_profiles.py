@@ -167,7 +167,7 @@ class ProfileHandler(BaseHTTPRequestHandler):
                 result = self.server.accounts.request(self.path,body,self.client_address[0],self.server.server_address[0],
                                                       self.server.tls_context is not None,self.server.account_registration,
                                                       gateway_source=source)
-                self._reply(200 if self.path.endswith(("/login","/launch","/claim-gift","/import-preview","/import-apply","/import-undo")) else 201,result)
+                self._reply(201 if self.path.endswith(("/register","/bind")) else 200,result)
                 return
             if self.path == "/local/v1/profiles":
                 if set(body) - {"nickname"} or ("nickname" in body and not isinstance(body["nickname"], str)):
@@ -224,7 +224,7 @@ def create_profile_server(identity, *, bind_host="127.0.0.1", port=18881,
     service.account_registration = service.registration if account_policy is None else account_policy=="open"
     service.region = {"realm": REALM, "game_host": advertised, "game_port": game_port,
                       "game_protocol": "overfield-packethead-protobuf", "client_version": "1.1.12",
-                      "save_import_features": ["pets", "field_progress"]}
+                        "save_import_features": ["pets", "field_progress"],"account_features":["captcha_lookup_v1"]}
     service.hostnames = frozenset(hosts)
     service.tls_context = tls_context
     return service

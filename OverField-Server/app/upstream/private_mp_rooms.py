@@ -20,6 +20,7 @@ def initialize():
             channel INTEGER NOT NULL, data BLOB NOT NULL);
         CREATE INDEX IF NOT EXISTS mp_beacons_scene ON mp_beacons(scene,channel);
         CREATE TEMP TABLE IF NOT EXISTS mp_rounds(team INTEGER PRIMARY KEY,data TEXT NOT NULL);
+        CREATE TEMP TABLE IF NOT EXISTS mp_collapse_queue(team INTEGER PRIMARY KEY);
     """)
 
 
@@ -44,6 +45,31 @@ def round_for(team):
 
 def write_round(team, state):
     db.conn.execute("INSERT OR REPLACE INTO mp_rounds VALUES(?,?)", (team,json.dumps(state,separators=(',',':'))))
+
+
+def select_collapse(s, cancel, rsp):
+    import private_mp_teams as teams
+    if not s.realm_rules.enable_collapse_rooms:
+        return pb.StatusCode_MODULE_CLOSE
+    row, status = teams.leader(s)
+    if not row:
+        return status
+    team = row[0]
+    if in_game(team):
+        return pb.StatusCode_MP_TEAM_GAME_STARTED
+    beacon = beacon_for(team)
+    if beacon and beacon.status != pb.MPBeaconStatus_PLACED:
+        return pb.StatusCode_MP_CANNOT_CHANGE_MODE
+    if cancel:
+        changed = db.conn.execute("DELETE FROM mp_collapse_queue WHERE team=?", (team,)).rowcount
+        rsp.text = "已恢复队伍原玩法"
+    else:
+        changed = db.conn.execute("INSERT OR IGNORE INTO mp_collapse_queue VALUES(?)", (team,)).rowcount
+        rsp.text = "下一局为坍塌地块，可以召集队员"
+    if changed:
+        teams.notify((pid for pid, _ in teams.roster(team)), MsgId.GmNotice,
+                     pb.GmNotice(status=pb.StatusCode_OK, notice=[rsp.text]))
+    return pb.StatusCode_OK
 
 
 def scene_beacons(s, data):
@@ -191,7 +217,7 @@ def room_info(state,pid,target):
     if state["mode"]==pb.EMultiplayerPlayMode_DestroyObject:
         hit = state["objects"]
         target.destroy_object.remain_object_list.extend(i for i in range(1,state["entities"]+1) if str(i) not in hit)
-    else:
+    elif state["mode"]==pb.EMultiplayerPlayMode_MagicPlatform:
         target.magic_platform.show_platform_list.extend(sorted(state["visible"]))
         target.magic_platform.finished_player_list.extend(map(int,state["finish"]))
 
@@ -201,11 +227,14 @@ def restore_member(s,row,notice):
     if beacon:
         notice.beacon.CopyFrom(beacon)
         if beacon.mode_info.gameplay_id:
-            notice.m_p_team.base.mode_info.gameplay_id=beacon.mode_info.gameplay_id
+            notice.m_p_team.base.mode_info.CopyFrom(beacon.mode_info)
     state = round_for(row[0])
     if state and s.player_id in state["active"]:
         room_info(state,s.player_id,notice.m_p_room)
         s.commit_callbacks.append((setattr,(s,"mp_room_team",row[0])))
+        if state["mode"] == pb.EMultiplayerPlayMode_Collapse:
+            return tuple(map(int, state["finish"]))
+    return ()
 
 
 def start(s,req,rsp):
@@ -221,7 +250,10 @@ def start(s,req,rsp):
     if not beacon.can_start:return pb.StatusCode_MP_TEAM_NOT_READY
     peers = members_present(s,beacon)
     if set(peers)!=set(beacon.members):return pb.StatusCode_MP_MEMBERS_NOT_AROUND
-    entries = res.index("TeamGameplay","sub_mode")[row[4]]["sub_mode_items"]
+    collapse = s.realm_rules.enable_collapse_rooms and db.conn.execute(
+        "SELECT 1 FROM mp_collapse_queue WHERE team=?", (team,)).fetchone()
+    sub_mode = 100601 if collapse else row[4]
+    entries = res.index("TeamGameplay","sub_mode")[sub_mode]["sub_mode_items"]
     levels = res.index("ScenesConfigAsset","MiniGameInfos","ID")
     supported = [e["index"] for e in entries if e["index"] in levels]
     if not supported:return pb.StatusCode_CFG_NOT_FOUND
@@ -230,10 +262,15 @@ def start(s,req,rsp):
     currency,amount=rules["room_cost"]
     charge,status=payments(s.player_id,{currency:amount})
     if charge is None:return status
-    state=dict(mode=rules["new_play_mode"],level=level,entities=data["EntityCount"],active=list(peers),
+    mode = pb.EMultiplayerPlayMode_Collapse if collapse else rules["new_play_mode"]
+    state=dict(mode=mode,level=level,entities=data.get("EntityCount", 0),active=list(peers),
                players=list(peers),ready=[],start=0,opened=millis(),ended=False,objects={},visible=[1],
                finish={},contacts={},hides={})
     write_round(team,state)
+    if collapse:
+        db.conn.execute("DELETE FROM mp_collapse_queue WHERE team=?", (team,))
+        beacon.mode_info.game_mode = mode
+        beacon.mode_info.sub_mode_id = sub_mode
     beacon.mode_info.gameplay_id=level
     beacon.status,beacon.can_start=pb.MPBeaconStatus_STARTED,False
     write_beacon(team,beacon)
@@ -359,11 +396,19 @@ def settle(team,state,stamp):
         for pid in sorted(state["players"],key=lambda p:(-scores[p],p)):
             ranked.destroy_object.add(player_id=pid,count=scores[pid])
         points=len(state["objects"])
-    else:
+    elif state["mode"]==pb.EMultiplayerPlayMode_MagicPlatform:
         for pid,elapsed in sorted(state["finish"].items(),key=lambda row:(row[1],int(row[0]))):
             ranked.magic_platform.add(player_id=int(pid),time=elapsed)
         points=len(state["finish"])*100//len(state["players"])
-    ranked.star=sum(points>=value for value in data["RewardParams"])
+    else:
+        # The two CN collapse rows contain a duration and no star/prize thresholds.
+        # One point represents surviving the round, zero a fall or withdrawal.
+        for pid in sorted(state["players"], key=lambda pid: (
+                str(pid) in state["finish"] or pid not in state["active"], pid)):
+            ranked.collapse_object.add(player_id=pid, count=int(
+                str(pid) not in state["finish"] and pid in state["active"]))
+        points=0
+    ranked.star=sum(points>=value for value in data.get("RewardParams", ()))
     finish=pb.MPPlayRoomEvent(event_type=pb.MPPlayRoomEvent_GameFinish,time=stamp,
                               play_mode=state["mode"],star=ranked.star,game_start_time=state["start"])
     send_event(state,finish)
@@ -416,6 +461,32 @@ def platform_event(state,pid,kind,pad,stamp):
             contacts.remove(pad)
         update_platforms(state,stamp)
     return True
+
+
+def collapse_fail(s, req, rsp):
+    import private_mp_teams as teams
+    if not s.realm_rules.enable_collapse_rooms:
+        return pb.StatusCode_MODULE_CLOSE
+    team, state = round_members(s)
+    if not state or state["mode"] != pb.EMultiplayerPlayMode_Collapse:
+        return pb.StatusCode_PLAYER_NOT_IN_MP_ROOM
+    stamp = millis()
+    if not state["start"] or stamp < state["start"] or state["ended"]:
+        return pb.StatusCode_MP_NOT_STARTING
+    duration = res.index("ScenesConfigAsset","MiniGameInfos","ID")[state["level"]]["Duration"]
+    if stamp >= state["start"] + 1000 * duration:
+        settle(team, state, stamp)
+        return pb.StatusCode_MP_NOT_STARTING
+    key = str(s.player_id)
+    if key not in state["finish"]:
+        state["finish"][key] = stamp - state["start"]
+        teams.notify(state["active"], MsgId.CollapseFailNotice,
+                     pb.CollapseFailNotice(status=pb.StatusCode_OK, player_id=s.player_id))
+        if all(str(pid) in state["finish"] for pid in state["active"]):
+            settle(team, state, stamp)
+        else:
+            write_round(team, state)
+    return pb.StatusCode_OK
 
 
 def update_platforms(state,stamp):
@@ -514,6 +585,10 @@ def leave(s,req,rsp):
     else:
         if state["mode"]==pb.EMultiplayerPlayMode_MagicPlatform and not state["ended"]:
             update_platforms(state,millis())
+        if (state["mode"] == pb.EMultiplayerPlayMode_Collapse and not state["ended"] and
+                all(str(pid) in state["finish"] for pid in state["active"])):
+            settle(team, state, millis())
+            return pb.StatusCode_OK
         write_round(team,state)
     return pb.StatusCode_OK
 

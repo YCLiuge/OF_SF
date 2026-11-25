@@ -16,6 +16,9 @@ class Handler(PacketHandler):
                 rsp.status, rsp.text = result.status, result.result
             else:
                 rsp.status = pb.StatusCode_BAD_REQ
+        elif req.type == NEAR and not req.expression and req.text in ("/collapse", "/collapse cancel"):
+            from private_mp_rooms import select_collapse
+            rsp.status = select_collapse(session, req.text.endswith(" cancel"), rsp)
         else:
             rsp.status = send(session, req, rsp)
         session.send(MsgId.SendChatMsgRsp, rsp, packet_id)

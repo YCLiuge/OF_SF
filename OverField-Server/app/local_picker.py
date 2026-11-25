@@ -33,7 +33,12 @@ class LocalPicker:
         if os.name != "nt" or os.environ.get("OF_NATIVE_PICKER") not in ("1", "launcher") or not client_root:
             return None
         home = Path(__file__).resolve().parents[2]
-        exe = home / ("OF_SF 玩家补丁.exe" if (home / ".of-player-patch.json").is_file() else "开放空间私服.exe")
+        if (home / ".of-player-patch.json").is_file():
+            exe = home / "OF_SF 登陆器.exe"
+            if not exe.is_file():
+                exe = home / "OF_SF 玩家补丁.exe"
+        else:
+            exe = home / "开放空间私服.exe"
         if Path(client_root).resolve()!=home/"Client" or not exe.is_file() or not is_loopback(urlsplit(origin).hostname):
             return None
         return cls(exe, preselected=os.environ["OF_NATIVE_PICKER"] == "launcher")

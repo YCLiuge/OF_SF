@@ -11,12 +11,8 @@ OWNER_DISABLED = frozenset((
 ))
 
 
-# Their status replies exist in the retail client. These activities have no private session or settlement.
-CLOSED_MINIGAMES = frozenset((MsgId.CollapseFailReq,))
-
-
 def unsupported_status(msg_id):
-    return pb.StatusCode_MODULE_CLOSE if msg_id in CLOSED_MINIGAMES else pb.StatusCode_FAIL
+    return pb.StatusCode_FAIL
 
 
 def status_replies():

@@ -15,6 +15,8 @@ LAUNCHER = "a3702251bd92b7ba773b00eeffef7a63a311098e96e2e83f541e7ea78070001b"
 ASSEMBLY = "2db98364241c95864781f77877523b9d2f728b22a91935fa30cdfb33a8b7f4ea"
 BUILD = "2026-10-21-14-05-50"
 PATCH = "2026-11-07-22-39-35"
+NOVEMBER_UPDATE = "2026-11-25-10-44-03"
+NOVEMBER_MANIFEST_SHA256 = "7c1d25a4b2efcc802a45e841cf95ae8438f317d68dd1e37ce2c6eee8ab707de6"
 RELEASE_ROOTS = {"launcher.exe","GameAssembly.dll","UnityPlayer.dll","baselib.dll","UnityCrashHandler64.exe","version"}
 RELEASE_DIRS = {"il2cpp_data","Plugins","Resources","StreamingAssets","yoo"}
 RELEASE_FILES = {"boot.config","ScriptingAssemblies.json","RuntimeInitializeOnLoads.json"}
@@ -22,6 +24,20 @@ RELEASE_FILES = {"boot.config","ScriptingAssemblies.json","RuntimeInitializeOnLo
 def sha(path):
     with path.open("rb") as f:
         return hashlib.file_digest(f,"sha256").hexdigest()
+
+def supported_manifest(source):
+    folder = source / "launcher_Data/yoo/DefaultPackage/ManifestFiles"
+    label = folder / "PackageManifest_DefaultPackage.version"
+    if not label.is_file():
+        return False
+    version = label.read_text(encoding="utf-8-sig").strip()
+    if version == PATCH:
+        return True
+    if version != NOVEMBER_UPDATE:
+        return False
+    manifest = folder / ("PackageManifest_DefaultPackage_" + version + ".bytes")
+    return manifest.is_file() and sha(manifest) == NOVEMBER_MANIFEST_SHA256
+
 
 def save(path, data):
     with tempfile.NamedTemporaryFile(dir=path.parent,delete=False) as f:
@@ -186,9 +202,9 @@ def _from_installed(source, home, endpoint, progress, *, compact_only=False):
         return old
     if (src==dest or not (src/"version").is_file() or
         (src/"version").read_text(encoding="utf-8-sig").strip()!=BUILD or
-        (src/"launcher_Data/yoo/DefaultPackage/ManifestFiles/PackageManifest_DefaultPackage.version").read_text(encoding="utf-8-sig").strip()!=PATCH or
+        not supported_manifest(src) or
         sha(src/"launcher.exe")!=LAUNCHER or sha(src/"GameAssembly.dll")!=ASSEMBLY):
-        raise ValueError("需要 TapTap 国服 PC 1.1.12 的原版程序与 11 月 7 日资源。")
+        raise ValueError("需要 TapTap 国服 PC 1.1.12 的原版程序与已支持的 11 月 7 日或 25 日资源清单。")
     inputs=list(asset_paths(src))
     if compact_only:
         compact_space(src,home,inputs,original)
@@ -360,4 +376,3 @@ def prepare(source,home,endpoint,progress=print,*,compact_only=False):
         result=_install_media(media,home,endpoint,progress)
     protect_private_channel_log(home)
     return result
-

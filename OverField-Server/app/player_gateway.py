@@ -20,7 +20,7 @@ from proto import net_pb2 as pb
 
 GET = {"/local/v1/region", "/private/plaza", "/private/gifts", "/private/maintenance"}
 IMPORT_PREVIEW = "/local/v1/accounts/import-preview"
-POST = {"/local/v1/accounts/"+action for action in ("register", "login", "bind", "launch", "claim-gift",
+POST = {"/local/v1/accounts/"+action for action in ("challenge","lookup","register","login","bind","launch","claim-gift",
                                                    "import-preview", "import-apply", "import-undo")}
 ATTACHMENT = re.compile(r"/private/(?:releases|notice-images)/[0-9a-f]{64}\Z")
 
@@ -44,7 +44,8 @@ class Gate:
         times = self.attempts.setdefault(address, deque())
         while times and times[0] <= now-60:
             times.popleft()
-        if len(times) >= 60:
+        limit=600 if address in player_gateway_peer.PROXY_LOOPBACKS else 60
+        if len(times) >= limit:
             return False
         times.append(now)
         return True

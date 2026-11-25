@@ -272,6 +272,7 @@ enum EMultiplayerPlayMode {
     EMultiplayerPlayMode_MagicPlatform = 2;
     EMultiplayerPlayMode_SinkObject = 3;
     EMultiplayerPlayMode_Landlord = 4;
+    EMultiplayerPlayMode_Collapse = 5;
 }
 
 enum RollNoticeType {
@@ -5368,6 +5369,11 @@ message MPPlayRoomRankMagicPlatform {
     int64 time = 2;
 }
 
+message MPPlayRoomRankCollapseObject {
+    uint32 player_id = 1;
+    uint32 count = 2;
+}
+
 message MPRoomRankSinkObjectPlayer {
     uint32 player_id = 1;
     uint32 score = 2;
@@ -5388,6 +5394,7 @@ message MPPlayRoomRankInfo {
     repeated MPPlayRoomRankDestroyObject destroy_object = 2;
     repeated MPPlayRoomRankMagicPlatform magic_platform = 3;
     MPRoomRankSinkObject sink_object = 4;
+    repeated MPPlayRoomRankCollapseObject collapse_object = 5;
 }
 
 message MPPlayRoomReadyReq {
@@ -6484,6 +6491,11 @@ message CollapseFailReq {
 
 message CollapseFailRsp {
     StatusCode status = 1;
+}
+
+message CollapseFailNotice {
+    StatusCode status = 1;
+    int64 player_id = 2;
 }
 
 message GomokuOnlinePlayerReadyReq {

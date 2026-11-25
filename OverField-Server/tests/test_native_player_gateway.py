@@ -136,7 +136,7 @@ def source_limits(port, tls_context):
                 conn=http.client.HTTPConnection("localhost",port,timeout=5)
                 conn.sock=sock
                 conn.request("POST","/local/v1/accounts/"+action,b"{}",{"Content-Type":"application/json",
-                              "X-Forwarded-For":"192.0.2.3",proof.HEADER:"untrusted-client-header"})
+                              "X-Forwarded-For":"127.0.0.1",proof.HEADER:"untrusted-client-header"})
                 rsp=conn.getresponse()
                 rsp.read()
                 return rsp.status
@@ -145,6 +145,7 @@ def source_limits(port, tls_context):
     assert send(b,"register")==400
     assert [send(a,"login") for _ in range(31)] == [400]*30+[429]
     assert send(b,"login")==400
+    assert [send("127.0.0.1","register") for _ in range(7)] == [400]*7
 
 
 def run(root,resources,certs):
@@ -228,7 +229,13 @@ def run(root,resources,certs):
             assert account("POST","/local/v1/accounts/attach",{})[0]==404
             assert account("POST","/local/v1/accounts/login",raw=b" "*2049)[0]==413
             login_fields={"username":"tls-account","password":"private-tls-CREDENTIAL-42"}
-            status,created=account_route("register",dict(login_fields,nickname="测试载入"))
+            signup=dict(login_fields,nickname="测试载入")
+            assert account_route("register",signup)==(428,{"error":"captcha_required"})
+            assert "captcha_lookup_v1" in account("GET","/local/v1/region")[1]["account_features"]
+            # This suite starts its authoritative HTTP service in a separate
+            # subprocess. The captcha roundtrip is tested with an in-memory
+            # renderer in test_player_captcha; provision this transport fixture locally.
+            status,created=request(http_port,"POST","/local/v1/accounts/register",signup)
             assert status==201
             assert account_route("login",dict(login_fields,password="incorrect-test"))[0]==401
             status,signed=account_route("login",login_fields)

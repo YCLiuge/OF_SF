@@ -14,8 +14,8 @@ from server.scene_data import get_session, online_session
 from utils import db
 
 
-COMMANDS = {"help", "whoami", "online", "give", "announce", "mail", "moonspot"}
-HELP = "服管命令：help、whoami、online、announce 正文、mail UID 正文、give 代币ID 数量、moonspot place、moonspot move/remove 编号。"
+COMMANDS = {"help", "whoami", "online", "give", "announce", "mail", "moonspot", "challenge"}
+HELP = "服管命令：help、whoami、online、announce 正文、mail UID 正文、give 代币ID 数量、moonspot place、moonspot move/remove 编号、challenge UID。"
 
 
 def chat_command(text):
@@ -37,6 +37,15 @@ def message_body(value):
 def dispatch(session, verb, arg, reply):
     pid=session.player_id
     actor=public_uid(pid)
+    if verb=="challenge":
+        from private_action_challenge import renew
+        uid=number(arg,0xfffffffe)
+        target=online_session(local_uid(uid)) if uid else None
+        if not target or not target.logged_in:
+            return None
+        renew(target, issuer=session)
+        reply.result=f"已向 UID {uid} 发送本服操作验证"
+        return f"uid={uid}"
     if verb=="moonspot":
         from private_moon_spots import command
         return command(session,arg,reply)

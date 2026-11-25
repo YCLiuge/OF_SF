@@ -7,9 +7,16 @@ import zlib
 from realm_plaza import KOI, koi_deadline, controlled_activities, photo_deadline, photo_editions
 
 STOCK_BUNDLE = "e49d461782ed9bf3309d2c35662e132a"
-# TextAsset payload bounds verified in the digest-pinned serialized file.
+NOVEMBER_BUNDLE = "4479579c8fb33fb720ec2dadebe34778"
+# TextAsset payload bounds verified against each digest-pinned serialized file.
 SHEETS = {"BlessingTree":(11185388,19948), "Scene": (10000616, 21774), "Activity": (8130600, 19041), "SeasonalMiniGames": (7522068, 191),
           "ActivityJinli": (11632344,39), "NPC": (11760004,14188), "ActivityFashionShow": (719004,186)}
+SHEETS_NOVEMBER = {"BlessingTree":(11186676,19948), "Scene":(10002432,21245), "Activity":(8132416,19041),
+                   "SeasonalMiniGames":(7523836,191),"ActivityJinli":(11633632,39),"NPC":(11761292,14188),
+                   "ActivityFashionShow":(719004,186)}
+KNOWN_BUNDLES = {STOCK_BUNDLE:(SHEETS,b"39ae3d4a",0xb04965e4), NOVEMBER_BUNDLE:(SHEETS_NOVEMBER,b"af6e22c5",0xbad7850d)}
+# The 11/25 table rescheduled rows 45–58. Each replacement refers to the identical prefab path.
+NOVEMBER_THEME_ROWS={45:22,46:23,47:20,49:21,50:4,51:5,52:6,53:7,54:8,55:9,56:10,57:11,58:23}
 OFF_START, OFF_END = "2000-01-01 00:00:00", "2000-01-01 00:00:01"
 
 
@@ -71,8 +78,8 @@ def _fields(data, pos, end):
             raise ValueError("Unsupported field in the selected native config row")
 
 
-def edit_dates(node, sheet, group, start_field, rows):
-    offset, size = SHEETS[sheet]
+def edit_dates(node, sheets, sheet, group, start_field, rows):
+    offset, size = sheets[sheet]
     if struct.unpack_from("<I", node, offset-4)[0] != size:
         raise ValueError("Unexpected TextAsset length")
     for number, begin, end in _fields(node, offset, offset+size):
@@ -90,27 +97,30 @@ def edit_dates(node, sheet, group, start_field, rows):
                 node[i:j] = text.encode("ascii")
 
 
-def _stage_dates(node, config):
+def _stage_dates(node, config, sheets):
     interval = (config["opens_at"], config["closes_at"])
     theme = 25 if config["theme"] == 2 else config["theme"]  # first Halloween edition has no native dates.
+    if sheets is SHEETS_NOVEMBER:
+        theme=NOVEMBER_THEME_ROWS.get(theme,theme)
     if {260326150,260815150}.intersection(config["activities"]):
-        edit_dates(node, "NPC", 1, 4, {10301: interval})
+        edit_dates(node, sheets, "NPC", 1, 4, {10301: interval})
     if KOI in config["activities"]:
-        edit_dates(node, "ActivityJinli", 1, 2, {KOI: (koi_deadline(*interval),)})
+        edit_dates(node, sheets, "ActivityJinli", 1, 2, {KOI: (koi_deadline(*interval),)})
     selected_shows = set(config["activities"]).intersection(photo_editions())
     if selected_shows:
-        edit_dates(node, "ActivityFashionShow", 1, 2,
+        edit_dates(node, sheets, "ActivityFashionShow", 1, 2,
                    {aid: (photo_deadline(aid,*interval),) for aid in selected_shows})
-    edit_dates(node, "Scene", 4, 3, {i: interval if i == theme else (OFF_START, OFF_END) for i in range(3,59)})
+    edit_dates(node, sheets, "Scene", 4, 3, {i: interval if i == theme else (OFF_START, OFF_END) for i in range(3,59)})
     selected = set(config["activities"])
     controlled = controlled_activities(selected)
-    edit_dates(node, "Activity", 1, 3, {i: interval if i in selected else (OFF_START, OFF_END) for i in controlled})
-    edit_dates(node, "SeasonalMiniGames", 1, 2, {i: interval if i == config["arcade"] else (OFF_START, OFF_END)
+    edit_dates(node, sheets, "Activity", 1, 3, {i: interval if i in selected else (OFF_START, OFF_END) for i in controlled})
+    edit_dates(node, sheets, "SeasonalMiniGames", 1, 2, {i: interval if i == config["arcade"] else (OFF_START, OFF_END)
                                                   for i in range(12000,12004)})
 
 
 def updated_bundle(blob, config):
-    if hashlib.md5(blob).hexdigest() != STOCK_BUNDLE:
+    layout = KNOWN_BUNDLES.get(hashlib.md5(blob).hexdigest())
+    if layout is None:
         raise ValueError("Unexpected national config bundle")
     header = blob.index(b"\0",blob.index(b"\0",12)+1)+1
     size, packed, size_info, flags = struct.unpack_from(">QIII",blob,header)
@@ -133,10 +143,10 @@ def updated_bundle(blob, config):
         raise ValueError("Invalid UnityFS data end")
     original = bytes(node)
     if "theme" in config:
-        _stage_dates(node, config)
+        _stage_dates(node, config, layout[0])
     if config.get("blessings"):
         from realm_blessings import dates
-        edit_dates(node,"BlessingTree",1,2,{row["id"]:dates(row) if row["enabled"] else (OFF_START,OFF_END)
+        edit_dates(node,layout[0],"BlessingTree",1,2,{row["id"]:dates(row) if row["enabled"] else (OFF_START,OFF_END)
                     for row in config["blessings"]})
     blocks = []
     offset = 0
@@ -163,12 +173,14 @@ def build(manifest, blob, config, patch, prefix):
     key = hashlib.sha256(bundle).hexdigest()
     version = (datetime(2100,1,1)+timedelta(seconds=int(key[:9],16))).strftime("%Y-%m-%d-%H-%M-%S")
     name = f"{prefix}_{version}"
-    old = STOCK_BUNDLE.encode()
+    base_digest=hashlib.md5(blob).hexdigest()
+    _,crc,stock_unity_crc=KNOWN_BUNDLES[base_digest]
+    old=base_digest.encode()
     if manifest.count(old) != 1 or manifest.count(patch.encode()) != 1:
         raise ValueError("Ambiguous configuration bundle in stock manifest")
     changed = bytearray(manifest.replace(patch.encode(),version.encode()))
     p = changed.index(old)
-    if changed[p+32:p+42] != b"\x08\x0039ae3d4a" or struct.unpack_from("<I",changed,p-6)[0] != 0xb04965e4:
+    if changed[p+32:p+42] != b"\x08\x00"+crc or struct.unpack_from("<I",changed,p-6)[0] != stock_unity_crc:
         raise ValueError("Unexpected stock YooAsset record")
     struct.pack_into("<I",changed,p-6,unity_crc)
     changed[p:p+32] = digest.encode()

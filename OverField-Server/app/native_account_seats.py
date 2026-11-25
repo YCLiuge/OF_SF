@@ -96,7 +96,7 @@ class NativeAccountSeats:
         seats=cls(identity,path)
         from local_picker import LocalPicker
         picker=LocalPicker.configured(path.parent,os.environ.get("OF_DISPATCH_URL",""))
-        if picker and picker.executable.name=="OF_SF 玩家补丁.exe":
+        if picker and picker.executable.name in ("OF_SF 登陆器.exe","OF_SF 玩家补丁.exe"):
             seats.picker=picker
         return seats
 
