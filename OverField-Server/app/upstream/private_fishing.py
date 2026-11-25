@@ -295,4 +295,7 @@ def tick(session):
     result=pb.FishingResultNotice()
     result.status=run(session,cast,result,settle)
     session.send(MsgId.FishingResultNotice,result,0)
+    if result.status == pb.StatusCode_OK and cast.preview.fish_infos:
+        from private_activity_fragments import grant
+        grant(session, 1111)
     set_after_commit(session,"fishing_cast",None)

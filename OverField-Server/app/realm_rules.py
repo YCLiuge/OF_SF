@@ -27,7 +27,9 @@ class RealmRules:
     game_connections:int=24
     starter_teachable_actions:int=1
     monster_gift_percent:int=20
-    ordinary_ground_drop_percent:int=0
+    activity_fragment_percent:int=20
+    activity_fragment_quantity:int=0
+    ordinary_ground_drop_percent:int=20
 
     def validated(self):
         numbers=[value for k,value in asdict(self).items() if k!="public_furniture_scope"]
@@ -37,6 +39,8 @@ class RealmRules:
             raise ValueError("Choose 1..512 simultaneous game connections")
         if not 0 <= self.ordinary_ground_drop_percent <= 100:
             raise ValueError("Choose an ordinary ground drop chance between 0 and 100 percent")
+        if not 0 <= self.activity_fragment_percent <= 100:
+            raise ValueError("Choose an outdoor fragment chance between 0 and 100 percent")
         if not 0 <= self.monster_gift_percent <= 100:
             raise ValueError("Choose a monster gift chance between 0 and 100 percent")
         if self.starter_teachable_actions not in (0,1):

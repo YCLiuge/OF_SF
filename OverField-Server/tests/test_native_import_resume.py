@@ -12,6 +12,7 @@ from save_import_location import destination
 from test_native_save_import import synthetic,world
 from test_private_profiles import request
 from test_game_realm import join,login
+from test_native_gacha import call as native_call
 from utils import db
 
 
@@ -54,9 +55,17 @@ def verify(port,game,suffix,data,scene,device):
     pid=db.conn.execute("SELECT player_id FROM private_slots WHERE slot=?",(auth["slot"],)).fetchone()[0]
     assert db.conn.execute("SELECT count(*) FROM private_poses WHERE player_id=?",(pid,)).fetchone()[0]==1
     if device:assert db.get_area(pid,100,101)
+    if data.get("field_progress"):
+        assert pb.AreaData.FromString(db.get_area(pid,1,1006)).level==4
+        assert db.get_challenge(pid,1,200003) and db.get_collection(pid,10201027)
     call("import-undo",token)
     assert not db.conn.execute("SELECT 1 FROM private_poses WHERE player_id=?",(pid,)).fetchone()
     assert not db.get_area(pid,100,101) and is_enrolled(pid)=="active"
+    if data.get("field_progress"):
+        assert not db.get_area(pid,1,1006) and not db.get_challenge(pid,1,200003) and not db.get_collection(pid,10201027)
+        assert not db.conn.execute("SELECT 1 FROM realm_field_activities WHERE player=? AND scene=1 AND kind=1",(pid,)).fetchone()
+        assert not db.conn.execute("SELECT 1 FROM claimed_rewards WHERE player_id=? AND system='collection' AND key='10201027'",(pid,)).fetchone()
+        assert not db.conn.execute("SELECT 1 FROM player_kv WHERE player_id=? AND ns='import_area_goals:1'",(pid,)).fetchone()
     preview=call("import-preview",{**token,"data":data})
     call("import-apply",{**token,"preview_id":preview["preview_id"]})
     client,opening,_=login(game.port,auth["ticket"])
@@ -73,6 +82,15 @@ def verify(port,game,suffix,data,scene,device):
         if device:assert any(a.area_id==101 and a.area_state==pb.AreaData.Unlock for a in notice.data.areas)
         else:assert not db.get_area(pid,100,101)
         if not data["quests"]:assert not main.quest_detail.quests
+        if data.get("field_progress"):
+            torii = next(a for a in notice.data.areas if a.area_id==1006)
+            assert torii.level==4 and {i.item_id:i.num for i in torii.items}=={102:10,192:10,1:300}
+            assert any(r.riddle_id==400003 and r.is_win and r.state==pb.Finish for r in notice.data.riddles)
+            assert any(c.challenge_id==200003 and c.use_time==31000 for c in notice.data.challenges)
+            goals=native_call(client,"AreaAchieveList",810,area_id=1006)
+            assert {a.achieve_id:a.count for a in goals.achieves}[10641]==3
+            assert native_call(client,"AreaLevelUp",811,area_id=1006).status==pb.StatusCode_AREA_LEVEL_QUEST_NOT_FINISH
+            assert not db.conn.execute("SELECT 1 FROM private_boxes WHERE player_id=? AND dynamic=1",(pid,)).fetchone()
 
 
 def run(root,resources):
@@ -113,6 +131,24 @@ def run(root,resources):
             data.pop("identity",None)
             assert data["progress_location"]["pose"]=={"pos":[17,-82,65],"rot":[0,-400,0]}
             verify(port,game,suffix,data,scene,device=scene==100)
+        source=archive(1,True)
+        foreign=source["decoded"]["scene"]["frames"][0]["decoded"]["data"]
+        foreign["areas"]=[{"area_id":1005,"area_state":{"v":1},"level":5}]
+        field=source["decoded"]["scene"]["frames"][1]["decoded"]["data"]
+        field.update(areas=[{"area_id":1006,"area_state":{"v":1},"level":4}],
+                     riddles=[{"riddle_id":400003,"state":{"v":1},"is_win":True},{"riddle_id":100002,"state":{"v":2}}],
+                     challenges=[{"challenge_id":200003,"state":{"v":1},"use_time":31000}],
+                     collections=[{"type":2,"item_map":{"10201027":{"item_id":10201027,"status":{"v":1}},
+                                                        "10201021":{"item_id":10201021}}}])
+        source["decoded"]["area"]={"name":"AreaAchieveListRsp","frames":[{"ok":True,"decoded":{
+            "status":{"v":1},"area_id":1006,"achieves":[{"achieve_id":10641,"count":3}]}}]}
+        projected=project(source)
+        projected.pop("identity",None)
+        f=projected["field_progress"]
+        assert f["devices"]==[[1006,1,4]] and f["riddles"]==[400003] and f["goals"]==[[1006,10641,3]]
+        verify(port,game,"region",projected,1,device=False)
+        foreign["areas"].append({"area_id":1006,"area_state":{"v":1},"level":5})
+        assert not project(source)["field_progress"]["goals"]
         missing=archive(100,False)
         duplicate=archive(100,False)
         frames=duplicate["decoded"]["main"]["frames"]
@@ -144,7 +180,8 @@ def run(root,resources):
             try:validate({**old,"progress_location":invalid})
             except ValueError:pass
             else:raise AssertionError("invalid source location accepted")
-    print("PASS: opening and windmill checkpoints, native scene/pose, starter and advanced story, neutral realm channel and undo.")
+    print("PASS opening and windmill checkpoints, native scene/pose, scoped regional devices and collectibles, "
+          "world challenge wins without retroactive chests, timed records, mixed-scope filtering and undo.")
 
 
 if __name__=="__main__":

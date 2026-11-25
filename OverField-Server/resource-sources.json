@@ -553,6 +553,12 @@
       "bytes": 11132,
       "source": "TapTap PC 1.1.12",
       "detail": "BattleEncounter.asset_full_name -> EncounterBattle prefab > MonsterNode.UnitConfigs (UnitID, Index), unique per encounter"
+    },
+    "resources/data/PetCaptureMonsters.json": {
+      "sha256": "ea799e664ab1c0f5902a929c188debf7b4e17a2616ebfdd040d4cbf902feabdf",
+      "bytes": 304,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Monster.monster_character_data.pet_i_d joined to Pet.pet.decision_capture; monster template to capturable pet item"
     }
   }
 }

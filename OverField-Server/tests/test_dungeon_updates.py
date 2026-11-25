@@ -44,7 +44,7 @@ def run(root, resources):
                 sampled.update(rows)
                 return list(rows[:count])
             with service.lock, db.conn, patch("private_boxes.random.sample", side_effect=sample):
-                fake = SimpleNamespace(player_id=pid, scene_id=9999)
+                fake = SimpleNamespace(player_id=pid, scene_id=9999, dungeon=(0,))
                 for level in range(1, 6):
                     with patch("private_boxes.db.get_players_info", return_value=[level]):
                         assert loot(fake, 0, False)

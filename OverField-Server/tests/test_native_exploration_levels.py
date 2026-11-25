@@ -101,11 +101,16 @@ def run(root, resources):
                 goals = [r["achieve_condition_i_d"] for r in missions if r.get("achieve_condition_i_d")]
                 def record(goal, count):
                     db.set_achieve(pid, goal, pb.Achieve(achieve_id=goal, count=count).SerializeToString())
+                    db.conn.execute("INSERT OR REPLACE INTO player_kv VALUES(?,'import_area_goals:1',?,?)",
+                                    (pid,str(goal),str(count)))
                 with host.lock, db.conn:
                     for goal in goals:
                         record(goal, achieves[goal]["count_param"])
                     last = goals[-1]
                     record(last, achieves[last]["count_param"] - 1)
+                    if achieves[last]["new_achieve_condition"] in range(12,18):
+                        # Legacy global counters from scene 1001 must not satisfy device 1001.
+                        db.set_achieve(pid,last,pb.Achieve(achieve_id=last,count=999).SerializeToString())
                 assert area(a, 504).status == pb.StatusCode_AREA_LEVEL_QUEST_NOT_FINISH
                 with host.lock, db.conn:
                     record(last, achieves[last]["count_param"])
@@ -116,6 +121,54 @@ def run(root, resources):
                 assert {r.achieve_id for r in listing.achieves} == {r.achieve_id for r in reply.achieves}
             assert area(a, 530).status == pb.StatusCode_AREA_LEVEL_LIMIT
             assert area(b, 531).status == pb.StatusCode_AREA_NOT_UNLOCK
+            def torii(name, seq):
+                return call(b, name, seq, area_id=1006)
+
+            opened = torii("AreaUnlock", 600)
+            assert opened.status == pb.StatusCode_OK and opened.area.level == 1
+            assert dict((r.achieve_id, r.count) for r in torii("AreaAchieveList", 601).achieves)[10612] == 0
+            assert call(b, "RiddleStateUpdate", 602, riddle_id=400003, battle_state=pb.Start).status == pb.StatusCode_OK
+            win = call(b, "RiddleStateUpdate", 603, riddle_id=400003, battle_state=pb.Finish, is_win=True)
+            assert win.status == pb.StatusCode_OK and win.dynamic_treasure_box_base_info.index
+            assert dict((r.achieve_id, r.count) for r in torii("AreaAchieveList", 604).achieves)[10612] == 1
+            assert call(b, "ChallengeStateUpdate", 605, challenge_id=200003, battle_state=pb.Start).status == pb.StatusCode_OK
+            assert call(b, "ChallengeStateUpdate", 606, challenge_id=200003, battle_state=pb.Finish, use_time=30000).status == pb.StatusCode_OK
+            assert dict((r.achieve_id, r.count) for r in torii("AreaAchieveList", 607).achieves)[10611] == 1
+            # A returning player's Torii device already reached level four before import.
+            with host.lock, db.conn:
+                device = pb.AreaData(area_id=1006, level=4, area_state=pb.AreaData.Unlock)
+                db.set_area(peer, 1, 1006, device.SerializeToString())
+            items = [10201027, 10201021, 10201026, 10401017, 10401018, 10401010,
+                     10601003, 10601002, 10601012, 10601022]
+            for index, item in enumerate(items):
+                assert call(b, "Collecting", 610 + index, item_id=item).status == pb.StatusCode_OK
+            # The corresponding item at the next device does not count.
+            assert call(b, "Collecting", 621, item_id=10201013).status == pb.StatusCode_OK
+            assert {v.achieve_id:v.count for v in torii("AreaAchieveList", 622).achieves} == {10641:3,10642:3,10643:4}
+            locked = torii("AreaLevelUp", 623)
+            assert locked.status == pb.StatusCode_AREA_LEVEL_QUEST_NOT_FINISH and not locked.items
+            assert {i.item_id:i.num for i in locked.area.items} == {102:10,192:10,1:300}
+            for index, item in enumerate((10101017,10101004,10301002,10301010,10501014,10501006)):
+                assert call(b, "Collecting", 640 + index, item_id=item).status == pb.StatusCode_OK
+            assert call(b, "RiddleStateUpdate", 650, riddle_id=100002, battle_state=pb.Start).status == pb.StatusCode_OK
+            assert call(b, "RiddleStateUpdate", 651, riddle_id=100002, battle_state=pb.Finish, is_win=True).status == pb.StatusCode_OK
+            from private_region_devices import catalog, completed
+            points = catalog()[0][1,1006][0]
+            with host.lock:
+                assert sum(map(len,points.values())) == 20
+                assert sum(completed(peer,1,kind,ids) for kind,ids in points.items()) == 19
+            assert call(b, "Collecting", 624, item_id=10201001).status == pb.StatusCode_OK
+            before = {item:balance(peer,item) for item in (102,192,1)}
+            promoted = torii("AreaLevelUp", 625)
+            assert promoted.status == pb.StatusCode_OK and promoted.area.level == 5 and not promoted.area.items
+            assert promoted == torii("AreaLevelUp", 625)
+            expected = {102:10,192:10,1:300}
+            assert {i.main_item.item_id:i.main_item.base_item.num for i in promoted.items} == expected
+            assert {item:balance(peer,item)-old for item,old in before.items()} == expected
+            with host.lock:
+                assert sum(completed(peer,1,kind,ids) for kind,ids in points.items()) == 20
+            assert torii("AreaLevelUp", 626).status == pb.StatusCode_AREA_LEVEL_LIMIT
+            assert torii("AreaClose", 627).area.level == 5 and torii("AreaUnlock", 628).area.level == 5
     finally:
         host.stop()
     host.start()
@@ -127,7 +180,8 @@ def run(root, resources):
             assert area(a, 541).status == pb.StatusCode_AREA_LEVEL_LIMIT
     finally:
         host.stop()
-    print(f"PASS {len(rows)} abilities, {seq - 100} priced tiers, a five-level map device, retry, isolation and restart.")
+    print(f"PASS {len(rows)} abilities, {seq - 100} priced tiers, scoped Torii device goals, Find Statue, "
+          "fourth collectible, one-time level-five bundle, legacy scope, retry, isolation and restart.")
 
 
 if __name__ == "__main__":

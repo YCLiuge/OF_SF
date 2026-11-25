@@ -11,3 +11,6 @@ class Handler(PacketHandler):
         rsp = pb.TreasureBoxOpenRsp()
         rsp.status = open_box(session, req, rsp)
         session.send(MsgId.TreasureBoxOpenRsp, rsp, packet_id)
+        if rsp.status == pb.StatusCode_OK and rsp.items:
+            from private_activity_fragments import chest_opened
+            chest_opened(session, req)

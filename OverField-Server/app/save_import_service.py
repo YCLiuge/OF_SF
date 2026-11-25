@@ -51,11 +51,15 @@ def seal_native_entry(conn,slot):
 
 def snapshot(conn,pid):
     result={}
+    from save_import_field import snapshot as snapshot_field
+    snapshot_field(conn,pid,result)
     for table,(key,col) in BLOBS.items():
         for identifier,blob in conn.execute(f"SELECT {key},{col} FROM {table} WHERE player_id=?",(pid,)):
             result[table,identifier]=blob
     for table,sql in (("level","SELECT level,exp,world_level,character_id FROM players WHERE player_id=?"),
                       ("head","SELECT head FROM players WHERE player_id=?"),
+                      ("pet_equipped","SELECT pet_instance_id FROM players WHERE player_id=?"),
+                      ("pet_capacity","SELECT v FROM player_kv WHERE player_id=? AND ns='pet_bag' AND k='capacity'"),
                       ("location","SELECT scene,channel FROM private_locations WHERE player_id=?"),
                       ("intro","SELECT v FROM player_kv WHERE player_id=? AND ns='profile' AND k='bottle_intro'")):
         value=conn.execute(sql,(pid,)).fetchone()
@@ -71,6 +75,15 @@ def snapshot(conn,pid):
 
 
 def restore_prior(conn,pid,table,key,value):
+    if table.startswith("field_"):
+        from save_import_field import undo
+        return undo(conn,pid,table,key,value)
+    if table=="pet_capacity":
+        if value is None:
+            conn.execute("DELETE FROM player_kv WHERE player_id=? AND ns='pet_bag' AND k='capacity'",(pid,))
+        else:
+            conn.execute("INSERT OR REPLACE INTO player_kv VALUES(?,'pet_bag','capacity',?)",(pid,*json.loads(value)))
+        return
     if table=="gather_total":
         scene,kind=divmod(key,8)
         if value is None:
@@ -103,6 +116,7 @@ def restore_prior(conn,pid,table,key,value):
     values=json.loads(value)
     if table=="level":conn.execute("UPDATE players SET level=?,exp=?,world_level=?,character_id=? WHERE player_id=?",(*values,pid))
     elif table=="head":conn.execute("UPDATE players SET head=? WHERE player_id=?",(*values,pid))
+    elif table=="pet_equipped":conn.execute("UPDATE players SET pet_instance_id=? WHERE player_id=?",(*values,pid))
     elif table=="location":conn.execute("UPDATE private_locations SET scene=?,channel=? WHERE player_id=?",(*values,pid))
     elif table=="intro":conn.execute("UPDATE player_kv SET v=? WHERE player_id=? AND ns='profile' AND k='bottle_intro'",(*values,pid))
     else:raise ValueError("invalid import journal")
@@ -169,6 +183,8 @@ class ImportService:
                     warnings=[WARN,SEALED]
                     from save_import_location import summary as resume_summary
                     warnings.append(resume_summary(plan))
+                    if counts.get("缺少可用明细的宠物"):
+                        warnings.append(f"备份记录共 {plan['pets']['total']} 只宠物，有可恢复明细 {counts['可恢复宠物']} 只。")
                     if plan["gear"]:warnings.append(EQUIPMENT)
                     if not ready:warnings.append(PRISTINE)
                     conn.execute("DELETE FROM private_import_preview WHERE slot=?",(slot,))

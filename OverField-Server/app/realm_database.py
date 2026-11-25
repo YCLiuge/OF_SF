@@ -34,6 +34,8 @@ def open_game_database(identity, data_dir):
         CREATE TABLE IF NOT EXISTS private_locations (
             player_id INTEGER PRIMARY KEY, scene INTEGER NOT NULL);
     """)
+    from private_activity_fragments import setup as setup_activity_fragments
+    setup_activity_fragments(db.conn)
     import private_abyss
     private_abyss.setup()
     from private_secondary_password import setup as setup_secondary_password

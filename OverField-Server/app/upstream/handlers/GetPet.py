@@ -1,4 +1,4 @@
 from private_request import handler
-from private_inventory import page
+from private_pets import page
 
-Handler = handler("GetPet", lambda session, req, rsp: page(session, req, rsp, "pet"))
+Handler = handler("GetPet", page)

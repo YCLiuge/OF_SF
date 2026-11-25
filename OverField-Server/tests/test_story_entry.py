@@ -70,7 +70,8 @@ def run(root, resources):
         with sock:
             assert {k:quests[k] for k in (100021,100022,100023)}=={100021:3,100022:3,100023:1}
             assert 100024 not in quests
-            assert request(sock,"AreaUnlock",area_id=1002).status==pb.StatusCode_BAD_REQ
+            assert request(sock,"AreaUnlock",area_id=2001).status==pb.StatusCode_BAD_REQ
+            assert request(sock,"AreaUnlock",area_id=1002).status==pb.StatusCode_OK
             assert interact(sock,1000241).status==pb.StatusCode_BAD_REQ
             assert request(sock,"AreaClose",area_id=1001).area.area_state==pb.AreaData.Close
             assert accept(sock,1000002).quest.quest_id==100023
@@ -343,4 +344,3 @@ if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--resources",type=Path,required=True)
     with TemporaryDirectory() as state:run(Path(state),parser.parse_args().resources)
-

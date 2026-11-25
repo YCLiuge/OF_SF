@@ -653,9 +653,12 @@ def make_SceneDataNotice(session):
     data = rsp.data
     data.scene_id = session.scene_id
     from private_field_gathering import fill as fill_gather
+    from private_region_devices import show_upgrade_reward
     fill_gather(session, data)
     for i in db.get_area(session.player_id, session.scene_id):
-        data.areas.add().ParseFromString(i)
+        area = data.areas.add()
+        area.ParseFromString(i)
+        show_upgrade_reward(session.scene_id, area)
     pos = session.pos.get(session.scene_id)
     if pos:
         session.scene_player.team.char1.pos.CopyFrom(pos)

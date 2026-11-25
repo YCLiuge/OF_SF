@@ -55,7 +55,7 @@ def looks_for_actor(looks):
 
 def validate(data):
     from private_entitlements import CURRENCY_IDS
-    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
+    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals","pets","field_progress"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
         raise ValueError("invalid data format")
     for key,limit in ARRAY_LIMITS.items():
         rows(data[key],limit)
@@ -201,6 +201,19 @@ def validate(data):
                 selected[kind]=max(count,selected.get(kind,0))
         out["gather_totals"]=[[scene,kind,value] for kind,value in sorted(selected.items())]
     totals={"队长等级":out["player"][0],**{LABELS[k]:len(out[k]) for k in LABELS}}
+    if "field_progress" in data:
+        from save_import_field import validate as validate_field
+        restored = validate_field(data["field_progress"], out.get("progress_location", {}).get("scene"))
+        for key, label in (("devices","区域装置"),("goals","区域目标"),("collectibles","区域收藏点"),
+                           ("riddles","世界挑战"),("challenges","限时挑战")):
+            if restored[key]:totals[label] = len(restored[key])
+        if any(restored[k] for k in restored if k != "scene"):
+            out["field_progress"] = restored
+    if "pets" in data:
+        from save_import_pets import validate as validate_pets
+        pets=out["pets"]=validate_pets(data["pets"])
+        totals["可恢复宠物"]=len(pets["entries"])
+        totals["缺少可用明细的宠物"]=pets["total"]-len(pets["entries"])
     if out.get("gather_totals"):totals["场景采集记录"]=len(out["gather_totals"])
     skipped=sum(len(data[k])-len(out[k]) for k in LABELS)
     totals["穿搭预设"]=sum(len(h[6]) for h in out["heroes"])
@@ -323,3 +336,9 @@ def restore(pid,plan):
         db.set_achieve(pid,key,a.SerializeToString())
     from save_import_location import restore as restore_location
     restore_location(pid,plan)
+    if "field_progress" in plan:
+        from save_import_field import restore as restore_field
+        restore_field(pid, plan["field_progress"])
+    if "pets" in plan:
+        from save_import_pets import restore as restore_pets
+        restore_pets(pid,plan["pets"])

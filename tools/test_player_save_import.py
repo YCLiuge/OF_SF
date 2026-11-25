@@ -8,10 +8,14 @@ import zipfile
 def backup(folder):
     folder.mkdir()
     marker="unrelated-private-test-data"
-    main={"status":{"v":1},"level":2,"exp":1,"world_level":0,"player_id":9067314,"player_name":"群星校验"}
+    main={"status":{"v":1},"level":2,"exp":1,"world_level":0,"player_id":9067314,"player_name":"群星校验",
+          "pet_instance_id":986654322}
     data={"format":"overfield-snapshot/1","account":{"session":marker,"uid":marker,"username":marker,"playerId":9067314,"playerName":"群星校验"},"endpoint":marker,
           "decoded":{"main":{"name":"PlayerMainDataRsp","frames":[{"ok":True,"decoded":main}]}},
           "stats":{"other":marker}}
+    pet={"item_id":200001009,"instance_id":986654322,"name":"测试云朵","level":1,"nature_id":132,
+         "integrity_id":100030,"integrity":[{"attr":{"v":5},"value":14}],"size":243,"weight":162840}
+    data["decoded"]["pet"]={"name":"GetPetRsp","frames":[{"ok":True,"decoded":{"status":{"v":1},"total_num":3,"pets":[pet]}}]}
     (folder/"snapshot.json").write_text(json.dumps(data),encoding="utf8")
     (folder/"private-server-import.json").write_text(json.dumps({"irrelevant":marker}),encoding="utf8")
     archive=folder/"player.zip"
@@ -27,11 +31,19 @@ def privacy(accounts,folder):
     preview="ofv_"+"a"*32
     expected={"format":"of-sf-progress/1","player":[2,1,0],"heroes":[],"quests":[],"chapters":[],
               "achievements":[],"stacks":[],"outfits":[],"gear":[],"team":[0,0,0],"loadouts":[],
-              "identity":{"uid":9067314,"nickname":"群星校验"}}
-    def capture(config,verb,path,fields,max_bytes):
+              "identity":{"uid":9067314,"nickname":"群星校验"},
+              "pets":{"total":3,"capacity":0,"entries":[{"item_id":200001009,"level":1,"nature_id":132,
+                      "integrity_id":100030,"star":0,"catch_scene_id":0,"catch_area_id":0,"catch_time":0,
+                      "size":243,"weight":162840,"integrity":[[5,14]],"special_color":False,
+                      "name":"测试云朵","active":True}]}}
+    def capture(config,verb,path,fields=None,max_bytes=0):
+        if verb=="GET":
+            assert path=="/local/v1/region" and fields is None
+            return 200,{"realm":accounts.PRIVATE_REALM,"save_import_features":["pets","field_progress"]}
         assert verb=="POST" and path=="/local/v1/accounts/import-preview"
         assert fields=={"import_ticket":token,"data":expected}
         assert "unrelated-private-test-data" not in json.dumps(fields)
+        assert "986654322" not in json.dumps(fields)
         return 200,{"ok":True,"eligible":True,"counts":{"角色":1},"warnings":[],"preview_id":preview}
     with patch.object(accounts,"request",side_effect=capture) as requested:
         for source in (archive,folder,folder/"snapshot.json",folder/"private-server-import.json"):
@@ -40,7 +52,24 @@ def privacy(accounts,folder):
         bad=folder/"broken.zip";bad.write_bytes(b"broken")
         reply=accounts.import_backup("import-preview",{"path":str(bad),"import_ticket":token},{})
         assert reply["code"]=="invalid_backup"
-        assert requested.call_count==4
+        assert requested.call_count==8
+    baseline={k:v for k,v in expected.items() if k!="pets"}
+    extended=dict(expected,field_progress={"scene":1,"devices":[[1,2]],"riddles":[[1,3]],"challenges":[],
+                                           "collectibles":[42],"goals":[]})
+    def legacy(config,verb,path,fields=None,max_bytes=0):
+        if verb=="GET":
+            return 200,{"realm":accounts.PRIVATE_REALM}
+        assert fields=={"import_ticket":token,"data":baseline}
+        return 200,{"ok":True,"eligible":True,"counts":{},"warnings":[],"preview_id":preview}
+    with patch.object(accounts,"request",side_effect=legacy),patch("save_import_data.project_file",return_value=extended.copy()):
+        result=accounts.import_backup("import-preview",{"path":str(archive),"import_ticket":token},{})
+        assert result["ok"] and any("3 只" in s and "1 只明细" in s for s in result["warnings"])
+        assert result["counts"]=={"旧服跳过的宠物明细":1,"旧服跳过的区域进度":3}
+        assert any("区域装置 1 条、谜题 1 条、收藏点 1 条" in s for s in result["warnings"])
+        assert any("取消" in s for s in result["warnings"])
+    with patch.object(accounts,"request",return_value=(200,{"realm":"unrelated"})) as rejected:
+        result=accounts.import_backup("import-preview",{"path":str(archive),"import_ticket":token},{})
+        assert result["code"]=="import_capabilities_unavailable" and rejected.call_count==1
     return archive
 
 
@@ -88,6 +117,7 @@ def over_tls(accounts, private, config, archive, who, state):
     assert cancelled.get("ok") and level()==before  # Closing the preview makes no write.
     info=submit("import-preview",path=str(archive))
     assert info.get("ok") and info.get("eligible")
+    assert info["counts"]["可恢复宠物"]==1 and info["counts"]["缺少可用明细的宠物"]==2
     assert info["identity"]=={"uid":9067314,"nickname":"群星校验","uid_status":"available","nickname_status":"available"}
     preview=info["preview_id"]
     assert not submit("import-apply",token=other["import_ticket"],preview_id=preview)["ok"]

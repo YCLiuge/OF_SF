@@ -189,6 +189,7 @@ def self_test():
                    "test_native_first_quest.py", "test_story_entry.py", "test_bottle_intro.py",
                    "test_native_mail.py", "test_native_manual.py", "test_native_recovery.py",
                    "test_native_story_objectives.py", "test_native_collection_queries.py", "test_native_character_skills.py", "test_native_closed_minigames.py",
+                   "test_native_activity_fragments.py", "test_native_field_supplies.py",
                    "test_native_encounter_gifts.py",
                    "test_native_ground_loot.py",
                    "test_native_secondary_password.py",

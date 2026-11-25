@@ -68,6 +68,8 @@ def catch_catalog():
 def run(root,resources):
     roles=LocalIdentity(root/"identity.sqlite3")
     a_role,b_role=[roles.create_profile(n) for n in ("钓手甲","钓手乙")]
+    from realm_rules import configure
+    configure(root, {"activity_fragment_percent": 100})
     host=LocalGameService(roles,root,resources,port=0)
     seq=count(200)
     clock=[1000.0]
@@ -102,6 +104,8 @@ def run(root,resources):
             with a,b:
                 prepare(pid)
                 prepare(other)
+                with host.lock:
+                    fragments_before = balance(pid, 124)
                 catch_catalog()
                 def chosen_pool(bait):
                     captured=[]
@@ -151,12 +155,15 @@ def run(root,resources):
                 assert sum(book.values())==len(actual.fish_infos) and not counts(b)
                 with host.lock:
                     assert (balance(pid,11),balance(pid,5021001))==(79,39)
+                    assert balance(pid,124) == fragments_before + 5
                     assert base(pid,fishing.KIND).proficiency_value>=100
                     assert balance(pid,row["item_i_d"])>=book[fish]
                 with patch("private_fishing.random.random",return_value=.999):
                     failed=cast(a).fishing_event_result
                 assert not failed.fish_infos
                 assert finish(a,failed.cost_time)[0].status==pb.StatusCode_OK and counts(a)==book
+                with host.lock:
+                    assert balance(pid,124) == fragments_before + 5
                 with host.lock: assert progress(pid,100210102)==1
                 with patch("private_fishing.random.random",return_value=0):
                     shortage=cast(a).fishing_event_result

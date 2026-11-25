@@ -153,3 +153,7 @@ Windows 11 x64，Python 3.12.13。用同一份合成数据库对比两版游戏�
 ```powershell
 python tools/benchmark_resident_memory.py --a "D:/bench/old/OverField-Server" --b OverField-Server --pairs 3 --clients 24
 ```
+
+## 野外补给箱查询
+
+首次访问一张地图的补给箱时，区服按原版点位编号建立索引。同一地图后续开箱直接定位，不再每次扫描整张图。已逐项核对 1,633 个地图箱点位。开发机上对樱庭昼 134 个点位各查 100 遍、取 7 轮中位数，查询部分从每次 5.63 微秒降至 0.57 微秒。此项测试只计点位查找，开箱全程还包括生成奖励、存档和网络回包。

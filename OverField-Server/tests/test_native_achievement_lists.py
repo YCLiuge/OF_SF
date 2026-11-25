@@ -56,6 +56,10 @@ def run(root, resources):
                     db.conn.execute("INSERT INTO claimed_rewards(player_id,system,key) VALUES(?,?,?)",(pid,ns,key))
                 for aid,n in ((41010016,7),(41010017,3),(10121,15)):
                     db.set_achieve(pid,aid,pb.Achieve(achieve_id=aid,count=n).SerializeToString())
+                # One real document belongs to this area. An older scene-wide total of
+                # fifteen cannot stand in for the two other documents at this device.
+                doc = pb.PBCollectionRewardData(item_id=10101015, status=pb.NotReward)
+                db.set_collection(pid,doc.item_id,1,doc.SerializeToString())
                 for scene,device,tier in ((1,1001,2),(3,3001,2),(6,3001,1)):
                     db.set_area(pid,scene,device,pb.AreaData(area_id=device,level=tier).SerializeToString())
             got=character(a)
@@ -67,7 +71,7 @@ def run(root, resources):
             assert values(character(b).character_achievement_lst)==initial
             assert not character(b).has_rewarded_ids and not character(b).rewarded_id_lst
             stage2=values(area(a,1001).achieves)
-            assert set(stage2)=={10121,10122,10123} and stage2[10121]>0
+            assert stage2=={10121:1,10122:0,10123:0}
             assert area(b,1001)==default
             assert area(a,3001).status==pb.StatusCode_BAD_REQ
             assert call(a,"ChangeSceneChannel",22,scene_id=3).status==pb.StatusCode_OK

@@ -81,6 +81,8 @@ def import_backup(action, inp, config):
     if not isinstance(ticket,str) or not IMPORT_TICKET.fullmatch(ticket):
         return {"ok":False,"code":"import_login_required"}
     form={"import_ticket":ticket}
+    compatibility=[]
+    omitted={}
     if action=="import-preview":
         from save_import_data import BackupFormatError,project_file
         try:
@@ -89,6 +91,26 @@ def import_backup(action, inp, config):
             return {"ok":False,"code":"invalid_backup","message":str(err)}
         except (OSError,KeyError,ValueError,TypeError,RuntimeError,zipfile.BadZipFile):
             return {"ok":False,"code":"invalid_backup","message":"无法读取全进度备份。请选择结果 ZIP、snapshot.json 或结果目录。"}
+        data=form["data"]
+        if "pets" in data or "field_progress" in data:
+            status,region=request(config,"GET","/local/v1/region",max_bytes=32768)
+            if status!=200 or region.get("realm")!=PRIVATE_REALM:
+                return {"ok":False,"code":"import_capabilities_unavailable","message":"无法读取所选区服的存档导入能力，请重新测试连接。"}
+            features=region.get("save_import_features",[])
+            if not isinstance(features,list) or any(not isinstance(feature,str) for feature in features):
+                return {"ok":False,"code":"import_capabilities_unavailable","message":"所选区服的存档导入能力格式无效，请联系服主。"}
+            if "pets" in data and "pets" not in features:
+                pets=data.pop("pets")
+                omitted["旧服跳过的宠物明细"]=len(pets["entries"])
+                compatibility.append(f"该区服版本无法继承宠物。本备份记录 {pets['total']} 只、含 {len(pets['entries'])} 只明细，本次导入会跳过宠物及仓库容量。")
+            if "field_progress" in data and "field_progress" not in features:
+                field=data.pop("field_progress")
+                categories=(("devices","区域装置"),("riddles","谜题"),("challenges","挑战"),("collectibles","收藏点"),("goals","区域目标"))
+                omitted["旧服跳过的区域进度"]=sum(len(field.get(k,())) for k,_ in categories)
+                detail="、".join(f"{label} {len(field[key])} 条" for key,label in categories if field.get(key))
+                compatibility.append("该区服版本会跳过"+(detail or "备份中的区域进度")+"。")
+            if compatibility:
+                compatibility.append("要保留上述进度，请先取消，待服主更新后重新预览。确认导入将仅恢复本页列出的项目。")
     elif action=="import-apply":
         preview=inp.get("preview_id")
         if not isinstance(preview,str) or not PREVIEW_ID.fullmatch(preview):
@@ -108,7 +130,7 @@ def import_backup(action, inp, config):
     if (not isinstance(counts,dict) or len(counts)>100 or
         any(not isinstance(k,str) or not 1<=len(k)<=72 or type(v) is not int or not 0<=v<=2**31 for k,v in counts.items())):
         raise ValueError("私服导入统计格式无效。")
-    result={"ok":True,"counts":counts}
+    result={"ok":True,"counts":{**omitted,**counts}}
     if "identity" in doc:
         result["identity"]=returned_identity(doc["identity"],action=="import-preview")
     if action=="import-preview":
@@ -116,7 +138,7 @@ def import_backup(action, inp, config):
         if (type(eligible) is not bool or eligible and (not isinstance(preview,str) or not PREVIEW_ID.fullmatch(preview)) or
             not isinstance(warnings,list) or len(warnings)>48 or any(not isinstance(w,str) or len(w)>400 for w in warnings)):
             raise ValueError("私服导入预览格式无效。")
-        result.update(eligible=eligible,preview_id=preview if eligible else "",warnings=warnings)
+        result.update(eligible=eligible,preview_id=preview if eligible else "",warnings=compatibility+warnings)
     return result
 
 
@@ -330,4 +352,3 @@ if __name__=="__main__":
         else:message="私服请求未完成，请检查连接配置和服务版本。"
         output={"ok":False,"code":"transport","message":message}
     print(json.dumps(output,ensure_ascii=True,separators=(",",":")))
-

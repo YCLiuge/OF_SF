@@ -13,6 +13,7 @@ from test_game_realm import login, join, next_msg
 from test_native_gacha import call
 from utils import db
 from utils.pb_create import make_item
+from utils.res_loader import res
 
 
 def run(root,resources):
@@ -29,7 +30,7 @@ def run(root,resources):
         item=balance(pid,template)
         return item.main_item.base_item.num if item else 0
     def hunt(sock,seq,tool=200100007,**changes):
-        args=dict(monster_id=1001,hp=10,max_hp=76,catcher_id=tool,catch_area_id=1001)
+        args=dict(monster_id=1009,hp=10,max_hp=76,catcher_id=tool,catch_area_id=1001)
         return call(sock,"PetCapture",seq,**{**args,**changes})
     def rename(sock,seq,pet_instance_id,name):
         req=pb.PetRenameReq(pet_instance_id=pet_instance_id,name=name)
@@ -68,6 +69,7 @@ def run(root,resources):
             assert hunt(a,12,tool=101).status==pb.StatusCode_BAD_REQ
             assert hunt(a,13,catch_area_id=3001).status==pb.StatusCode_BAD_REQ
             assert hunt(a,14,hp=77).status==pb.StatusCode_BAD_REQ
+            assert hunt(a,9,monster_id=1001).status==pb.StatusCode_BAD_REQ
             assert amount(pid,quantum)==5
             with patch("private_pets.random.random",return_value=.99):
                 failed=hunt(a,15,ordinary)
@@ -76,9 +78,10 @@ def run(root,resources):
                 got=hunt(a,16)
             assert got.status==pb.StatusCode_OK and got.success and len(got.items)==1
             pet=got.items[0].main_item.pet
-            assert pet.catch_scene_id==1 and pet.catch_area_id==1001 and pet.catch_time and pet.item_id==200001001
+            assert pet.catch_scene_id==1 and pet.catch_area_id==1001 and pet.catch_time and pet.item_id==200001009
             assert hunt(a,16)==got and amount(pid,quantum)==4
-            second=hunt(a,17).items[0].main_item.pet
+            second=hunt(a,17,monster_id=2104).items[0].main_item.pet
+            assert second.item_id==200001205 and hunt(a,17,monster_id=2104).items[0].main_item.pet==second
             first,other=pet.instance_id,second.instance_id
             assert other!=first
             page=call(a,"GetPet",20,start_index=0,end_index=1)
@@ -92,9 +95,9 @@ def run(root,resources):
             assert rename(a,26,pet_instance_id=first,name="103").status==pb.StatusCode_BAD_REQ
             assert rename(a,27,pet_instance_id=first,name="小灰").name=="小灰"
             assert call(a,"ChangePet",28,pet_instance_id=first).status==pb.StatusCode_OK
-            assert scene_pet(b,"小灰")==200001001
+            assert scene_pet(b,"小灰")==200001009
             assert rename(a,29,pet_instance_id=first,name="云朵").status==pb.StatusCode_OK
-            assert scene_pet(b,"云朵")==200001001
+            assert scene_pet(b,"云朵")==200001009
             assert release(a,30,other,first).status==pb.StatusCode_BAD_REQ
             assert release(a,31,other,other).status==pb.StatusCode_BAD_REQ
             assert release(a,32,other,999999).status==pb.StatusCode_PET_NOT_FOUND
@@ -109,6 +112,16 @@ def run(root,resources):
             assert call(a,"ItemUse",36,item_id=bag,num=2).status==pb.StatusCode_OK
             assert call(a,"ItemUse",36,item_id=bag,num=2).status==pb.StatusCode_OK and amount(pid,bag)==0
             assert capacity(pid)==102 and capacity(peer)==100
+            targets=res["PetCaptureMonsters"]["monsters"]
+            assert len(targets)==17 and len(set(targets.values()))==13
+            with game.lock,db.conn:
+                stock(peer,quantum,len(targets))
+            for seq,(monster,species) in enumerate(targets.items(),100):
+                result=hunt(b,seq,monster_id=int(monster))
+                assert result.success and result.items[0].main_item.pet.item_id==species
+            warehouse=call(b,"GetPet",120,start_index=0,end_index=100)
+            assert warehouse.total_num==17 and amount(peer,quantum)==0
+            assert sum(pet.item_id==200001205 for pet in warehouse.pets)==5
             # Filled historical warehouse must reject capture before charging; exercise a bulk import.
             with game.lock,db.conn:
                 clones=[]

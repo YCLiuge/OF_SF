@@ -39,6 +39,8 @@ def update(session, req, rsp):
         best = pb.ChallengeData.FromString(raw) if raw else None
         if not best or best.state != pb.Finish or not best.use_time or result.use_time < best.use_time:
             db.set_challenge(session.player_id, session.scene_id, req.challenge_id, result.SerializeToString())
+            from private_region_devices import changed
+            changed(session, 18, req.challenge_id)
         # These 111 rows specify a treasure box but contain no box or loot-pool ID.
         # Do not mint generic currency or create unrelated dynamic boxes.
     return pb.StatusCode_OK

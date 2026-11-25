@@ -1,5 +1,6 @@
 """Read national area and character achievement configuration against the current private role."""
 from private_dungeons import _table, progress
+from private_region_devices import objectives
 from proto import net_pb2 as pb
 from utils import db
 
@@ -32,13 +33,8 @@ def area_list(session, req, rsp):
     if tier is None:
         return pb.StatusCode_CFG_NOT_FOUND
     rsp.area_id = aid
-    if tier.get("mission_pool_i_d"):
-        pool = _table("Area","area_mission_data")[tier["mission_pool_i_d"]]
-        for entry in pool["area_mission_data_group"]:
-            objective = entry.get("achieve_condition_i_d")
-            if objective:
-                target = _table("Achieve","achieve")[objective]["count_param"]
-                rsp.achieves.add(achieve_id=objective, count=min(progress(session.player_id, objective),target))
+    for objective, count, _ in objectives(session.player_id, owner, aid, level):
+        rsp.achieves.add(achieve_id=objective, count=count)
     return pb.StatusCode_OK
 
 

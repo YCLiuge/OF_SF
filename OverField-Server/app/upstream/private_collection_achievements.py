@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 
 from private_dungeons import _table, report
 from private_map_progress import collectible
+from private_region_devices import catalog as region_catalog, changed as region_changed
 from proto import net_pb2 as pb
 from utils import db
 
@@ -23,7 +24,10 @@ def rules():
     scoped, exact = defaultdict(list), defaultdict(list)
     valid_conditions = {c for conditions in CONDITIONS.values() for c in conditions}
     scenes = _table("Scene", "scene")
+    regional_goals = region_catalog()[2]
     for aid, row in achievements.items():
+        if aid in regional_goals:
+            continue
         kind = row.get("new_achieve_condition")
         args, target = row.get("param", ()), row.get("count_param", 0)
         if target <= 0:
@@ -99,3 +103,5 @@ def restore(session):
 def discovered(session, item, kind):
     if not session.dungeon[0]:
         credit(session,Counter(scopes(kind,session.scene_id)),(item,))
+        if 1 <= kind <= 6:
+            region_changed(session, kind + 11, item)

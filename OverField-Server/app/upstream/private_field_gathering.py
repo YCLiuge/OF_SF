@@ -223,6 +223,8 @@ def gather(session, req, rsp):
     rsp.group_gather_limit.gather_group_id = group_id
     rsp.group_gather_limit.gather_limit.CopyFrom(counters[1][2])
     record_book(session, entries)
+    from private_activity_fragments import gathered
+    gathered(session, kind)
     if kind == 5 and info["new_weapon_type"] == 15:
         from private_bless_tasks import record
         record(session,76)

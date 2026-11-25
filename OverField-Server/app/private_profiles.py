@@ -223,7 +223,8 @@ def create_profile_server(identity, *, bind_host="127.0.0.1", port=18881,
     service.accounts = AccountService(identity)
     service.account_registration = service.registration if account_policy is None else account_policy=="open"
     service.region = {"realm": REALM, "game_host": advertised, "game_port": game_port,
-                      "game_protocol": "overfield-packethead-protobuf", "client_version": "1.1.12"}
+                      "game_protocol": "overfield-packethead-protobuf", "client_version": "1.1.12",
+                      "save_import_features": ["pets", "field_progress"]}
     service.hostnames = frozenset(hosts)
     service.tls_context = tls_context
     return service
@@ -282,4 +283,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

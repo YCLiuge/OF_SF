@@ -39,7 +39,9 @@ def open_scenic(session,req,rsp):
                             (pid,f"scenic_spots:{scene}",str(spot))).rowcount
     if first:
         from private_dungeons import grant, reward_items
+        from private_region_devices import changed
         grant(session,reward_items(pid,cfg["first_reward_i_d"]),pb.ClaimQuestRewardRsp().items)
+        changed(session, 11, spot)
     finish_objectives(session,spot)
     rsp.battle_data.battle_id = spot
     rsp.battle_data.type = req.mission_type

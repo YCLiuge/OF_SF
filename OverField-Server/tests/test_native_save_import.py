@@ -60,7 +60,21 @@ def world(base,resources):
 
 def run(root,resources):
     folder=root/"export";folder.mkdir()
-    (folder/"snapshot.json").write_text(json.dumps(synthetic()),encoding="utf8")
+    fixture=synthetic()
+    from save_import_data import project
+    assert "pets" not in project(fixture)
+    def record(name,data):
+        return {"name":name,"frames":[{"ok":True,"decoded":{"status":{"v":1},**data}}]}
+    fixture["decoded"]["pet_capacity"]=record("PetWarehouseLimitNotice",{"warehouse_limit":100})
+    assert "pets" not in project(fixture)
+    pet={"item_id":200001009,"instance_id":986654322,"name":"雪团","level":1,"nature_id":132,
+         "integrity_id":100030,"integrity":[{"attr":{"v":5},"value":14}],"special_color":True,
+         "catch_scene_id":1,"catch_area_id":1001,"catch_time":1770000000,"size":243,"weight":162840}
+    fixture["decoded"]["main"]["frames"][0]["decoded"]["pet_instance_id"]=pet["instance_id"]
+    fixture["decoded"]["pack"]["frames"][0]["decoded"]["items"].append({"main_item":{"item_id":pet["item_id"],"pet":pet}})
+    fixture["decoded"]["pet_page"]=record("GetPetRsp",{"total_num":3,"pets":[pet]})
+    fixture["decoded"]["pet_capacity"]=record("PetWarehouseLimitNotice",{"warehouse_limit":125})
+    (folder/"snapshot.json").write_text(json.dumps(fixture),encoding="utf8")
     (folder/"private-server-import.json").write_text("DO-NOT-COPY",encoding="utf8")
     archive=root/"export.zip"
     with zipfile.ZipFile(archive,"w") as f:
@@ -68,7 +82,7 @@ def run(root,resources):
     data=project_file(archive)
     assert all(project_file(p)==data for p in (folder,folder/"snapshot.json",folder/"private-server-import.json"))
     assert data["identity"] == {"uid":4444444,"nickname":"旧服角色甲"}
-    assert not any(secret in json.dumps(data) for secret in ("DO-NOT-COPY","986654321"))
+    assert not any(secret in json.dumps(data) for secret in ("DO-NOT-COPY","986654321","986654322"))
     with zipfile.ZipFile(root/"ambiguous.zip","w") as f:
         for name in ("a","b"):f.writestr(name+"/snapshot.json","{}")
     try:project_file(root/"ambiguous.zip");raise AssertionError("multiple snapshots accepted")
@@ -95,6 +109,8 @@ def run(root,resources):
         assert call("import-preview",{**auth,"data":data,"slot":b["slot"]})[0]==400
         status,info=call("import-preview",{**auth,"data":data})
         assert status==200 and info["eligible"] and info["counts"]["探索员"]==1,info
+        assert info["counts"]["可恢复宠物"]==1 and info["counts"]["缺少可用明细的宠物"]==2
+        assert any("共 3 只" in msg and "明细 1 只" in msg for msg in info["warnings"])
         assert db.conn.execute("SELECT COUNT(*) FROM private_slots").fetchone()[0]==0
         key={"preview_id":info["preview_id"]}
         assert call("import-apply",{**wrong,**key})[0]==409
@@ -105,6 +121,12 @@ def run(root,resources):
         assert call("import-apply",{**auth,**key})[0]==200
         assert call("import-undo",wrong)[0]==409
         pid=db.conn.execute("SELECT player_id FROM private_slots WHERE slot=?",(a["slot"],)).fetchone()[0]
+        from private_pets import capacity,owned_pets
+        equipped_pet,=db.get_players_info(pid,"pet_instance_id")
+        companion,=owned_pets(pid)
+        assert equipped_pet==companion.instance_id and equipped_pet!=986654322 and capacity(pid)==125
+        assert companion.name=="雪团" and companion.integrity[0].value==14 and companion.special_color
+        assert (companion.catch_scene_id,companion.catch_time,companion.size,companion.weight)==(1,1770000000,243,162840)
         assert pid>=1000001 and pid!=4444444
         assert db.conn.execute("SELECT player_name,level,exp FROM players WHERE player_id=?",(pid,)).fetchone()==("旧服角色甲",20,322)
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,5012011)).main_item.base_item.num==53
@@ -130,13 +152,17 @@ def run(root,resources):
         new=call("login",credentials)[1];auth={"import_ticket":new["import_ticket"]}
         assert call("import-apply",{**auth,**key})[0]==200
         assert call("import-undo",auth)[0]==200 and call("import-undo",auth)[0]==200
+        assert not list(owned_pets(pid)) and not db.get_players_info(pid,"pet_instance_id")[0] and capacity(pid)==100
         assert db.conn.execute("SELECT level FROM players WHERE player_id=?",(pid,)).fetchone()[0]==10
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,5012011)).main_item.base_item.num==4
         info=call("import-preview",{**auth,"data":data})[1]
         assert info["eligible"] and call("import-apply",{**auth,"preview_id":info["preview_id"]})[0]==200
         client,info,_=login(game.port,new["ticket"])
         with closing(client):
-            main,_=join(client)
+            main,scene=join(client)
+            assert main.pet_instance_id and main.pet_instance_id==next(owned_pets(pid)).instance_id
+            visible=next(player for player in scene.data.players if player.player_id==main.player_id)
+            assert (visible.pet_item_id,visible.pet_name)==(200001009,"雪团")
             native_hero=next(h for h in main.characters if h.character_id==101001)
             native_look=native_hero.outfit_presets[native_hero.in_use_outfit_preset_index]
             assert native_look.clothes_dye_scheme_index==1 and native_look.pend_top==4200744 and native_look.outfit_hide_info.hide_braid

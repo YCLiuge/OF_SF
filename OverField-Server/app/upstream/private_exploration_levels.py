@@ -4,7 +4,8 @@ from proto import net_pb2 as pb
 from utils import db
 from private_badge_tree import _owned
 from private_crafts import payments, save_pack, stack
-from private_dungeons import _table, progress, report
+from private_dungeons import _table, grant, progress, report
+from private_region_devices import UPGRADE_REWARDS, objectives, show_upgrade_reward
 
 
 def counted_upgrade(session, condition):
@@ -70,6 +71,7 @@ def area(session, req, rsp):
     device = pb.AreaData.FromString(blob)
     rsp.area.CopyFrom(device)
     rsp.area.ClearField("items")
+    show_upgrade_reward(scene, rsp.area)
     if device.area_state != pb.AreaData.Unlock:
         return pb.StatusCode_AREA_NOT_UNLOCK
     level = device.level or 1
@@ -78,22 +80,18 @@ def area(session, req, rsp):
         return pb.StatusCode_CFG_NOT_FOUND
     if level + 1 not in rules:
         return pb.StatusCode_AREA_LEVEL_LIMIT
-    pools = _table("Area","area_mission_data")
-    missions = pools[rules[level]["mission_pool_i_d"]]["area_mission_data_group"]
-    achievements = _table("Achieve","achieve")
-    for mission in missions:
-        goal = mission.get("achieve_condition_i_d")
-        if goal and progress(pid,goal) < achievements[goal]["count_param"]:
-            return pb.StatusCode_AREA_LEVEL_QUEST_NOT_FINISH
+    if any(count < target for goal, count, target in objectives(pid, scene, aid, level)):
+        return pb.StatusCode_AREA_LEVEL_QUEST_NOT_FINISH
     device.level = level + 1
     device.ClearField("items")
     db.set_area(pid,scene,aid,device.SerializeToString())
     rsp.area.CopyFrom(device)
-    next_pool = rules[device.level].get("mission_pool_i_d")
-    if next_pool:
-        for mission in pools[next_pool]["area_mission_data_group"]:
-            goal = mission.get("achieve_condition_i_d")
-            if goal:
-                rsp.achieves.add(achieve_id=goal,count=min(progress(pid,goal),achievements[goal]["count_param"]))
+    show_upgrade_reward(scene, rsp.area)
+    for goal, count, _ in objectives(pid, scene, aid, device.level):
+        rsp.achieves.add(achieve_id=goal, count=count)
+    # The retail Torii device displays this bundle for its level 4 -> 5 transition.
+    reward = UPGRADE_REWARDS.get((scene, aid, level))
+    if reward:
+        grant(session, reward, rsp.items)
     counted_upgrade(session,140)
     return pb.StatusCode_OK

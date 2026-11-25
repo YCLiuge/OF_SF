@@ -41,12 +41,24 @@ def gameplay_reward(session, req, rsp):
     return pb.StatusCode_OK
 
 
+_scene_boxes = {}
+
+
 def template_at(session, index):
     if session.dungeon[0]:
         cfg = dungeon.box_config(session.dungeon[0], index)
         return cfg["i_d"] if cfg else 0
-    scene = next((s for s in res["ScenesConfigAsset"]["Scenes"] if s["ID"] == session.scene_id), {})
-    return next((p["ID"] for i, p in enumerate(scene.get("CollectionTreasureInfos", ())) if p.get("Index", i) == index), 0)
+    scene = res.index("ScenesConfigAsset", "Scenes", "ID").get(session.scene_id)
+    if scene is None:
+        return 0
+    points = scene.get("CollectionTreasureInfos", ())
+    entry = _scene_boxes.get(session.scene_id)
+    if entry is None or entry[0] is not points:
+        by_index = {}
+        for position, point in enumerate(points):
+            by_index.setdefault(point.get("Index", position), point["ID"])
+        entry = _scene_boxes[session.scene_id] = (points, by_index)
+    return entry[1].get(index, 0)
 
 
 def key_for(session, req, index):
@@ -59,6 +71,49 @@ def key_for(session, req, index):
     return (session.player_id, zone(session), int(req.box_type), index)
 
 
+def refresh_seconds(template):
+    chest = res.index("TreasureBox","treasure_box").get(template,{})
+    rule = res.index("TreasureBox","collection_treasure_box").get(chest.get("relate_i_d"),{})
+    return (rule.get("refresh_time") or [0])[0]
+
+
+def level_reward(pool, world, level):
+    # These retail pools contain one initial level curve followed by a row for
+    # each of the five higher world tiers. The mapping to chests is a realm rule.
+    rows = res.index("Reward","reward_item_pool")[pool]["reward_item_pool_group"]
+    if world > 1:
+        return rows[min(world,6)-7]
+    return next((r for r in rows[:-5] if level <= r["max_level_limit"]),rows[-6])
+
+
+def field_chest_loot(session, supply):
+    from private_ground_loot import drop_pools, equipment_level
+    pid = session.player_id
+    level,world = db.get_players_info(pid,"level,world_level")
+    world = max(1,world)
+    max_level = min(max(1,level),res.index("Level","world_level")[min(world,6)]["monster_level"])
+    coins = level_reward(1000001,world,level)["item_max_count"]
+    if supply:
+        # The official sample contains 76 coins; its exact variance/fatigue
+        # is not in the client. Keep this provisional band local to supply boxes.
+        coins = random.randint(max(1,coins*4//5),coins)
+    rewards = [make_item(101,coins,pid)]
+    gear = drop_pools(world)
+    tags = [tag for tag in (2,3) if gear[tag]]
+    for _ in range(random.randint(1,2) if tags else 0):
+        tag = random.choice(tags)
+        item = random.choice(gear[tag])
+        rewards.append(make_item(item,1,pid,equipment_level=equipment_level(item,tag,max_level)))
+    if supply:
+        stone = level_reward(1000011,world,level)
+        rewards.append(make_item(stone["item_i_d"],random.randint(stone["item_min_count"],stone["item_max_count"]),pid))
+        if random.random() < 0.5:
+            materials = res.index("Reward","reward_item_pool")[1000041]["reward_item_pool_group"]
+            material = random.choice(materials)
+            rewards.append(make_item(material["item_i_d"],random.randint(material["item_min_count"],material["item_max_count"]),pid))
+    return rewards
+
+
 def loot(session, box, dynamic):
     pid = session.player_id
     # Fixed national tutorial boxes and known collection rewards in of-ps. Other ordinary boxes use private drop rates.
@@ -68,6 +123,11 @@ def loot(session, box, dynamic):
     if box in fixed:
         template, count = fixed[box]
         return [make_item(template,count,pid)]
+    if not session.dungeon[0]:
+        if dynamic and box==300000:
+            return field_chest_loot(session,False)
+        if not dynamic and refresh_seconds(box):
+            return field_chest_loot(session,True)
     items = [make_item(101,10,pid)]
     world = max(1, db.get_players_info(pid, "world_level")[0])
     eligible = set(res["ReleasedEquipment"]["equipment_ids"])
@@ -88,9 +148,19 @@ def open_box(session, req, rsp):
     pid, realm_zone, dynamic, _ = key
     old = db.conn.execute("SELECT template,data,refresh FROM private_boxes WHERE player_id=? AND zone=? AND dynamic=? AND idx=?", key).fetchone()
     now = int(time.time())
+    data = None
     if old and old[1] and (not old[2] or old[2] > now):
         data = pb.TreasureBoxData.FromString(old[1])
-    else:
+        # Old releases saved aliased four-hour chests with refresh=0. Keep an
+        # unclaimed roll intact, and let an empty one spawn normally again.
+        if not dynamic and not old[2] and (duration := refresh_seconds(old[0])):
+            if data.rewards:
+                data.next_refresh_time = now + duration
+                db.conn.execute("UPDATE private_boxes SET data=?,refresh=? WHERE player_id=? AND zone=? AND dynamic=? AND idx=?",
+                                (data.SerializeToString(),data.next_refresh_time,*key))
+            else:
+                data = None
+    if data is None:
         if dynamic and not old:
             return pb.StatusCode_TREASURE_BOX_NOT_EXIST
         template = old[0] if old else template_at(session, idx)
@@ -100,10 +170,9 @@ def open_box(session, req, rsp):
             status = dungeon.open_box(session,req,rsp)
             if status != pb.StatusCode_OK:
                 return status
-        cfg = next((r for r in table("treasure_box") if r["i_d"] == template), {})
+        cfg = res.index("TreasureBox","treasure_box").get(template,{})
         data = pb.TreasureBoxData(index=idx,box_id=template,state=pb.TreasureBoxState_Open,type=cfg.get("new_treasure_box_type",0))
-        collect = next((r for r in table("collection_treasure_box") if r["i_d"] == template), {})
-        duration = (collect.get("refresh_time") or [0])[0]
+        duration = refresh_seconds(template)
         if not dynamic and duration > 0:
             data.next_refresh_time = now + duration
         for item in loot(session,template,dynamic):
@@ -146,9 +215,11 @@ def pickup(session, req, rsp):
 
 
 def fill_scene(session, data):
-    rows = db.conn.execute("SELECT data FROM private_boxes WHERE player_id=? AND zone=? AND dynamic=0 AND data IS NOT NULL AND (refresh=0 OR refresh>?)",
+    rows = db.conn.execute("SELECT template,refresh,claimed,data FROM private_boxes WHERE player_id=? AND zone=? AND dynamic=0 AND data IS NOT NULL AND (refresh=0 OR refresh>?)",
                            (session.player_id,zone(session),int(time.time())))
-    for (blob,) in rows:
+    for template,refresh,claimed,blob in rows:
+        if claimed and not refresh and refresh_seconds(template):
+            continue
         entry = data.treasure_boxes.add()
         entry.ParseFromString(blob)
         entry.next_refresh_time *= 1000

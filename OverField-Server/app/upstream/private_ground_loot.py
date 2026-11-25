@@ -117,6 +117,8 @@ def monster(session,req,rsp):
         return pb.StatusCode_OK
     from private_bless_tasks import record
     record(session,86)
+    from private_activity_fragments import grant
+    grant(session, 1101)
     if not session.realm_rules.ordinary_ground_drop_percent:
         return pb.StatusCode_OK
     from private_encounter_gifts import for_battle

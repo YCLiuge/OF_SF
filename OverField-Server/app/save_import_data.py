@@ -113,6 +113,56 @@ def source_gather_totals(snapshot, main):
     return [[scene,kind,count] for kind,count in sorted(totals.items())]
 
 
+def source_field_progress(snapshot, main):
+    scene, channel = numbers(main, ("scene_id", "channel_id"))
+    owner = integer(main.get("player_id"), 0xffffffff)
+    if not owner or not channel or scene in (0, 100, 9999):
+        return None
+    devices, challenges, collectibles, goals = {}, {}, {}, {}
+    riddles, ambiguous_devices = set(), set()
+    for notice in documents(snapshot, "SceneDataNotice"):
+        data = notice.get("data", {})
+        if (data.get("scene_id") != scene or data.get("channel_id") != channel or
+                sum(isinstance(p, dict) and p.get("player_id") == owner for p in data.get("players", ())) != 1):
+            ambiguous_devices.update(integer(a.get("area_id")) for a in data.get("areas", ()) if isinstance(a, dict))
+            continue
+        for area in data.get("areas", ()):
+            aid, state, level = numbers(area, ("area_id", "area_state", "level"))
+            if aid and state <= 1 and 0 < level <= 255:
+                devices[aid] = [aid, state, level]
+        for entry in data.get("riddles", ()):
+            key, state = numbers(entry, ("riddle_id", "state"))
+            if key and state == 1 and entry.get("is_win") is True:
+                riddles.add(key)
+        for entry in data.get("challenges", ()):
+            key, state, elapsed = numbers(entry, ("challenge_id", "state", "use_time"))
+            if key and state == 1 and elapsed:
+                challenges[key] = min(challenges.get(key, elapsed), elapsed)
+        for group in data.get("collections", ()):
+            kind = integer(group.get("type"))
+            entries = group.get("item_map", {})
+            if not 1 <= kind <= 6 or not isinstance(entries, dict):
+                continue
+            for key, entry in entries.items():
+                if not isinstance(entry, dict):
+                    continue
+                item, status = numbers(entry, ("item_id", "status"))
+                if item and str(item) == str(key) and status <= 1:
+                    collectibles[kind, item] = max(status, collectibles.get((kind, item), 0))
+    for reply in documents(snapshot, "AreaAchieveListRsp"):
+        aid = integer(reply.get("area_id"))
+        if aid in devices and aid not in ambiguous_devices:
+            for entry in reply.get("achieves", ()):
+                goal, count = numbers(entry, ("achieve_id", "count"))
+                if goal and count:
+                    goals[aid, goal] = max(count, goals.get((aid, goal), 0))
+    if any((devices, challenges, riddles, collectibles, goals)):
+        return {"scene":scene, "devices":[devices[k] for k in sorted(devices)], "riddles":sorted(riddles),
+                "challenges":[[k, v] for k, v in sorted(challenges.items())],
+                "collectibles":[[k[0], k[1], v] for k, v in sorted(collectibles.items())],
+                "goals":[[k[0], k[1], v] for k, v in sorted(goals.items())]}
+
+
 def project(snapshot):
     if not isinstance(snapshot,dict) or snapshot.get("format")!="overfield-snapshot/1":
         raise BackupFormatError("请选择全进度工具导出的 snapshot.json 或完整 ZIP。")
@@ -128,6 +178,10 @@ def project(snapshot):
     active_head=integer(main.get("head"))
     if active_head:
         data["head"]=active_head
+    from save_import_pets import project as project_pets
+    pets=project_pets(snapshot,main)
+    if pets:
+        data["pets"]=pets
     identity = projected_identity(snapshot)
     if identity:
         data["identity"] = identity
@@ -135,6 +189,8 @@ def project(snapshot):
     if location:data["progress_location"]=location
     gathered = source_gather_totals(snapshot,main)
     if gathered:data["gather_totals"]=gathered
+    field = source_field_progress(snapshot, main)
+    if field:data["field_progress"] = field
     for h in main.get("characters",[]):
         core=numbers(h,("character_id","level","max_level","exp","star"))
         skills=[numbers(s,("skill_id","skill_level")) for s in h.get("character_skill_list",[])]

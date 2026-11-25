@@ -11,6 +11,7 @@ from private_equipment import load
 from proto import net_pb2 as pb
 from utils import db
 from utils.pb_create import make_item
+from utils.res_loader import res
 
 
 def capacity(pid):
@@ -19,6 +20,26 @@ def capacity(pid):
     limit = int(globals_["PetBagMax"]["values"][0])
     row = db.conn.execute("SELECT v FROM player_kv WHERE player_id=? AND ns='pet_bag' AND k='capacity'", (pid,)).fetchone()
     return min(limit, max(initial, int(row[0]))) if row else initial
+
+
+def owned_pets(pid):
+    for (blob,) in db.conn.execute("SELECT item_detail_blob FROM items_s WHERE player_id=? ORDER BY instance_id",(pid,)):
+        item = pb.ItemDetail.FromString(blob).main_item
+        if item.HasField("pet"):
+            yield item.pet
+
+
+def page(session, req, rsp):
+    if req.end_index and req.start_index>req.end_index:
+        return pb.StatusCode_BAD_REQ
+    total = 0
+    for index,pet in enumerate(owned_pets(session.player_id)):
+        if index>=req.start_index and (not req.end_index or index<req.end_index):
+            rsp.pets.add().CopyFrom(pet)
+        total = index+1
+    rsp.total_num = total
+    rsp.end_index = min(req.start_index,total)+len(rsp.pets)
+    return pb.StatusCode_OK
 
 
 def update_scene(session):
@@ -70,10 +91,10 @@ def change(session, req, rsp):
 
 def capture(session, req, rsp):
     pid = session.player_id
-    source = next((r for r in _table("Pet", "pet").values() if r["monster_i_d"] == req.monster_id), None)
-    tool = next((r for r in _table("Expression","catcher").values() if r["need_item_i_d"] == req.catcher_id), None)
+    species = res["PetCaptureMonsters"]["monsters"].get(str(req.monster_id))
+    tool = _table("Expression", "catcher", "need_item_i_d").get(req.catcher_id)
     item = _table("Item", "item").get(req.catcher_id, {})
-    if not source or not tool or item.get("new_bag_item_tag") != pb.EBagItemTag_Catcher or not 0 < req.hp <= req.max_hp:
+    if not species or not tool or item.get("new_bag_item_tag") != pb.EBagItemTag_Catcher or not 0 < req.hp <= req.max_hp:
         return pb.StatusCode_BAD_REQ
     # The original sends the current region when one exists. A missing optional region is zero.
     if req.catch_area_id and not any(r["area_i_d"] == req.catch_area_id for r in
@@ -81,9 +102,8 @@ def capture(session, req, rsp):
         return pb.StatusCode_BAD_REQ
     if _table("Scene","scene").get(session.scene_id,{}).get("new_scene_type") != 1:
         return pb.StatusCode_BAD_REQ
-    count = sum(pb.ItemDetail.FromString(row[0]).main_item.HasField("pet") for row in
-                db.conn.execute("SELECT item_detail_blob FROM items_s WHERE player_id=?", (pid,)))
-    if count >= capacity(pid):
+    limit = capacity(pid)
+    if any(index>=limit for index,_ in enumerate(owned_pets(pid),1)):
         return pb.StatusCode_PET_GRID_FULL
     costs, status = payments(pid, {req.catcher_id:tool["need_item_count"]})
     if costs is None:
@@ -94,7 +114,7 @@ def capture(session, req, rsp):
         return pb.StatusCode_CFG_NOT_FOUND
     rsp.success = req.catcher_id == 200100007 or random.random() < Config.PET_CATCH_RATES[quality - 1]
     if rsp.success:
-        new = make_item(source["i_d"], 1, pid)
+        new = make_item(species, 1, pid)
         pet = new.main_item.pet
         if db.get_item_detail(pid, instance_id=pet.instance_id):
             max_id, = db.conn.execute("SELECT max(instance_id) FROM items_s WHERE player_id=?", (pid,)).fetchone()
