@@ -68,7 +68,7 @@ python tools/benchmark_game_connections.py --server OverField-Server --clients 3
 python tools/benchmark_item_templates.py --server OverField-Server --rounds 3
 ```
 
-同机回环的八角色测试连续执行 160 次请求，原版和新版响应摘要及八份最终存档相同。八人断开到全部连接名额可复用，从 511–514 ms 降到 2.25–4.15 ms。32 人的 384 次实际写入中，P95 请求往返 26.80 ms，等候服务锁 24.98 ms，SQLite 提交 0.41 ms。服主可停服后用 `rules --game-connections 32` 设置准入上限，默认 24，可设 1–512。该上限不能用作实测公网容量。
+同机回环的八角色测试连续执行 160 次请求，原版和新版响应摘要及八份最终存档相同。八人断开到全部连接名额可复用，从 511–514 ms 降到 2.25–4.15 ms。32 人的 384 次实际写入中，P95 请求往返 26.80 ms，等候服务锁 24.98 ms，SQLite 提交 0.41 ms。服主可停服后用 `rules --game-connections 32` 设置准入上限，默认 96，可设 1–512，也支持通过管理台在线调整。该上限不能用作实测公网容量。
 
 11,483 个模板逐个创建的三轮耗时中位数从 2.42 s 降到 0.08 s，批量生成维持在约 0.08 s。两条路径分别与各自旧版的完整 Protobuf 序列摘要一致。索引保存静态表，余额、角色、实例编号继续从当前区服读取。
 
