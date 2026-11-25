@@ -5,6 +5,7 @@ import json
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Callable
 
 from local_identity import SLOT,TICKET
 from remote_realm import RemoteRealm,REALM
@@ -15,6 +16,7 @@ from ssh_game_channel import SshChannels,port_value
 class RemoteLogin:
     slot:str
     ticket:str
+    on_disconnect:Callable[[],None] | None=None
 
 
 class RemotePassword:
@@ -63,5 +65,8 @@ class RemotePassword:
         # Each authenticated slot gets its own archive namespace and gameplay session.
         realm=RemoteRealm(self.identity,{"slot":login.slot,"profile_key":None},self.channels,self.http_port,self.game_port,None,False)
         with realm.connect(login.slot,account_ticket=login.ticket) as player:
-            yield player
-
+            try:
+                yield player
+            finally:
+                if login.on_disconnect and player.resume_needed:
+                    login.on_disconnect()

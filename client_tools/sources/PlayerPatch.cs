@@ -40,7 +40,7 @@ namespace OfSfPlayer {
                 if(dialog.ShowDialog(this)==DialogResult.OK)box.Text=dialog.SelectedPath;
             }
         }
-        internal PlayerWindow(bool selectRealm){
+        internal PlayerWindow(bool selectRealm,bool reconnect=false){
             picker=selectRealm;Text="OF_SF · 玩家补丁";StartPosition=FormStartPosition.CenterScreen;
             Font=new Font("Microsoft YaHei UI",9);AutoScaleMode=AutoScaleMode.Dpi;
             ClientSize=new Size(740,540);MinimumSize=new Size(630,525);Controls.Add(grid);
@@ -48,7 +48,7 @@ namespace OfSfPlayer {
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,95));
             foreach(var h in new[]{36,32,32,32,32,32,32,32,32,40,26})grid.RowStyles.Add(new RowStyle(SizeType.Absolute,h));
             grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            var title=Label("连接 OF_SF 区服");title.Font=new Font(Font.FontFamily,15,FontStyle.Bold);Span(title,0);
+            var title=Label(reconnect?"连接已中断，请重新登录当前区服":"连接 OF_SF 区服");title.Font=new Font(Font.FontFamily,15,FontStyle.Bold);Span(title,0);
             Field("TapTap 游戏目录",source,1);ButtonAt("浏览…",1,delegate{Browse(source);});
             Field("工作位置",work,2);ButtonAt("浏览…",2,delegate{Browse(work);});
             Field("当前区服",servers,3);
@@ -62,11 +62,11 @@ namespace OfSfPlayer {
             Field("游戏名（可选）",nickname,8);nickname.Enabled=false;grid.SetColumnSpan(nickname,2);
             register.CheckedChanged+=delegate{nickname.Enabled=register.Checked;};
             var buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=false};
-            Add(buttons,picker?"应用并重启":"进入游戏",delegate{Run("play");});
+            Add(buttons,reconnect?"重新登录并进入游戏":picker?"应用并重启":"进入游戏",delegate{Run("play");});
             Add(buttons,"首次进游戏前导入存档",delegate{Run("import");});
             Add(buttons,"测试连接",delegate{Run("test");});
             Add(buttons,"清除补丁数据",delegate{Run("uninstall");});Span(buttons,9);
-            Span(Label("有角色备份？请先创建本区账号并导入存档，再进入游戏。已有账号可直接登录。"),10);Span(output,11);
+            Span(Label(reconnect?"输入本区账号和密码后，补丁会正常重开当前私服游戏窗口。可关闭此页，稍后从补丁登录。":"有角色备份？请先创建本区账号并导入存档，再进入游戏。已有账号可直接登录。"),10);Span(output,11);
             FormClosing+=delegate(object s,FormClosingEventArgs e){if(busy)e.Cancel=true;};
             servers.SelectedIndexChanged+=delegate{UpdateConnectionStatus();};
             servers.SelectionChangeCommitted+=delegate{SaveSelectedRealm();};
@@ -210,7 +210,8 @@ namespace OfSfPlayer {
     internal static class PlayerProgram {
         [STAThread] static void Main(string[] args){
             Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-            using(var page=new PlayerWindow(Array.IndexOf(args,"--realm-picker")>=0)){
+            bool reconnect=Array.IndexOf(args,"--reconnect")>=0;
+            using(var page=new PlayerWindow(reconnect || Array.IndexOf(args,"--realm-picker")>=0,reconnect)){
                 if(Array.IndexOf(args,"--check-ui")>=0){
                     var windowHandle=page.Handle;
                     Environment.ExitCode=(page.ValidControls() && OfSfImport.ImportWindow.CheckLayout())?0:2;

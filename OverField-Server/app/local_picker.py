@@ -91,14 +91,14 @@ class LocalPicker:
         finally:
             k.CloseHandle(proc)
 
-    def enter(self, connection):
+    def enter(self, connection, *, reconnect=False):
         # This action is bound to one fixed binary installed beside this player's client.
         with self.lock:
             if self.child is not None and self.child.poll() is None:
                 return True
             if not self.player_is_foreground(connection):
                 return False
-            self.child = subprocess.Popen([str(self.executable),"--realm-picker"],cwd=self.executable.parent,
+            flag = "--reconnect" if reconnect else "--realm-picker"
+            self.child = subprocess.Popen([str(self.executable),flag],cwd=self.executable.parent,
                     stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,close_fds=True)
             return True
-

@@ -58,9 +58,15 @@ class FriendsProbe {
         var info=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(args[1]));
         var host=new Uri((string)info["endpoint"]).Host;
         string mode=args[2];
-        foreach(bool picker in new[]{false,true}){
-            using(var w=(Form)Activator.CreateInstance(type,Private,null,new object[]{picker},null)){
+        foreach(string view in new[]{"login","picker","reconnect"}){
+            bool reconnect=view=="reconnect", picker=view!="login";
+            using(var w=(Form)Activator.CreateInstance(type,Private,null,new object[]{picker,reconnect},null)){
                 w.ShowInTaskbar=false; w.Opacity=0; w.Show();
+                if(reconnect){
+                    bool found=false;
+                    foreach(var item in All(w))if(item.Text=="连接已中断，请重新登录当前区服")found=true;
+                    Check(found,"Reconnect window omitted the reason for signing in again");
+                }
                 var opts=Field<ComboBox>(w,"servers");
                 foreach(string n in new[]{"account","password","nickname"})Check(Field<TextBox>(w,n).Text=="","Unexpected saved player");
                 if(!picker && mode!="existing"){

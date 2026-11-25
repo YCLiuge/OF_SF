@@ -169,6 +169,7 @@ class RemotePlayer:
         self.stream=stream
         self.slot=slot
         self.player_id=player_id
+        self.resume_needed=False
 
     def play(self,client,host):
         stream=self.stream
@@ -200,6 +201,7 @@ class RemotePlayer:
             raise ValueError("Remote private player login rejected")
         login.DiscardUnknownFields()
         client.sendall(encode(h.msg_id,login.SerializeToString(),h.packet_id))
+        self.resume_needed=True
         client.settimeout(120)
         stream.settimeout(120)
         social=SocialGameFields()
@@ -260,6 +262,8 @@ class RemotePlayer:
                     rejected=getattr(pb,name)(status=pb.StatusCode_BAD_REQ)
                     send_client(getattr(MsgId,name),rejected.SerializeToString(),head.packet_id)
                     continue
+                if head.msg_id==MsgId.PlayerOfflineReq:
+                    self.resume_needed=False
                 stream.sendall(encode(head.msg_id,msg.SerializeToString(),head.packet_id))
         finally:
             shutdown(stream)

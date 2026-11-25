@@ -1,6 +1,7 @@
 """A remote password account plays its own role over an authenticated private game transport."""
 import argparse
 from contextlib import closing,contextmanager
+from dataclasses import replace
 import os
 from pathlib import Path
 import socket
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import time
 from tempfile import TemporaryDirectory
+from threading import Event
 from unittest.mock import patch
 
 from local_game_service import LocalGameService,pb,MsgId
@@ -69,7 +71,8 @@ def run(root,resources):
                 grant=proxy.reserve(proof["slot"],proof["ticket"])
                 assert submit("launch",{"slot":proof["slot"],"ticket":proof["ticket"]})[0]==401
                 assert submit("launch",{"slot":proof["slot"],"ticket":grant.ticket})[0]==401
-                seats.grant=grant
+                disconnected=Event()
+                seats.grant=replace(grant,on_disconnect=disconnected.set)
                 with socket.create_connection(("127.0.0.1",game.port),timeout=5) as c:
                     c.sendall(encode(MsgId.VerifyLoginTokenReq,pb.VerifyLoginTokenReq(sdk_uid="development-uid",login_token="development-proof").SerializeToString(),1))
                     h,b=receive(c)
@@ -79,6 +82,10 @@ def run(root,resources):
                     assert pb.PlayerLoginRsp.FromString(b).player_name==payload["nickname"]
                     main,scene=join(c)
                     assert main.player_name==payload["nickname"] and main.player_id==1000000+index
+                    if index==2:
+                        from test_native_gacha import call
+                        assert call(c,"PlayerOffline",19).status==pb.StatusCode_OK
+                assert disconnected.wait(0.5 if index==2 else 4)==(index==1)
                 assert seats.grant is None
             with closing(sqlite3.connect(front/"game.sqlite")) as db:
                 assert not db.execute("SELECT player_id FROM private_slots").fetchall()
@@ -93,4 +100,3 @@ def run(root,resources):
 if __name__=="__main__":
     p=argparse.ArgumentParser();p.add_argument("--resources",type=Path,required=True)
     with TemporaryDirectory() as tmp:run(Path(tmp),p.parse_args().resources)
-

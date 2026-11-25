@@ -1,6 +1,8 @@
 """Local Windows handoff between the private account launcher and its own direct Unity child."""
 import ctypes
 from ctypes import wintypes as w
+from dataclasses import replace
+from functools import partial
 import ipaddress
 import os
 from pathlib import Path
@@ -77,6 +79,9 @@ class NativeAccountSeats:
         self.lock=threading.Lock()
         self.pending={}
         self.remote=None
+        self.picker=None
+        self.last_owner=None
+        self.disconnected_owner=None
 
     @classmethod
     def configured(cls,identity,bind):
@@ -88,7 +93,12 @@ class NativeAccountSeats:
         path=exe.resolve(strict=True)
         if path.name.lower()!="launcher.exe" or not (path.parent/".of-private-client.json").is_file():
             raise ValueError("Choose the prepared private game executable")
-        return cls(identity,path)
+        seats=cls(identity,path)
+        from local_picker import LocalPicker
+        picker=LocalPicker.configured(path.parent,os.environ.get("OF_DISPATCH_URL",""))
+        if picker and picker.executable.name=="OF_SF 玩家补丁.exe":
+            seats.picker=picker
+        return seats
 
     def attach(self,sock,body):
         required={"ticket","pid","slot"} if self.remote else {"ticket","pid"}
@@ -113,6 +123,7 @@ class NativeAccountSeats:
                         if not db.execute("SELECT 1 FROM realm_accounts WHERE slot=?",(slot,)).fetchone():
                             raise ValueError("Not a password account")
                 self.pending[pid]=(born,slot,now+300)
+                self.last_owner=self.disconnected_owner=None
         except (ValueError,OSError):
             raise AccountError(403,"invalid_native_handoff") from None
 
@@ -122,7 +133,20 @@ class NativeAccountSeats:
         with self.lock:
             entry=self.pending.get(pid)
             if not entry or exe!=self.client or born!=entry[0] or entry[2]<=time.monotonic():
+                if self.picker and exe==self.client and self.disconnected_owner==(pid,born):
+                    try:
+                        if self.picker.enter(sock,reconnect=True):
+                            self.disconnected_owner=None
+                    except OSError:
+                        pass
                 raise ValueError("No matching private account launch")
             del self.pending[pid]
+            if self.remote and self.picker:
+                self.last_owner=(pid,born)
+                return replace(entry[1],on_disconnect=partial(self._disconnected,self.last_owner))
             return entry[1]
 
+    def _disconnected(self,owner):
+        with self.lock:
+            if self.last_owner==owner:
+                self.disconnected_owner=owner

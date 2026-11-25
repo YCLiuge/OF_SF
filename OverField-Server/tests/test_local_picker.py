@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import time
 from tempfile import TemporaryDirectory
 import unittest
 from types import SimpleNamespace
@@ -12,11 +13,43 @@ from urllib.parse import urlsplit
 
 from game_dispatch import GameDispatch
 from local_picker import LABEL, LocalPicker
+from native_account_seats import NativeAccountSeats
+from remote_password import RemoteLogin
 from ssh_game_channel import valid_target
 from test_game_dispatch import http, listening
 
 
 class EditorTests(TestCase):
+    def test_disconnected_player_is_offered_password_login_once(self):
+        client=Path("launcher.exe")
+        seats=NativeAccountSeats(None,client)
+        seats.picker=LocalPicker("test-patch.exe")
+        seats.remote=object()
+        seats.pending[21]=(73,RemoteLogin("private-slot","one-use-ticket"),time.monotonic()+300)
+        owner=[21,73]
+        foreground=[False]
+        with patch("native_account_seats.connection_pid",side_effect=lambda _:owner[0]), \
+             patch("native_account_seats.process_info",side_effect=lambda _: (client,7,owner[1])), \
+             patch.object(seats.picker,"player_is_foreground",side_effect=lambda _:foreground[0]), \
+             patch("local_picker.subprocess.Popen") as opener:
+            grant=seats.claim(None)
+            self.assertEqual(grant.ticket,"one-use-ticket")
+            with self.assertRaises(ValueError):
+                seats.claim(None)
+            opener.assert_not_called()
+            grant.on_disconnect()
+            for candidate in ([22,73],[21,74],[21,73]):
+                owner[:]=candidate
+                with self.assertRaises(ValueError):
+                    seats.claim(None)
+            opener.assert_not_called()
+            foreground[0]=True
+            for _ in range(3):
+                with self.assertRaises(ValueError):
+                    seats.claim(None)
+            opener.assert_called_once()
+            self.assertEqual(opener.call_args.args[0],["test-patch.exe","--reconnect"])
+
     def test_native_list_and_activation(self):
         realm=GameDispatch("http://127.0.0.1:18881","127.0.0.1",11033)
         p=LocalPicker("No-real-UI.exe")
@@ -105,4 +138,3 @@ class EditorTests(TestCase):
 
 if __name__=="__main__":
     main()
-

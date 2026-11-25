@@ -55,6 +55,7 @@ def inside(root, temp):
     if os.name=="nt":
         assert subprocess.run([str(root/patch.EXE),"--check-ui"],check=False,timeout=12).returncode==0
         assert subprocess.run([str(root/patch.EXE),"--realm-picker","--check-ui"],check=False,timeout=12).returncode==0
+        assert subprocess.run([str(root/patch.EXE),"--reconnect","--check-ui"],check=False,timeout=12).returncode==0
     for bad in ("http://127.0.0.1:18443","https://user@host","https://host/x","https://host:0","https://host?x=1"):
         try:player_address(bad)
         except ValueError:pass
