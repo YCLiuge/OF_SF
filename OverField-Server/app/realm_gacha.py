@@ -3,6 +3,7 @@ from functools import lru_cache
 import json
 from pathlib import Path
 
+from config_revision import check
 from local_identity import LocalIdentity
 from state_lock import exclusive_state
 
@@ -101,7 +102,7 @@ def upgrade(conn, prefix=""):
                              (json.dumps(current,separators=(",",":")),))
 
 
-def configure(state, settings=None, *, enable_featured=None):
+def configure(state, settings=None, *, enable_featured=None, expected=None):
     if settings is not None:
         validate(settings)
     with exclusive_state(state, purpose="profiles") as root:
@@ -110,6 +111,7 @@ def configure(state, settings=None, *, enable_featured=None):
             upgrade(conn)
             stored = conn.execute("SELECT settings FROM private_gacha_config WHERE id=1").fetchone()
             current = json.loads(stored[0]) if stored else defaults()
+            check(current, expected)
             if enable_featured is not None:
                 template = featured_pool(enable_featured)
                 match = next((p for p in current["pools"] if p["id"] == enable_featured), None)

@@ -13,6 +13,7 @@ from tempfile import NamedTemporaryFile
 from threading import Lock
 from weakref import WeakValueDictionary
 import time
+import warnings
 from state_lock import exclusive_state, is_link_or_reparse
 import notice_images
 
@@ -163,6 +164,32 @@ class Maintenance:
         self.blobs=self.data/"release-files"
         with closing(sqlite3.connect(self.dbfile)) as db, db:
             for sql in SCHEMA:db.execute(sql)
+        self._migrate_jpeg_notices()
+
+    def _migrate_jpeg_notices(self):
+        with closing(sqlite3.connect(self.dbfile)) as db:
+            # Decode without holding a write lock, and retain ordering and timestamps.
+            digests = [r[0] for r in db.execute("SELECT digest FROM realm_notice_assets WHERE mime='image/jpeg'")]
+            for digest in digests:
+                row = db.execute("SELECT data FROM realm_notice_assets WHERE digest=?", (digest,)).fetchone()
+                if row is None:
+                    continue
+                try:
+                    desc, data = notice_images.publish_image(row[0])
+                    if desc["mime"] != "image/png" or hashlib.sha256(row[0]).hexdigest() != digest:
+                        raise ValueError("Stored notice image failed verification")
+                except (OSError, ValueError) as exc:
+                    # A broken legacy attachment must not take the game server offline.
+                    warnings.warn(f"Could not migrate notice image {digest}: {exc}", RuntimeWarning)
+                    continue
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    if not db.execute("SELECT 1 FROM realm_notice_images WHERE digest=? LIMIT 1", (digest,)).fetchone():
+                        continue
+                    db.execute("INSERT OR IGNORE INTO realm_notice_assets VALUES(?,?,?,?,?)",
+                               (desc["sha256"], desc["mime"], desc["width"], desc["height"], data))
+                    db.execute("UPDATE realm_notice_images SET digest=? WHERE digest=?", (desc["sha256"], digest))
+                    db.execute("DELETE FROM realm_notice_assets WHERE digest=?", (digest,))
 
     def plaza(self):
         with closing(sqlite3.connect(self.dbfile)) as db:

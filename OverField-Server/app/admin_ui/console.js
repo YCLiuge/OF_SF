@@ -1,16 +1,19 @@
+import {editorFor} from './editors.js';
 const el = id => document.getElementById(id);
 const groups = {
-  realm:'区服', maintenance:'运营概览', notice:'公告', release:'版本', events:'活动', plaza:'海上舞台',
+  capacity:'连接容量', realm:'区服', maintenance:'运营概览', notice:'公告', release:'版本', events:'活动', plaza:'海上舞台',
   gacha:'招募', blessings:'祈愿树', rules:'玩法规则', codes:'兑换码', reports:'举报', photos:'照片墙', state:'备份'
 };
 const actions = {list:'列表', get:'查看配置', set:'修改配置', catalog:'内容目录', edit:'编辑', issue:'创建', publish:'发布',
-  withdraw:'撤回', enable:'开启卡池', resolve:'标记已处理', backup:'备份存档', restore:'还原存档', status:'运行状态', stop:'正常停服'};
+  withdraw:'撤回', enable:'开启卡池', resolve:'标记已处理', backup:'备份存档', restore:'还原存档', schedule:'预设下次启动', status:'运行状态', stop:'正常停服'};
 const labels = {id:'编号',file:'服务器上的文件路径',archive:'服务器上的备份路径',title:'标题',body:'正文',images:'服务器上的图片路径',
   version:'版本号',notes:'更新说明',sha256:'SHA-256',limit:'每页条数',before:'上一页最后一项编号',enabled:'启用',
   code:'兑换码或分享码',quota:'总名额',kind:'类型',rewards:'奖励',expires_at:'到期时间',trees:'祈愿树排期',pools:'卡池配置',
   resolved:'已处理',events:'活动配置',stages:'舞台配置'};
 const lifecycle = {running:'运行中',stopping:'正在停服',stopped:'已停服',busy:'维护中',uninitialized:'尚未初始化',stale:'上次退出异常'};
 let token = '', operations = {}, selected = '', session = 0, busy = false;
+const forms = new Set(['events.set','plaza.set','blessings.set','gacha.set','rules.schedule']);
+let editor = null, selectionVersion = 0;
 const message = value => { el('status').textContent = value; };
 function node(tag, text) {
   const item = document.createElement(tag);
@@ -18,16 +21,33 @@ function node(tag, text) {
   return item;
 }
 function displayName(name) {
+  const names={'events.set':'活动排期','plaza.set':'舞台与活动入口','blessings.set':'祈愿树排期','gacha.set':'招募池与概率','rules.schedule':'预设玩法参数','capacity.set':'调整连接上限'};
+  if(names[name])return names[name];
   const [group, action] = name.split('.');
   return (groups[group] || group) + ' · ' + (actions[action] || action);
 }
-async function request(path, method = 'GET', payload) {
+async function request(path, method = 'GET', payload, options = {}) {
   const headers = {Authorization: 'Bearer ' + token};
+  if (options.tag) headers['If-Match'] = options.tag;
   if (payload !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, {method, headers, body: payload, credentials:'omit', cache:'no-store'});
   const body = await response.json();
-  if (!response.ok || !body.ok) throw Error(body.error?.message || 'HTTP ' + response.status);
-  return body.result;
+  if (!response.ok || !body.ok) {
+    const raw=body.error?.message;
+    const friendly={
+      'Cannot open before the native calendar':'活动开始时间不能早于原排期。',
+      'Cannot close after the native calendar':'活动结束时间不能晚于原排期。',
+      'Activity window is empty':'请检查活动的起止时间。',
+      'Empty blessing tree window':'祈愿树结束时间须在开始时间之后。',
+      'Plaza opening must precede closing':'海上舞台的结束时间须晚于开始时间。',
+      'Choose one edition of the courtyard dialogue':'幽冥庭院的首期与复刻共用剧情，请选择其中一期。',
+      'Choose one photo competition at a time':'同一舞台排期只能安排一场摄影比赛。',
+      'Choose one battle pass season at a time':'同一舞台排期只能选择一期通行证。',
+      'Reward weights must be integer basis points totaling 10000':'奖励组使用整数万分比，合计须为 10000。'
+    };
+    throw Error(friendly[raw] || raw || 'HTTP ' + response.status);
+  }
+  return options.snapshot ? {data:body.result,tag:response.headers.get('ETag')} : body.result;
 }
 class RealmOverview extends HTMLElement {
   connectedCallback() {
@@ -35,19 +55,25 @@ class RealmOverview extends HTMLElement {
     refresh.className = 'quiet light'; refresh.type = 'button'; refresh.onclick = () => this.refresh();
     head.append(node('h2','区服概况'),refresh);
     this.values = []; const row = node('div'); row.className = 'metrics';
-    for (const title of ['服务状态','注册账号','游戏角色']) {
+    for (const title of ['服务状态','注册账号','游戏角色','在线连接 / 上限']) {
       const cell = node('div'), value = node('b','—');
       cell.append(node('span', title), value); row.append(cell); this.values.push(value);
     }
-    this.button = refresh; this.replaceChildren(head, row);
+    const edit = node('button','调整上限'); edit.type='button'; edit.className='quiet light';
+    edit.onclick=()=>select('capacity.set'); this.capacityEdit=edit; edit.hidden=true;
+    this.button = refresh; this.replaceChildren(head,row,edit);
   }
   reset() { this.values.forEach(field => field.textContent = '—'); this.button.disabled = false; }
   async refresh() {
     const epoch = session; this.button.disabled = true;
     try {
-      const data = await request('/admin/v1/operations/realm.status');
+      const hasCapacity=Object.hasOwn(operations,'capacity.get');
+      const [data,capacity]=await Promise.all([request('/admin/v1/operations/realm.status'),
+        hasCapacity?request('/admin/v1/operations/capacity.get'):null]);
+      this.capacityEdit.hidden=!Object.hasOwn(operations,'capacity.set');
+      this.currentLimit=capacity?.limit;
       if (epoch !== session) return;
-      [lifecycle[data.lifecycle] || data.lifecycle, data.accounts, data.characters].forEach((value,index) => {
+      [lifecycle[data.lifecycle] || data.lifecycle, data.accounts, data.characters, capacity?String(capacity.used ?? '—')+' / '+capacity.limit:'—'].forEach((value,index) => {
         this.values[index].textContent = value ?? '—';
       });
     } catch(error) { if (epoch === session) message(error.message); }
@@ -100,8 +126,12 @@ function field(key, spec, required) {
   }
   return wrap;
 }
-function select(name) {
-  selected = name; const op = operations[name], schema = op.inputSchema;
+function select(name,force=false) {
+  if (!force && editor?.dirty && !window.confirm('离开将放弃未保存的修改。继续？')) return;
+  const version=++selectionVersion; editor=null;
+  selected = name;
+  for(const b of el('quick').children)b.setAttribute('aria-current',String(b.dataset.route===name));
+  const op = operations[name], schema = op.inputSchema;
   el('title').textContent = displayName(name); el('route').textContent = name;
   el('description').textContent = op.availability === 'stopped' ? '请在正常停服后通过服主 CLI 执行此操作。' : (/[\u3400-\u9fff]/.test(op.description) ? op.description : '');
   el('mode').textContent = op.readOnly ? '只读' : op.availability === 'stopped' ? '停服操作' : '更改区服';
@@ -110,6 +140,34 @@ function select(name) {
   el('output').hidden = true; el('result').textContent = '';
   el('execute').textContent = op.readOnly ? '查询' : op.availability === 'stopped' ? '请通过 CLI 执行' : displayName(name);
   el('execute').disabled = busy || op.availability === 'stopped'; message(''); navigation();
+  if (forms.has(name)) openEditor(name,version);
+  if (name==='capacity.set') {
+    const limit=el('field-limit'); limit.type='number'; limit.min='1'; limit.max='512';limit.step='1';
+    limit.labels[0].textContent='最大同时连接数（1–512）'; if(overview.currentLimit)limit.value=overview.currentLimit;
+  }
+}
+async function openEditor(name,version) {
+  const group=name.split('.')[0], fields=el('fields'), save=el('execute');
+  fields.replaceChildren(node('p','正在读取区服配置…')); save.textContent='保存配置'; save.disabled=true;
+  try {
+    const route='/admin/v1/operations/'+group+'.';
+    const [snapshot,catalog]=await Promise.all([request(route+'get','GET',undefined,{snapshot:true}),
+      group==='rules'?null:request(route+'catalog')]);
+    if (selectionVersion!==version) return;
+    if (!snapshot.tag) throw Error('当前服务端未提供配置版本，请更新管理台服务。');
+    const entry=editorFor(group,operations[name].inputSchema,catalog,snapshot.data,()=>{
+      editor.dirty=true; save.disabled=false; el('editor-feedback').textContent='有未保存的修改';
+    });
+    editor={...entry,tag:snapshot.tag,dirty:false};
+    const reload=node('button','重新读取区服配置');reload.type='button';reload.className='quiet light';
+    reload.onclick=()=>select(name);
+    const messageBox=node('p');messageBox.id='editor-feedback';messageBox.setAttribute('role','status');
+    messageBox.setAttribute('aria-live','polite');fields.replaceChildren(entry.host,reload,messageBox);
+  } catch(error) {
+    if(selectionVersion!==version)return;
+    const retry=node('button','重试');retry.type='button';retry.onclick=()=>select(name,true);
+    fields.replaceChildren(node('p',error.message),retry);
+  }
 }
 function collect() {
   const encoded = [], query = new URLSearchParams();
@@ -137,11 +195,17 @@ el('login').onsubmit = async event => {
     if (epoch !== session) return;
     operations = spec.operations; el('token').value = ''; el('connect').hidden = true;
     el('workspace').hidden = false; el('logout').hidden = false;
-    select(operations['realm.status'] ? 'realm.status' : Object.keys(operations)[0]); overview.refresh();
+    const quick=el('quick');quick.replaceChildren();
+    for (const key of forms) {
+      if (!operations[key])continue;
+      const btn=node('button',displayName(key));btn.type='button';btn.dataset.route=key;
+      btn.onclick=()=>select(key);quick.append(btn);
+    }
+    select(operations['events.set']?'events.set':Object.keys(operations)[0]); overview.refresh();
   } catch(error) { if (epoch === session) {token = ''; message(error.message);} }
 };
 el('logout').onclick = () => {
-  ++session; token = ''; operations = {}; selected = ''; busy = false;
+  ++session; ++selectionVersion; editor=null; token = ''; operations = {}; selected = ''; busy = false;
   el('filter').value = ''; el('token').value = '';
   for (const id of ['schema','result','fields','operations']) el(id).replaceChildren();
   overview.reset(); el('workspace').hidden = true; el('logout').hidden = true;
@@ -151,13 +215,39 @@ el('filter').oninput = navigation;
 el('operation').onsubmit = async event => {
   event.preventDefault(); const name = selected, epoch = session, op = operations[name];
   if (busy || !op || op.availability === 'stopped') return;
+  const version=selectionVersion;
+  if(forms.has(name)) {
+    const target=editor;
+    if(!target?.dirty)return;
+    try {
+      const body=target.values();
+      if (name==='rules.schedule' && Object.keys(body).length===0) {
+        target.dirty=false;el('execute').disabled=true;el('editor-feedback').textContent='没有待保存的修改';return;
+      }
+      busy=true;el('execute').disabled=true;el('fields').inert=true;
+      const route='/admin/v1/operations/'+name;
+      await request(route,'POST',JSON.stringify(body),{tag:target.tag});
+      target.dirty=false;
+      if(version!==selectionVersion)return;
+      await openEditor(name,version);
+      if(version===selectionVersion && el('editor-feedback'))el('editor-feedback').textContent='已保存，并已从区服重新读取。';
+    } catch(error) {
+      if(version===selectionVersion) el('editor-feedback').textContent=error.message;
+    } finally {
+      if(epoch===session)busy=false;
+      el('fields').inert=false;
+      if(version===selectionVersion)el('execute').disabled=!editor?.dirty;
+    }
+    return;
+  }
   try {
     const {body,query} = collect();
     if (!op.readOnly && !window.confirm('确认执行「' + displayName(name) + '」？')) return;
     busy = true; el('execute').disabled = true; message('');
     const path = '/admin/v1/operations/' + name + (op.readOnly && query ? '?' + query : '');
     const result = await request(path, op.readOnly ? 'GET' : 'POST', op.readOnly ? undefined : body);
+    if (name==='capacity.set' && epoch===session)await overview.refresh();
     if (epoch === session && selected === name) {el('output').hidden = false; el('result').textContent = JSON.stringify(result,null,2);}
   } catch(error) { if (epoch === session) message(error.message); }
-  finally { if (epoch === session) {busy = false; el('execute').disabled = operations[selected].availability === 'stopped';} }
+  finally { if (epoch === session) {busy = false; el('execute').disabled = operations[selected].availability === 'stopped' || (forms.has(selected) && !editor?.dirty);} }
 };

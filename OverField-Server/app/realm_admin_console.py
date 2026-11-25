@@ -1,4 +1,4 @@
-"""Self-hosted operator UI. Only these three files are served on the owner listener."""
+"""Self-hosted operator UI. Only the listed files are served on the owner listener."""
 from pathlib import Path
 
 _ROOT = Path(__file__).with_name("admin_ui")
@@ -7,6 +7,7 @@ ASSETS = {
     for path, media, filename in (
         ("/admin/", "text/html", "index.html"),
         ("/admin/console.css", "text/css", "console.css"),
+        ("/admin/editors.js", "text/javascript", "editors.js"),
         ("/admin/console.js", "text/javascript", "console.js"),
     )
 }

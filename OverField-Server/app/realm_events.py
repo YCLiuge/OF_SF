@@ -4,6 +4,7 @@ from functools import lru_cache
 import json
 from pathlib import Path
 
+from config_revision import check
 from local_identity import LocalIdentity
 from state_lock import exclusive_state
 
@@ -144,7 +145,7 @@ def validate(settings):
     return settings
 
 
-def configure(state, settings=None, *, plaza=False):
+def configure(state, settings=None, *, plaza=False, expected=None):
     if settings is not None:
         if plaza:
             import realm_plaza
@@ -158,6 +159,7 @@ def configure(state, settings=None, *, plaza=False):
             stored = conn.execute("SELECT settings FROM private_event_config WHERE id=1").fetchone()
             combined = json.loads(stored[0]) if stored else {"events": []}
             if settings is not None:
+                check(combined.get("plaza", {}) if plaza else {"events": combined["events"]}, expected)
                 if plaza:
                     combined["plaza"] = settings
                 else:

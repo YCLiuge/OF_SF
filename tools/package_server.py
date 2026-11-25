@@ -38,6 +38,14 @@ def tracked_source(repo, linux):
             if file.is_symlink() or not file.is_file():
                 raise ValueError(f"Tracked source missing or redirected: {file}")
             files.append((name, file))
+    # Ship the operator browser QA alongside its test fixtures in either distribution.
+    qa = "tools/check_operator_browser.py"
+    subprocess.run(["git", "-C", str(repo), "ls-files", "--error-unmatch", "--", qa],
+                   stdout=subprocess.DEVNULL, check=True)
+    browser_check = local_path(repo, qa)
+    if browser_check.is_symlink() or not browser_check.is_file():
+        raise ValueError("Missing operator browser acceptance script")
+    files.append((qa, browser_check))
     found = {name for name, _ in files}
     if not {"of.py", "start.sh", "resource-sources.json", "app/game_dispatch.py"} <= found:
         raise ValueError("Expected tracked server source in the checkout")

@@ -16,10 +16,10 @@ from test_game_realm import login, next_msg
 
 def run(root, resources):
     identity = LocalIdentity(root / "identity.sqlite3")
-    assert load(identity).game_connections == 24
+    assert load(identity).game_connections == 96
     with identity._write() as db:
         db.execute("INSERT OR REPLACE INTO realm_rules VALUES(1,?)", (json.dumps({"world_max": 80}),))
-    assert load(identity).game_connections == 24
+    assert load(identity).game_connections == 96
     for limit in (0, 513):
         try:
             configure(root, {"game_connections": limit})
@@ -61,10 +61,20 @@ def run(root, resources):
             assert logout.status == pb.StatusCode_OK and logout.reason == pb.PlayerOfflineReason_NONE
             assert first.recv(1) == b""
             first.close()
-            assert host.slots.acquire(timeout=4)
-            host.slots.release()
+            with host.connections_lock:
+                assert host.connections_lock.wait_for(lambda: len(host.connections) == 1, timeout=4)
+            assert host.capacity(1) == {"limit": 1, "used": 1}
+            assert load(identity).game_connections == 1
+            ping(second, 5)
+            assert host.capacity(3) == {"limit": 3, "used": 1}
             third, _, _ = connect(2)
             clients.enter_context(third)
+            assert host.capacity(1) == {"limit": 1, "used": 2}
+            with socket.create_connection(("127.0.0.1", host.port), timeout=4) as excess:
+                try:
+                    assert excess.recv(1) == b""
+                except ConnectionResetError:
+                    pass
             ping(third, 3)
             ping(second, 4)
     finally:

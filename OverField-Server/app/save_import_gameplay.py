@@ -121,10 +121,13 @@ def validate(data):
         condition_sets[qid]=ids
         if ids:inferred[ids].append(qid)
     achieve=_table("Achieve","achieve")
+    from save_import_fishing import quest_floor
+    fishing_floor=1
     for entry in data["quests"]:
         key,state,count,conditions=row(entry,4)
         for v in (key,state,count):number(v)
         cs=[numbers(c,3) for c in rows(conditions,64)]
+        fishing_floor=max(fishing_floor,quest_floor(key,state,cs))
         ids=frozenset(c[0] for c in cs)
         if not key and len(inferred.get(ids,()))==1:key=inferred[ids][0]
         if not key or key not in quests or state not in (1,2,3) or len(ids)!=len(cs):continue
@@ -147,6 +150,8 @@ def validate(data):
             continue
         cs=[[cid,st,min(n,achieve.get(cid,{}).get("count_param",1))] for cid,st,n in cs]
         out["quests"].append([key,state,min(count,max(1,quests[key].get("limit_num",1))),cs])
+    if fishing_floor>1:
+        out["fishing_level_floor"]=fishing_floor
     chapters=_table("Story","story_chapter")
     for entry in data["chapters"]:
         key,stories=row(entry,2);number(key)
@@ -238,6 +243,7 @@ def validate(data):
         out["gather_totals"]=[[scene,kind,value] for kind,value in sorted(selected.items())]
     totals={"队长等级":out["player"][0],**{LABELS[k]:len(out[k]) for k in LABELS}}
     if out.get("fishing_rods"):totals["探索员鱼竿"]=len(out["fishing_rods"])
+    if out.get("fishing_level_floor"):totals["钓获记录证实的最低钓鱼等级"]=out["fishing_level_floor"]
     for kind,key,label in (("persistent","additional_quests","支线、委托及番外等一次性任务"),("history",HISTORY,"未激活的历史任务")):
         values=[record for ident,(category,record) in supplementary.items() if category==kind and ident not in ambiguous]
         if values:
@@ -267,6 +273,8 @@ def validate(data):
 
 def restore(pid,plan):
     from private_appearance import valid_preset
+    from save_import_fishing import apply_floor
+    apply_floor(db.conn,pid,plan.get("fishing_level_floor",1))
     level,exp,world=plan["player"]
     for scene,kind,count in plan.get("gather_totals",()):
         db.conn.execute("""INSERT INTO field_gather_counts VALUES(?,0,?,?,?,'',0,0)

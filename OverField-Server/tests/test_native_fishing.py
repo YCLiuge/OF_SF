@@ -187,6 +187,22 @@ def run(root,resources):
                 date[0]=datetime(2026,11,24,tzinfo=shop.CN)
                 assert cast(a,fishing_pond_id=111).status==pb.StatusCode_BAD_REQ
                 assert cast(a,fishing_box_id=5021005).status==pb.StatusCode_LifeLvNotEnough
+                # Required levels 1/3/5/7/7 are printed on the five national bait boxes.
+                with host.lock,db.conn:
+                    info=base(pid,fishing.KIND)
+                    info.level=6
+                    db.set_life(pid,fishing.KIND,info.SerializeToString())
+                for bait in (5021003,5021004,5021005):
+                    expected=pb.StatusCode_ITEM_NOT_ENOUGH if bait==5021003 else pb.StatusCode_LifeLvNotEnough
+                    assert cast(a,fishing_box_id=bait).status==expected
+                with host.lock,db.conn:
+                    info.level=7
+                    db.set_life(pid,fishing.KIND,info.SerializeToString())
+                for bait in (5021004,5021005):
+                    assert cast(a,fishing_box_id=bait).status==pb.StatusCode_ITEM_NOT_ENOUGH
+                with host.lock,db.conn:
+                    info.level=1
+                    db.set_life(pid,fishing.KIND,info.SerializeToString())
                 assert cast(a,fishing_box_id=6021).status==pb.StatusCode_ITEM_NOT_ENOUGH
                 assert cast(a,fishing_rod_id=1004001).status==pb.StatusCode_ITEM_NOT_ENOUGH
                 with host.lock,db.conn:
@@ -331,6 +347,28 @@ def run(root,resources):
                     assert pb.ItemDetail.FromString(db.get_item_detail(other,instance_id=rod_id)).main_item.weapon.durability==15
         finally:
             host.stop()
+    configure(root,{"fishing_min_level":7})
+    host=LocalGameService(roles,root,resources,port=0)
+    host.start()
+    try:
+        for profile,expected in ((roles.create_profile("新钓手"),7),(a_role,7),(b_role,9)):
+            client,_=opened(profile)
+            with client:
+                assert ask(client,"GetLifeInfo",life_type=fishing.KIND)[0].life_base_info.level==expected
+                assert ask(client,"GetLifeInfo",life_type=pb.LIFE_TYPE_Cooking)[0].life_base_info.level==1
+    finally:
+        host.stop()
+    configure(root,{"fishing_min_level":1})
+    host=LocalGameService(roles,root,resources,port=0)
+    host.start()
+    try:
+        for profile,expected in ((a_role,7),(roles.create_profile("开荒钓手"),1)):
+            client,_=opened(profile)
+            with client:
+                assert ask(client,"GetLifeInfo",life_type=fishing.KIND)[0].life_base_info.level==expected
+    finally:
+        host.stop()
+    print("PASS fishing level floors, new and returning players, bait gates 1/3/5/7/7.")
     print("PASS native fishing: 60 recommended bait grades, day/night and seasonal eligibility, mastery, "
           "five-point wear, arapaima, empty hooks, large-fish goal, repeat casts, cancellation, "
           "connection changes, persisted gear and atlas claims.")

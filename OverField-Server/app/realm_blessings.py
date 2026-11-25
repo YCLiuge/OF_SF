@@ -2,6 +2,7 @@
 from functools import lru_cache
 import json
 
+from config_revision import check
 from local_identity import LocalIdentity
 from realm_events import DATA, SCHEMA, _timestamp
 from state_lock import exclusive_state
@@ -52,7 +53,7 @@ def validate(trees):
     return sorted(trees,key=lambda row:row["id"])
 
 
-def manage(state, name, data):
+def manage(state, name, data, *, expected=None):
     if name=="blessings.catalog":
         return {"trees":list(catalog().values())}
     if name=="blessings.get" and not (state/"identity.sqlite3").is_file():
@@ -64,6 +65,7 @@ def manage(state, name, data):
             stored=conn.execute("SELECT settings FROM private_event_config WHERE id=1").fetchone()
             config=json.loads(stored[0]) if stored else {"events":[]}
             if name=="blessings.set":
+                check({"trees":config.get("blessings",[])}, expected)
                 trees=validate(data["trees"])
                 if trees:
                     config["blessings"]=trees

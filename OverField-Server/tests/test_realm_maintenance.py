@@ -1,5 +1,6 @@
 """Live HTTP, CLI state, original 1.1.12 bulletin shape and fixed-origin verified releases."""
 import argparse
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 import hashlib
@@ -29,6 +30,55 @@ class Tests(unittest.TestCase):
             return struct.pack(">I",len(data))+kind+data+struct.pack(">I",zlib.crc32(kind+data))
         return (b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",1,1,8,2,0,0,0))+
                 chunk(b"IDAT",zlib.compress(bytes((0,red,0,0))))+chunk(b"IEND",b""))
+
+    def test_native_jpeg_conversion_and_shared_legacy_refs(self):
+        # A solid red 8x4 JPEG. Retail SetNoticeImage requests the PNG cache slot.
+        jpeg = base64.b64decode(
+            b"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHB"
+            b"wgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIy"
+            b"MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAEAAgDASIAAhEBAx"
+            b"EB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAA"
+            b"AAAAAAAAAAAABgf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCPAH1of//Z"
+        )
+        legacy = notice_images.inspect(jpeg)
+        self.assertEqual(legacy["mime"], "image/jpeg")
+        with TemporaryDirectory() as tmp:
+            identity = LocalIdentity(Path(tmp) / "identity.sqlite3")
+            owner = Maintenance(identity)
+            with closing(sqlite3.connect(identity.path)) as db, db:
+                db.execute("INSERT INTO realm_notice_assets VALUES(?,?,?,?,?)",
+                           (legacy["sha256"], legacy["mime"], 8, 4, jpeg))
+                for identifier in (7, 8):
+                    db.execute("INSERT INTO realm_notices VALUES(?,?,?,?,1)", (identifier, "title", "body", 1234))
+                    db.execute("INSERT INTO realm_notice_images VALUES(?,0,?)", (identifier, legacy["sha256"]))
+            owner = Maintenance(identity)
+            feed = owner.feed()
+            self.assertEqual([(n["id"], n["published"]) for n in feed["notices"]], [(8, 1234), (7, 1234)])
+            converted = feed["notices"][0]["images"][0]
+            self.assertEqual(feed["notices"][1]["images"], [converted])
+            self.assertNotEqual(converted["sha256"], legacy["sha256"])
+            self.assertEqual((converted["mime"], converted["width"], converted["height"]), ("image/png", 8, 4))
+            desc, png = owner.open_image(converted["sha256"])
+            self.assertEqual(notice_images.inspect(png), desc)
+            self.assertEqual(png[24:26], bytes((8, 2)))  # 8-bit RGB
+            blocks = []
+            offset = 8
+            while offset + 12 <= len(png):
+                size, kind = struct.unpack_from(">I4s", png, offset)
+                if kind == b"IDAT":
+                    blocks.append(png[offset + 8:offset + 8 + size])
+                offset += 12 + size
+            # The first RGB pixel has no predictors for any of the PNG row filters.
+            red, green, blue = zlib.decompress(b"".join(blocks))[1:4]
+            self.assertGreater(red, 220)
+            self.assertLess(max(green, blue), 25)
+            self.assertEqual(Maintenance(identity).feed(), feed)
+            owner.withdraw(7)
+            self.assertEqual(owner.open_image(converted["sha256"])[1], png)
+            source = Path(tmp) / "again.jpg"
+            source.write_bytes(jpeg)
+            owner.announce("new", "new", [source])
+            self.assertEqual(owner.feed()["notices"][0]["images"], [converted])
 
     def test_notice_images_and_migration(self):
         with TemporaryDirectory() as tmp:

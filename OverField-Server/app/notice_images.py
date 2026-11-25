@@ -99,6 +99,17 @@ def inspect(data):
     return metadata(hashlib.sha256(data).hexdigest(), mime, *dims, len(data))
 
 
+def publish_image(data):
+    desc = inspect(data)
+    if desc["mime"] == "image/jpeg":
+        from notice_jpeg import encode
+        data = encode(data, desc["width"], desc["height"])
+        desc = inspect(data)
+        if desc["mime"] != "image/png":
+            raise ValueError("JPEG conversion did not produce a native PNG notice")
+    return desc, data
+
+
 def load_files(paths):
     paths = tuple(paths)
     if len(paths) > MAX_IMAGES:
@@ -110,7 +121,7 @@ def load_files(paths):
             raise ValueError("Choose a regular notice image file")
         with path.open("rb") as stream:
             data = stream.read(MAX_IMAGE + 1)
-        loaded.append((inspect(data), data))
+        loaded.append(publish_image(data))
     return loaded
 
 

@@ -114,7 +114,7 @@ def run(root):
             assert call("POST", "notice.publish", b'{"title":"a","title":"b","body":"c"}')[0] == 400
             assert call("POST", "notice.publish", b"x" * 65537)[0] == 413
             for path,kind,text in (("/admin/","text/html","OF_SF"),("/admin/console.js","text/javascript","/admin/v1/schema"),
-                                   ("/admin/console.css","text/css","#workspace")):
+                                   ("/admin/editors.js","text/javascript","editorFor"),("/admin/console.css","text/css","#workspace")):
                 conn=http.client.HTTPConnection("127.0.0.1",owner,timeout=3)
                 try:
                     conn.request("GET",path)
@@ -128,6 +128,28 @@ def run(root):
             assert request(owner,"POST","/admin/")[0]==405
             assert request(owner,"GET","/admin/v1/schema")[0]==401
             assert call("POST", "rules.set", {"world_max": 50})[1]["error"]["code"] == "state_busy"
+            daily={"id":4008, "enabled":True, "opens_at":None, "closes_at":None}
+            address=api.OPERATIONS+"events.get"
+            conn=http.client.HTTPConnection("127.0.0.1",owner,timeout=3)
+            try:
+                conn.request("GET",address,headers={"Authorization":"Bearer "+token})
+                read=conn.getresponse()
+                tag=read.getheader("ETag")
+                assert len(tag)==66 and json.loads(read.read())["result"]=={"events":[]}
+                headers={"Authorization":"Bearer "+token,"Content-Type":"application/json","If-Match":tag}
+                conn.request("POST",api.OPERATIONS+"events.set",json.dumps({"events":[daily]}),headers)
+                saved=conn.getresponse()
+                assert saved.status==200 and json.loads(saved.read())["result"]["events"]==[daily]
+                conn.request("POST",api.OPERATIONS+"events.set",'{"events":[]}',headers)
+                stale=conn.getresponse()
+                assert stale.status==412 and json.loads(stale.read())["error"]["code"]=="config_changed"
+            finally:
+                conn.close()
+            assert call("GET","events.get")[1]["result"]["events"]==[daily]
+            assert call("POST","rules.schedule",{"uid_start":2000000})[0]==400
+            assert call("POST","rules.schedule",{"game_connections":72})[0]==400
+            assert call("POST","rules.schedule",{"public_furniture_limit":2})[0]==200
+            assert call("GET","rules.get")[1]["result"]["public_furniture_limit"]==2
             for path in ["//server/share/poster.png", "file://server/pkg.png", r"\\.\pipe\test"]:
                 assert call("POST", "notice.publish", {"title": "x", "body": "x", "images": [path]})[0] == 400
             archive = root / "unexpected.zip"

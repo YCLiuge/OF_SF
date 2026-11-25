@@ -9,11 +9,14 @@ import socket
 import threading
 from urllib.parse import parse_qsl
 
+from config_revision import revision
 import realm_admin as admin
 
 PREFIX = "/admin/v1"
 OPERATIONS = PREFIX + "/operations/"
-STATUS = {"invalid_request": 400, "unknown_operation": 404, "not_found": 404,
+READ_CONFIG = {name + ".get" for name in ("events", "blessings", "plaza", "gacha", "rules")}
+WRITE_CONFIG = {"events.set", "blessings.set", "plaza.set", "gacha.set", "rules.schedule"}
+STATUS = {"config_changed": 412, "invalid_request": 400, "unknown_operation": 404, "not_found": 404,
           "already_exists": 409, "state_busy": 409, "storage_error": 500}
 
 
@@ -69,6 +72,13 @@ def openapi():
             inputs = spec["inputSchema"]
             operation["parameters"] = [{"name": key, "in": "query", "required": key in inputs["required"],
                                         "schema": prop} for key,prop in inputs["properties"].items()]
+        if name in READ_CONFIG:
+            operation["responses"]["200"]["headers"] = {"ETag": {"schema":{"type":"string"},
+                "description":"Current configuration revision, for conditional writes."}}
+        if name in WRITE_CONFIG:
+            operation["parameters"] = [{"name":"If-Match","in":"header","required":False,"schema":{"type":"string"},
+                "description":"The ETag from the corresponding GET; a stale revision returns HTTP 412."}]
+            operation["responses"]["412"] = operation["responses"]["default"]
         paths[OPERATIONS + name] = {method: operation}
     return {"openapi": "3.1.0", "info": {"title": "OF_SF operator API", "version": "1.0"},
             "security": [{"ownerToken": []}], "components": {"securitySchemes": {
@@ -183,21 +193,26 @@ class Handler(BaseHTTPRequestHandler):
             raw = self.rfile.read(size)
             if len(raw) != size:
                 return self.fail(400, "invalid_request", "Incomplete request body.")
+        tags = self.headers.get_all("If-Match", [])
+        if tags and (name not in WRITE_CONFIG or len(tags) != 1 or not re.fullmatch(r'"[a-f0-9]{64}"', tags[0])):
+            return self.fail(400, "invalid_request", "Invalid configuration revision.")
         response = admin.response_for(lambda: admin.execute(
             self.server.state, name, admin.decode_request(raw) if self.command == "POST" else values, self.server.request_stop,
-            authorize=authorize_operation))
-        self.reply(200 if response["ok"] else STATUS[response["error"]["code"]], response)
+            authorize=authorize_operation, expected=tags[0] if tags else None, live_capacity=self.server.live_capacity))
+        headers = [("ETag", revision(response["result"]))] if response["ok"] and name in READ_CONFIG else []
+        self.reply(200 if response["ok"] else STATUS[response["error"]["code"]], response, headers)
 
     do_GET = do_POST = dispatch
 
 
 @contextmanager
-def listener(configuration, state, request_stop):
+def listener(configuration, state, request_stop, live_capacity=None):
     if configuration is None:
         yield None
         return
     port, bearer = configuration
     with AdminServer(("127.0.0.1", port), Handler) as server:
+        server.live_capacity = live_capacity
         server.state = state
         server.request_stop = request_stop
         server.bearer = bearer

@@ -8,7 +8,7 @@ import socketserver
 import sqlite3
 import struct
 import sys
-from threading import BoundedSemaphore, Condition, Event, Lock, RLock, Thread
+from threading import Condition, Event, Lock, RLock, Thread
 import time
 
 UPSTREAM = Path(__file__).resolve().parent / "upstream"
@@ -212,26 +212,24 @@ class _TCP(socketserver.ThreadingTCPServer):
                         _log.exception("Could not reclaim disconnected player's furniture, will retry")
 
     def process_request(self,request,client_address):
-        if self.owner.slots.acquire(blocking=False):
-            try:
-                with self.owner.connections_lock:
-                    self.owner.connections.add(request)
-                super().process_request(request,client_address)
-            except BaseException:
-                with self.owner.connections_lock:
-                    self.owner.connections.discard(request)
-                self.owner.slots.release()
-                raise
-        else:
+        with self.owner.connections_lock:
+            admitted = len(self.owner.connections) < self.owner.connection_limit
+            if admitted:
+                self.owner.connections.add(request)
+        if not admitted:
             self.shutdown_request(request)
-
-    def process_request_thread(self,request,client_address):
+            return
         try:
-            super().process_request_thread(request,client_address)
+            super().process_request(request, client_address)
+        except BaseException:
+            self.owner.release_connection(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
         finally:
-            with self.owner.connections_lock:
-                self.owner.connections.discard(request)
-            self.owner.slots.release()
+            self.owner.release_connection(request)
 
 
 from stage_diagnostics import StageDiagnostics
@@ -396,6 +394,23 @@ class _Connection(socketserver.BaseRequestHandler):
 
 class LocalGameService:
     """One packaged realm per process. A separate file-backed identity service issues tickets."""
+    def release_connection(self, request):
+        with self.connections_lock:
+            self.connections.discard(request)
+            self.connections_lock.notify_all()
+
+    def capacity(self, limit=None):
+        if limit is not None:
+            # Serialize disk and runtime updates in the same order for concurrent operators.
+            # Admissions keep using the current value until the new setting has committed.
+            with self.capacity_update_lock:
+                updated = realm_rules.configure(self.data_dir, {"game_connections": limit}, next_start=True)
+                with self.connections_lock:
+                    self.connection_limit = updated.game_connections
+                    return {"limit": self.connection_limit, "used": len(self.connections)}
+        with self.connections_lock:
+            return {"limit": self.connection_limit, "used": len(self.connections)}
+
     def __init__(self,identity,data_dir,resources,bind="127.0.0.1",port=11033):
         self.identity=identity
         self.data_dir=Path(data_dir).resolve()
@@ -414,10 +429,11 @@ class LocalGameService:
             self.native_accounts.remote=self.remote_password
         self.bind=bind
         self.port=port
-        self.slots=BoundedSemaphore(self.realm_rules.game_connections)
+        self.connection_limit = self.realm_rules.game_connections
+        self.capacity_update_lock = Lock()
         self.lock=RLock()
         self.slot_available=Condition(self.lock)
-        self.connections_lock=Lock()
+        self.connections_lock=Condition()
         self.connections=set()
         self.closing=Event()
         self.active={}
@@ -563,6 +579,8 @@ class LocalGameService:
                 pid,proposed=self._prepare_role(slot,name,row)
                 from save_import_service import seal_native_entry
                 seal_native_entry(db.conn,slot)
+                from save_import_fishing import apply_floor, sealed_floor
+                apply_floor(db.conn,pid,max(self.realm_rules.fishing_min_level,sealed_floor(db.conn,pid,slot)))
                 s=Session(sock,slot,pid,proposed)
                 s.pending_publish = self.pending_publish
                 self.session_sequence += 1

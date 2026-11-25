@@ -7,6 +7,7 @@ COPY resources/ resources/
 COPY vendor/common/ vendor/common/
 COPY vendor/linux-x86_64/ vendor/linux-x86_64/
 COPY of.py LICENSE-of-ps.txt resource-sources.json ./
+RUN apt-get update && apt-get install -y --no-install-recommends libgd3 && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g 10001 overfield && useradd --no-create-home -u 10001 -g overfield overfield && install -d -o overfield -g overfield -m 0700 /state /state/realm
 USER 10001:10001
 EXPOSE 18881/tcp 11033/tcp

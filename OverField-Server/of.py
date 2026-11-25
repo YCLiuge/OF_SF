@@ -116,7 +116,7 @@ def serve(state):
                 thread.start()
                 pending.write_text(run_id,encoding="ascii")
                 pending.replace(active)
-                with realm_admin_http.listener(admin_cfg, state, request_stop) as admin_thread:
+                with realm_admin_http.listener(admin_cfg, state, request_stop, game.capacity) as admin_thread:
                     print("Server ready: %s profile %s:%d, game TCP %s:%d, advertised %s, registration %s" % (
                         "HTTPS" if tls else "HTTP", cfg["bind"], cfg["http_port"], cfg["bind"],
                         cfg["game_port"], cfg["game_host"], registration), flush=True)
@@ -277,6 +277,9 @@ def main():
         cmd.add_argument("archive",type=Path)
     import realm_rules
     realm_rules.parser(commands)
+    fishing=commands.add_parser("recover-fishing-level",help="Check a sealed import's retained catch records while the realm is stopped")
+    fishing.add_argument("--uid",type=int,required=True)
+    fishing.add_argument("--apply",action="store_true")
     args=parser.parse_args()
     state=args.state.resolve()
     if args.command=="postgres-report":
@@ -291,6 +294,10 @@ def main():
         from realm_maintenance import owner_command
         return owner_command(state,args)
     if args.command=="rules":return realm_rules.command(state,args)
+    if args.command=="recover-fishing-level":
+        from save_import_fishing import recover_offline
+        print(json.dumps(recover_offline(state,ROOT/"resources",args.uid,apply=args.apply)))
+        return
     if args.command in (None,"start"):return serve(state)
     if args.command=="player-gateway":
         from player_gateway import run

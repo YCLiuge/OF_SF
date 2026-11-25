@@ -6,6 +6,7 @@ from pathlib import Path
 import sqlite3
 from contextlib import closing
 
+from config_revision import check
 from local_identity import LocalIdentity
 from state_lock import exclusive_state
 
@@ -24,8 +25,9 @@ class RealmRules:
     mp_team_members:int=16
     mp_team_name_length:int=20
     mp_team_limit:int=0
-    game_connections:int=24
+    game_connections:int=96
     starter_teachable_actions:int=1
+    fishing_min_level:int=1
     monster_gift_percent:int=20
     activity_fragment_percent:int=20
     activity_fragment_quantity:int=0
@@ -47,6 +49,8 @@ class RealmRules:
             raise ValueError("Choose a monster gift chance between 0 and 100 percent")
         if self.starter_teachable_actions not in (0,1):
             raise ValueError("Choose 1 for permanent starter actions or 0 to learn teachable actions")
+        if not 1<=self.fishing_min_level<=10:
+            raise ValueError("Choose a minimum fishing level between 1 and 10")
         if self.enable_collapse_rooms not in (0,1):
             raise ValueError("Choose 1 to offer optional collapse rooms, or 0 to close them")
         if not 1<=self.public_min<=self.public_max<self.uid_start<0xffffffff:
@@ -77,10 +81,10 @@ def parser(commands):
         cmd.add_argument("--"+f.name.replace("_","-"),dest=f.name,type=str if f.name=="public_furniture_scope" else int)
 
 
-def configure(state,changes):
+def configure(state,changes,*,next_start=False,expected=None):
     # The server lock makes range changes exclusive with both a running realm
     # and migration. Reads share the profile lifecycle lock with backup/restore.
-    purpose = "server" if changes else "profiles"
+    purpose = "server" if changes and not next_start else "profiles"
     with exclusive_state(state, purpose=purpose) as root:
         root.mkdir(parents=True,exist_ok=True)
         identity=LocalIdentity(root/"identity.sqlite3")
@@ -88,6 +92,7 @@ def configure(state,changes):
             return load(identity)
         with identity._write() as db:
             current=read(db)
+            check(asdict(current), expected)
             updated=RealmRules(**(asdict(current)|changes)).validated()
             if current.uid_start!=updated.uid_start and (root/"game.sqlite").exists():
                 with closing(sqlite3.connect((root/"game.sqlite").as_uri()+"?mode=ro",uri=True)) as game:

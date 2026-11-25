@@ -51,6 +51,8 @@ def seal_native_entry(conn,slot):
 
 def snapshot(conn,pid):
     result={}
+    life=conn.execute("SELECT life_blob FROM life_info WHERE player_id=?", (pid,)).fetchone()
+    if life:result["life_info",0]=life[0]
     from save_import_quests import HISTORY
     for key,raw in conn.execute("SELECT k,v FROM player_kv WHERE player_id=? AND ns=?",(pid,HISTORY)):
         result[HISTORY,int(key)]=raw
@@ -79,6 +81,9 @@ def snapshot(conn,pid):
 
 def restore_prior(conn,pid,table,key,value):
     from save_import_quests import HISTORY
+    if table=="life_info" and key==0:
+        conn.execute("UPDATE life_info SET life_blob=? WHERE player_id=?", (value,pid))
+        return
     if table==HISTORY:
         if value is None:
             conn.execute("DELETE FROM player_kv WHERE player_id=? AND ns=? AND k=?",(pid,HISTORY,str(key)))

@@ -8,6 +8,7 @@ import sys
 from uuid import UUID
 from zipfile import BadZipFile
 
+from config_revision import ConfigChanged
 import migrate
 from local_identity import LocalIdentity
 from realm_maintenance import Maintenance, admin_feed
@@ -25,6 +26,11 @@ IMAGES = {"type": "array", "maxItems": 4, "items": STRING}
 RULES = {f.name: ({"type": "string", "enum": ["channel", "realm"]}
                   if f.name == "public_furniture_scope" else {"type": "integer"})
          for f in fields(realm_rules.RealmRules)}
+
+
+# Range/identity changes retain their exclusive stopped-server workflow.
+NEXT_START_RULES = {key: rule for key, rule in RULES.items()
+                    if key not in {"public_min", "public_max", "uid_start", "world_min", "world_max", "game_connections"}}
 
 
 def operation(mode, description, properties=None, required=(), minimum=0, *, read_only=False):
@@ -78,8 +84,12 @@ OPERATIONS = {
     "gacha.get": operation("any", "Return the active configuration and basis-point probabilities.", read_only=True),
     "gacha.set": operation("any", "Replace this realm's banner configuration, effective on the next request.",
                            {"pools": {"type": "array", "maxItems": 1000, "items": BANNER}}, ("pools",)),
+    "capacity.get": operation("any", "读取游戏连接上限和当前连接数。", read_only=True),
+    "capacity.set": operation("any", "调整游戏连接上限，在线玩家可继续游戏。",
+                              {"limit": {"type": "integer", "minimum": 1, "maximum": 512}}, ("limit",)),
     "realm.status": operation("any", "Read local lifecycle and persistent record counts.", read_only=True),
     "realm.stop": operation("running", "Request graceful shutdown of this server instance."),
+    "rules.schedule": operation("any", "预设下次启动时生效的玩法参数。", NEXT_START_RULES, minimum=1),
     "rules.get": operation("any", "Read configured gameplay rules.", read_only=True),
     "rules.set": operation("stopped", "Update supplied rules atomically.", RULES, minimum=1),
     "photos.list": operation("any", "List published player photos, newest first.",
@@ -222,7 +232,13 @@ def validate(value, schema, name="input"):
         raise ValueError("Invalid " + name)
 
 
-def run(state, name, data, request_stop):
+def run(state, name, data, request_stop, expected=None, live_capacity=None):
+    if name in ("capacity.get", "capacity.set"):
+        if live_capacity is not None:
+            return live_capacity(data.get("limit"))
+        changes = {"game_connections": data["limit"]} if name == "capacity.set" else {}
+        rules = realm_rules.configure(state, changes)
+        return {"limit": rules.game_connections, "used": None}
     if name in ("reports.list", "reports.resolve"):
         from realm_reports import manage
         with exclusive_state(state,purpose="profiles") as root:
@@ -238,13 +254,13 @@ def run(state, name, data, request_stop):
             return moderate(root,name,data)
     if name in ("blessings.catalog","blessings.get","blessings.set"):
         import realm_blessings
-        return realm_blessings.manage(state,name,data)
+        return realm_blessings.manage(state,name,data, expected=expected)
     if name == "plaza.catalog":
         return realm_plaza.catalog()
     if name == "plaza.get":
         return realm_events.configure(state, plaza=True) if (state / "identity.sqlite3").is_file() else {}
     if name == "plaza.set":
-        return realm_events.configure(state, data, plaza=True)
+        return realm_events.configure(state, data, plaza=True, expected=expected)
     if name == "events.catalog":
         return {"events": realm_events.available()}
     if name == "events.get":
@@ -252,9 +268,14 @@ def run(state, name, data, request_stop):
             return {"events": []}
         return realm_events.configure(state)
     if name == "events.set":
-        return realm_events.configure(state, data)
+        return realm_events.configure(state, data, expected=expected)
     if name == "gacha.catalog":
-        return {"banners": realm_gacha.available()}
+        banners = realm_gacha.available()
+        presets = {r["id"]: r for r in realm_gacha.defaults()["pools"]}
+        for row in banners:
+            if row["featured"] and row["id"] not in presets:
+                presets[row["id"]] = realm_gacha.featured_pool(row["id"])
+        return {"banners": banners, "presets": presets}
     if name == "gacha.get":
         if not (state / "identity.sqlite3").is_file():
             return realm_gacha.defaults()
@@ -262,7 +283,7 @@ def run(state, name, data, request_stop):
     if name == "gacha.enable":
         return realm_gacha.configure(state, enable_featured=data["id"])
     if name == "gacha.set":
-        return realm_gacha.configure(state, data)
+        return realm_gacha.configure(state, data, expected=expected)
     if name == "realm.status":
         return status(state)
     if name == "realm.stop":
@@ -270,6 +291,8 @@ def run(state, name, data, request_stop):
             raise ValueError("The selected realm has no running server")
         request_stop(state, quiet=True)
         return {"requested": True}
+    if name == "rules.schedule":
+        return asdict(realm_rules.configure(state, data, next_start=True, expected=expected))
     if name in ("rules.set", "rules.get"):
         if name == "rules.get" and not (state / "identity.sqlite3").is_file():
             return asdict(realm_rules.RealmRules())
@@ -307,12 +330,12 @@ def operation_spec(name):
     return OPERATIONS[name]
 
 
-def execute(state, name, data, request_stop, *, authorize=None):
+def execute(state, name, data, request_stop, *, authorize=None, expected=None, live_capacity=None):
     spec = operation_spec(name)
     validate(data, spec["inputSchema"])
     if authorize:
         authorize(name, spec, data)
-    return run(state, name, data, request_stop)
+    return run(state, name, data, request_stop, expected, live_capacity)
 
 
 def schema():
@@ -323,7 +346,9 @@ def response_for(action):
     try:
         return {"apiVersion": VERSION, "ok": True, "result": action()}
     except (KeyError, ValueError, StateBusy, OSError, sqlite3.Error, BadZipFile, RecursionError) as error:
-        if isinstance(error, StateBusy):
+        if isinstance(error, ConfigChanged):
+            code = "config_changed"
+        elif isinstance(error, StateBusy):
             code = "state_busy"
         elif isinstance(error, KeyError):
             code = "unknown_operation"
