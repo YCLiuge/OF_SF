@@ -11,10 +11,11 @@ from private_channels import count_here, room_limit, tally, bag_adjust
 from private_initial_queries import supply,table
 
 
-def publish(session, notice):
+def publish(session, notice, exclude_actor=False):
     msg_id = getattr(MsgId, notice.DESCRIPTOR.name)
     for peer in room_members(session):
-        peer.send(msg_id,notice,0)
+        if not exclude_actor or peer is not session:
+            peer.send(msg_id,notice,0)
 
 
 def fresh_id(pid,scene,channel):
@@ -53,7 +54,11 @@ def hand(session,req,rsp):
 def put_away(session,req,rsp):
     pid=session.player_id
     row=db.conn.execute("SELECT fid,item FROM realm_hand_furniture WHERE player=? AND fid=?",(pid,req.furniture_id)).fetchone()
-    if not row:return pb.StatusCode_FURNITURE_NOT_EXIST
+    if not row:
+        if req.furniture_id and req.furniture_id == getattr(session, "returned_hand_id", None):
+            rsp.furniture_id = req.furniture_id
+            return pb.StatusCode_OK
+        return pb.StatusCode_FURNITURE_NOT_EXIST
     db.conn.execute("DELETE FROM realm_hand_furniture WHERE player=?",(pid,))
     grant(session,{row[1]:1},pb.PackNotice().items)
     rsp.furniture_id=row[0]
@@ -78,6 +83,9 @@ def place(session, req, rsp):
     else:
         limit=room_limit(session)
         if limit is not None and count_here(session)>=limit:return pb.StatusCode_CANT_REPEATED_PLACED_IN_OTHER_CHANNEL
+        from private_home_capacity import can_place
+        if not can_place(session, req.furniture_item_id):
+            return pb.StatusCode_FurnitureNumLimit
         if held and held[0]==fid:
             if held[1]!=req.furniture_item_id:return pb.StatusCode_BAD_REQ
             db.conn.execute("DELETE FROM realm_hand_furniture WHERE player=?",(pid,))
@@ -92,7 +100,8 @@ def place(session, req, rsp):
         record(session, 129)
     update=pb.SceneGardenFurnitureUpdateNotice(status=pb.StatusCode_OK)
     update.furniture_info.CopyFrom(details)
-    publish(session,update)
+    # The retail placement callback operates on the local preview before applying scene updates.
+    session.commit_callbacks.append((publish, (session, update)))
     return pb.StatusCode_OK
 
 
@@ -113,7 +122,10 @@ def remove(session, req, rsp):
     tally(session.player_id)
     if req.is_put_in_package:grant(session,{details.furniture_item_id:1},pb.PackNotice().items)
     rsp.furniture_id=req.furniture_id
-    publish(session,pb.SceneGardenFurnitureRemoveNotice(status=pb.StatusCode_OK,furniture_id=req.furniture_id,item_id=details.furniture_item_id))
+    notice = pb.SceneGardenFurnitureRemoveNotice(status=pb.StatusCode_OK, furniture_id=req.furniture_id,
+                                                 item_id=details.furniture_item_id)
+    # Picking the object up reuses its local handle. The remove notice destroys that handle.
+    session.commit_callbacks.append((publish, (session, notice, not req.is_put_in_package)))
     return pb.StatusCode_OK
 
 

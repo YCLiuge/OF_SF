@@ -114,12 +114,12 @@ def operate(session, req, rsp):
     return pb.StatusCode_OK
 
 
-def send_mail(pid, title, content, items, instant, peer, *, sender="罗塔售后部", model_id=0):
+def send_mail(pid, title, content, items, instant, peer, *, sender="罗塔售后部", model_id=0, overdue_days=0):
     prev = db.conn.execute("SELECT max(mail_id) FROM mail WHERE player_id=?",(pid,)).fetchone()[0] or 0
     seq = db.conn.execute("SELECT v FROM player_kv WHERE player_id=? AND ns='wish_mail' AND k='last'",(pid,)).fetchone()
     mid = max(prev, int(seq[0]) if seq else 0) + 1
     msg = pb.MailBriefData(mail_id=mid, title=title, sender=sender, model_id=model_id, content=content,
-                           send_time=int(instant.timestamp()),content_type=pb.MailContentType_TEXT)
+                           send_time=int(instant.timestamp()),overdue_day=overdue_days,content_type=pb.MailContentType_TEXT)
     for item,num in items:
         if item and num:
             msg.items.add(item_id=item, num=num)

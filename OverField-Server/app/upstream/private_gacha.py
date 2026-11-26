@@ -75,22 +75,27 @@ def info(pid, pool, stats=None):
 
 
 CHOICE = 9000
+CHOICE_BANNERS = (9000, 9001)
 
 
-def choices(pools):
-    allowed = res.index("Gacha", "info")[CHOICE]["card_pool_range"]
+def choices(pools, banner=CHOICE):
+    allowed = res.index("Gacha", "info")[banner]["card_pool_range"]
     return [key for key in allowed if key in pools]
 
 
-def selected(pid, pools):
-    stored = db.conn.execute("SELECT selected FROM private_gacha_choices WHERE player=?", (pid,)).fetchone()
-    return stored[0] if stored and stored[0] in choices(pools) else 0
+def selected(pid, pools, banner=CHOICE):
+    if banner == CHOICE:
+        stored = db.conn.execute("SELECT selected FROM private_gacha_choices WHERE player=?", (pid,)).fetchone()
+    else:
+        stored = db.conn.execute("SELECT v FROM player_kv WHERE player_id=? AND ns='recruit_choice' AND k=?",
+                                 (pid, str(banner))).fetchone()
+    return int(stored[0]) if stored and int(stored[0]) in choices(pools, banner) else 0
 
 
-def choice_info(pid, pools, stats=None):
-    pick = selected(pid, pools)
-    count = stats[CHOICE][0] if stats is not None else db.get_total_gacha_num(pid, CHOICE)
-    result = pb.GachaInfo(gacha_id=CHOICE, choose_pool_id=pick, gacha_times=count)
+def choice_info(pid, pools, stats=None, banner=CHOICE):
+    pick = selected(pid, pools, banner)
+    count = stats[banner][0] if stats is not None else db.get_total_gacha_num(pid, banner)
+    result = pb.GachaInfo(gacha_id=banner, choose_pool_id=pick, gacha_times=count)
     if pick:
         misses = (stats[pick][2] or 0) if stats is not None else db.get_gacha_guarantee(pid, pick)
         result.guarantee = max(1, pools[pick]["pity"] - misses)
@@ -99,26 +104,29 @@ def choice_info(pid, pools, stats=None):
 
 def choose(session, req, rsp):
     pools = active()
-    if onboarding(session) or req.gacha_id != CHOICE or req.choose_gacha_pool not in choices(pools):
+    if req.gacha_id not in CHOICE_BANNERS or req.choose_gacha_pool not in choices(pools, req.gacha_id):
         return pb.StatusCode_BAD_REQ
-    db.conn.execute("INSERT OR REPLACE INTO private_gacha_choices VALUES(?,?)",
-                    (session.player_id, req.choose_gacha_pool))
-    rsp.gacha_id, rsp.choose_gacha_pool = CHOICE, req.choose_gacha_pool
+    if req.gacha_id == CHOICE:
+        db.conn.execute("INSERT OR REPLACE INTO private_gacha_choices VALUES(?,?)",
+                        (session.player_id, req.choose_gacha_pool))
+    else:
+        db.conn.execute("INSERT OR REPLACE INTO player_kv(player_id,ns,k,v) VALUES(?,'recruit_choice',?,?)",
+                        (session.player_id, str(req.gacha_id), str(req.choose_gacha_pool)))
+    rsp.gacha_id, rsp.choose_gacha_pool = req.gacha_id, req.choose_gacha_pool
     return pb.StatusCode_OK
 
 
 def list_pools(session, req, rsp):
-    if onboarding(session):
-        return tutorial.list_pools(session, req, rsp)
     pools = active()
-    show_choice = bool(choices(pools))
     if pools:
-        keys = (*pools, CHOICE) if show_choice else tuple(pools)
-        stats = pool_stats(session.player_id, keys)
+        banners = [key for key in CHOICE_BANNERS if choices(pools, key)]
+        stats = pool_stats(session.player_id, (*pools, *banners))
         for pool in pools.values():
             rsp.gachas.add().CopyFrom(info(session.player_id, pool, stats))
-        if show_choice:
-            rsp.gachas.add().CopyFrom(choice_info(session.player_id, pools, stats))
+        for key in banners:
+            rsp.gachas.add().CopyFrom(choice_info(session.player_id, pools, stats, key))
+    if onboarding(session) and 2000 not in pools:
+        rsp.gachas.add().CopyFrom(tutorial.pool_info(session.player_id))
     return pb.StatusCode_OK
 
 
@@ -164,18 +172,18 @@ def pity_misses(pid, pool):
     return row[0] if row else recent_misses(pid, pool["pity"] - 1, 4)
 
 
-def extra(balances, item_id, amount, delta):
+def extra(balances, item_id, amount, delta, *, converted=False):
     item = balances.change(item_id, amount)
-    reward = delta.extras.add()
+    reward = (delta.transformed_item if converted else delta.extras).add()
     reward.CopyFrom(item)
     reward.base_item.num = amount
 
 
-def duplicate_bonus(balances, prefix, quality, delta):
+def duplicate_bonus(balances, prefix, quality, delta, *, converted=False):
     rule = res.index("GlobalConfig", "config", "key")[f"Gacha_{prefix}Quality{quality}_Reward"]
     for value in rule["values"]:
         item_id, amount = map(int, value.split(":"))
-        extra(balances, item_id, amount, delta)
+        extra(balances, item_id, amount, delta, converted=converted)
 
 
 def known_poster(pid, template):
@@ -233,9 +241,9 @@ def apply_award(pid, item_id, delta, notice, balances, recruit):
         delta.main_item.character.ParseFromString(owned[0])
         max_star = delta.main_item.character.star >= 5
         if not max_star:
-            extra(balances, config["repeat_item_i_d"], 3 if quality in (3, 4) else 1, delta)
+            extra(balances, config["repeat_item_i_d"], 3 if quality in (3, 4) else 1, delta, converted=True)
         if quality in (3, 4):
-            duplicate_bonus(balances, "Character_FullStar" if max_star else "Character_", quality, delta)
+            duplicate_bonus(balances, "Character_FullStar" if max_star else "Character_", quality, delta, converted=max_star)
             if recruit:
                 extra(balances, 107, {3: 500, 4: 1500}[quality], delta)
         return
@@ -255,7 +263,7 @@ def apply_award(pid, item_id, delta, notice, balances, recruit):
 
 
 def draw(session, req, rsp, packet_id):
-    lesson = onboarding(session)
+    lesson = req.gacha_id == 2000 and req.is_single and onboarding(session)
     cache = getattr(session, "gacha_receipts", None)
     request = (packet_id, req.gacha_id, req.is_single)
     if packet_id and cache is not None and request in cache:
@@ -272,7 +280,7 @@ def draw(session, req, rsp, packet_id):
 
 def regular_draw(session, req, rsp, pending):
     pools = active()
-    pool_id = selected(session.player_id, pools) if req.gacha_id == CHOICE else req.gacha_id
+    pool_id = selected(session.player_id, pools, req.gacha_id) if req.gacha_id in CHOICE_BANNERS else req.gacha_id
     pool = pools.get(pool_id)
     if pool is None or session.dungeon[0]:
         return pb.StatusCode_BAD_REQ
@@ -281,9 +289,11 @@ def regular_draw(session, req, rsp, pending):
         return fashion.draw(session,req,rsp,pending,pool)
     config = res.index("Gacha", "info")[req.gacha_id]
     key = "1" if req.is_single else "2"
-    count = config["method" + key + "_count"]
+    count = config.get("method" + key + "_count", 0)
+    if count not in (1, 10):
+        return pb.StatusCode_BAD_REQ
     ticket_id, price = config["consume_item" + key + "_i_d"], config["consume_item" + key + "_num"]
-    if req.gacha_id == CHOICE and db.get_total_gacha_num(pid, CHOICE) + count > config["max_times"]:
+    if config.get("max_times") and db.get_total_gacha_num(pid, req.gacha_id) + count > config["max_times"]:
         return pb.StatusCode_BAD_REQ
     pending.balances.change(ticket_id, -price)
     misses = pity_misses(pid, pool)
@@ -301,7 +311,7 @@ def regular_draw(session, req, rsp, pending):
         award(pid, item, delta, pending.pack, balances=pending.balances, recruit=True)
         rewards.record(db, pid, req.gacha_id, delta)
     db.set_gacha_guarantee(pid, pool_id, misses)
-    rsp.info.CopyFrom(choice_info(pid, pools) if req.gacha_id == CHOICE else info(pid, pool))
+    rsp.info.CopyFrom(choice_info(pid, pools, banner=req.gacha_id) if req.gacha_id in CHOICE_BANNERS else info(pid, pool))
     return pb.StatusCode_OK
 
 
@@ -324,7 +334,7 @@ def pick(session, req, rsp):
 
 def grant_pick(session, req, rsp, pending):
     pool = active().get(req.gacha_id)
-    if not pool or onboarding(session):
+    if not pool:
         return pb.StatusCode_BAD_REQ
     config = res.index("Gacha", "info")[req.gacha_id]
     options = res.index("Gacha", "reward_pool").get(config.get("optional_pool_i_d"), {})

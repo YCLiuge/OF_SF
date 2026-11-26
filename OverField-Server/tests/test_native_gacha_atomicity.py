@@ -121,7 +121,7 @@ def run(root, resources):
                 assert len(settled["grants"]) == 10 and db.get_gacha_guarantee(pid, 2000) == 4
                 for item, receipt in zip(result.items, settled["grants"]):
                     assert receipt[1:3] == ("draw", int(item.main_item.is_new))
-                    assert json.loads(receipt[3]) == [[x.item_id, x.base_item.num] for x in item.extras]
+                    assert json.loads(receipt[3]) == [[x.item_id, x.base_item.num] for x in (*item.transformed_item, *item.extras)]
             replay, notices = draw(first, 31)
             assert replay == result and not notices
             with game.lock:

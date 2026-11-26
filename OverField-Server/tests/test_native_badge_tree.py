@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from local_game_service import LocalGameService, MsgId, pb
-from local_game_wire import encode
+from local_game_wire import encode, receive
 from local_identity import LocalIdentity
 from private_badge_config import ABILITY_BY_ITEM, NODE_REWARDS
 from private_dungeons import _table
@@ -22,7 +22,17 @@ def run(state, resources):
 
     def connect(index):
         sock, _, pid = login(game.port, identity.issue_ticket(*slots[index]))
-        assert call(sock,"PlayerMainData").status == pb.StatusCode_OK
+        main = call(sock, "PlayerMainData")
+        assert main.status == pb.StatusCode_OK and 100000008 in main.unlock_functions
+        markers = []
+        while True:
+            head, body = receive(sock)
+            if head.msg_id == MsgId.SceneDataNotice:
+                break
+            if head.msg_id == MsgId.PackNotice:
+                markers.extend(item.main_item.base_item.num for item in pb.PackNotice.FromString(body).items
+                               if item.main_item.item_id == 100000008)
+        assert markers == [1], markers
         return sock, pid
 
     def amount(pid, item):
@@ -48,6 +58,16 @@ def run(state, resources):
         a,pid = connect(0)
         b,bid = connect(1)
         with a,b:
+            pages = {1, 2, 3, 4, 5, 1001, 1002, 1003}
+            assert amount(pid, 100000008) == 0  # The tutorial can still give its one-time reward.
+            for scene in (1, 2, 3, 4, 5, 1):
+                assert call(a, "ChangeSceneChannel", scene_id=scene).status == pb.StatusCode_OK
+                full = call(a, "AbilityBadgeList")
+                assert {page.page for page in full.ability_badge_pages} == pages
+                assert not any(page.active_box_ids or page.is_reward for page in full.ability_badge_pages)
+                single = call(a, "AbilityBadgeList", scene_id=scene).ability_badge_pages
+                assert [page.page for page in single] == [scene] and not single[0].active_box_ids
+            assert not call(a, "AbilityBadgeList", scene_id=9999).ability_badge_pages
             assert starter(a).status == pb.StatusCode_BAD_REQ
             with game.lock, db.conn:
                 q=pb.Quest()

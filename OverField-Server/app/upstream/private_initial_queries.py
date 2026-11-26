@@ -31,7 +31,7 @@ def badges(session, req, rsp):
     pid=session.player_id
     scenes={r["scene_i_d"] for r in table("MoonStone","stone_area_data")}
     all_pages=db.get_ability_tree(pid)
-    pages=(req.scene_id,) if req.scene_id else sorted(all_pages)
+    pages=(req.scene_id,) if req.scene_id else sorted(scenes)
     for scene in pages:
         if scene in scenes:
             rsp.ability_badge_pages.add(page=scene, active_box_ids=all_pages.get(scene,()))
@@ -39,10 +39,13 @@ def badges(session, req, rsp):
              for aid in node.get("unlock_achieve_i_d",())}
     rewards={rule["achieve_condition_i_d"] for group in table("MoonStone","stone_reward_quest_data")
              for rule in group.get("stone_reward_quest_data_group_info",()) if rule.get("achieve_condition_i_d")}
-    for aid in sorted(unlocks|rewards):
-        raw=db.get_achieve(pid,aid)
-        if raw:
-            achieve=pb.Achieve.FromString(raw)
+    ids = sorted(unlocks | rewards)
+    if ids:
+        markers = ",".join("?" for _ in ids)
+        rows = db.conn.execute(f"SELECT achieve_id,achieve_blob FROM achieve WHERE player_id=? "
+                               f"AND achieve_id IN ({markers}) ORDER BY achieve_id", (pid, *ids))
+        for aid, raw in rows:
+            achieve = pb.Achieve.FromString(raw)
             if achieve.count or aid in unlocks:
                 rsp.ability_badge_achieves.add().CopyFrom(achieve)
     ids=db.conn.execute("SELECT key FROM claimed_rewards WHERE player_id=? AND system='badge_achieve' ORDER BY key",(pid,))

@@ -18,6 +18,7 @@ def verify(js, until, get, post):
         else:
             until(lambda: js("var f=document.querySelector('#editor-feedback');f && !!f.textContent && !f.textContent.includes('未保存') && !document.querySelector('#execute').disabled"))
     js("window.confirm=()=>true")
+    verify_mail(js,until,get)
     open_form('events.set')
     select_item(4008);mode('on')
     select_item(3001);mode('on')
@@ -54,8 +55,10 @@ def verify(js, until, get, post):
     select_item(2000);change('.editor-grid label:first-child input','71')
     save();assert next(row for row in get('gacha.get')['pools'] if row['id']==2000)['pity']==71
     n=len(get('gacha.get')['pools'])
+    select_item(3010); mode('off');save()
+    assert not next(row for row in get('gacha.get')['pools'] if row['id']==3010)['enabled']
     select_item(3010); mode('on');save()
-    assert len(get('gacha.get')['pools'])==n+1
+    assert len(get('gacha.get')['pools'])==n and next(row for row in get('gacha.get')['pools'] if row['id']==3010)['enabled']
     open_form('rules.schedule')
     change('#fields .editor-grid label:first-child input','345')
     save();assert get('rules.get')['home_furniture_limit']==345
@@ -64,6 +67,28 @@ def verify(js, until, get, post):
     change('#field-limit','137');js("document.querySelector('#operation').requestSubmit()")
     until(lambda:js("document.querySelector('.metrics div:last-child b').textContent.endsWith('/ 137')"))
     assert get('capacity.get')['limit']==137
+
+def verify_mail(js,until,get):
+    def change(selector,value,event="input"):
+        import json
+        js(f"var f=document.querySelector({json.dumps(selector)});f.value={json.dumps(value)};f.dispatchEvent(new Event({json.dumps(event)}))")
+    # Send from the actual operator form. Retrying the same draft reuses its durable batch.
+    js("document.querySelector('#quick [data-route=\"mail.send\"]').click()")
+    change('[name=scope]','existing','change')
+    change('[name=title]','隔离浏览器投递')
+    change('[name=body]','管理台附件测试')
+    js("document.querySelector('#fields fieldset button').click()")
+    change('[data-item]','101');change('[data-count]','7')
+    key=js("document.querySelector('[name=request_id]').value")
+    js("document.querySelector('#operation').requestSubmit()")
+    until(lambda:js("document.querySelector('#result').textContent.includes('已登记批次')"))
+    js("document.querySelector('#operation').requestSubmit()")
+    until(lambda:js("!document.querySelector('#execute').disabled"))
+    rows=[r for r in get('mail.list')['batches'] if r['request_id']==key]
+    assert len(rows)==1 and rows[0]['title']=='隔离浏览器投递'
+    js("document.querySelector('#result button').click()")
+    assert js("document.querySelector('[name=request_id]').value")!=key
+
 
 def verify_password_reset(js,until,player):
     import json

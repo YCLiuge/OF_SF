@@ -48,8 +48,8 @@ def info(pid,count):
 
 
 def select(s,req,rsp):
-    from private_gacha import active,onboarding
-    if req.gacha_id!=FASHION or FASHION not in active() or s.dungeon[0] or onboarding(s):
+    from private_gacha import active
+    if req.gacha_id!=FASHION or FASHION not in active() or s.dungeon[0]:
         return pb.StatusCode_BAD_REQ
     if not req.item_id:
         previous=current(s.player_id)

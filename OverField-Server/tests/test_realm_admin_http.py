@@ -81,6 +81,7 @@ def run(root):
             spec_path = api.PREFIX + "/openapi.json"
             for bad_token in (None, "wrong-token"):
                 assert request(owner, "GET", spec_path, bad_token)[0] == 401
+                assert request(owner, "POST", api.OPERATIONS + "mail.send", bad_token, {})[0] == 401
                 assert request(owner, "POST", api.OPERATIONS + "notice.publish", bad_token,
                                {"title": "Denied", "body": "test"})[0] == 401
             status, body = request(owner, "GET", spec_path + "?token=" + token)

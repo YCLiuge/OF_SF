@@ -577,6 +577,14 @@ class LocalGameService:
                 self._reclaim_departed(row[0])
             with db.conn:
                 pid,proposed=self._prepare_role(slot,name,row)
+                # Import prepares a role before its first native login. Only a normal new
+                # role (or a reverted import) receives the starter loadout.
+                imported = db.conn.execute("SELECT state FROM private_import_receipt WHERE slot=?", (slot,)).fetchone()
+                if row is None or (imported and imported[0] == "undone"):
+                    receipt = db.conn.execute("INSERT OR IGNORE INTO claimed_rewards(player_id,system,key) VALUES(?, 'private_entitlements', 'starter-roster-v1')", (pid,))
+                    if receipt.rowcount:
+                        from private_entitlements import grant_new_roster
+                        grant_new_roster(pid)
                 from save_import_service import seal_native_entry
                 seal_native_entry(db.conn,slot)
                 from save_import_fishing import apply_floor, sealed_floor

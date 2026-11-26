@@ -25,6 +25,22 @@ def _owned(player, item):
     return detail is not None and detail.main_item.WhichOneof("item") == "base_item" and detail.main_item.base_item.num > 0
 
 
+def project_tree_marker(player, notices):
+    """Expose the realm's existing unlock to the native UI without claiming the tutorial reward."""
+    from utils.pb_create import make_item
+    marker = make_item(100000008, 1, player)
+    tag = marker.main_item.item_tag
+    packet = notices.get(tag)
+    if packet is None:
+        packet = notices[tag] = pb.PackNotice(status=pb.StatusCode_OK)
+    for item in packet.items:
+        if item.main_item.item_id == marker.main_item.item_id:
+            if item.main_item.WhichOneof("item") == "base_item":
+                item.main_item.base_item.num = max(1, item.main_item.base_item.num)
+            return
+    packet.items.add().CopyFrom(marker)
+
+
 def _access(player, area):
     item = area["unlock_item_i_d"]
     unlock = res.index("PlayerUnlock", "player_unlock", "item_i_d").get(item)
@@ -94,10 +110,11 @@ def starter_talk(session, req, packet_id):
 
 
 def list_badges(session, req, rsp):
-    for group in res.index("MoonStone", "stone_unlock_data").values():
-        for node in group.get("stone_unlock_data_group_info", ()):
-            for key in node.get("unlock_achieve_i_d", ()):
-                _achieve_count(session.player_id, key)
+    unlock_conditions = {key for group in res.index("MoonStone", "stone_unlock_data").values()
+                         for node in group.get("stone_unlock_data_group_info", ())
+                         for key in node.get("unlock_achieve_i_d", ())}
+    for key in unlock_conditions:
+        _achieve_count(session.player_id, key)
     status = badges(session, req, rsp)
     taken = _claimed(session.player_id, "badge_page")
     for page in rsp.ability_badge_pages:

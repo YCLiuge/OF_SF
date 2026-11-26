@@ -1,7 +1,7 @@
 from network.packet_handler import PacketHandler, packet_handler
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
-from private_channels import HOME, is_public, reclaim
+from private_channels import HOME, is_public, reclaim, return_hand
 from private_dungeons import enter
 from server import scene_data
 
@@ -15,6 +15,8 @@ class Handler(PacketHandler):
         rsp.status = enter(session, req, rsp)
         session.send(MsgId.DungeonEnterRsp, rsp, packet_id)
         if not was_inside and rsp.status == pb.StatusCode_OK:
+            if session.scene_id == HOME:
+                return_hand(session.player_id, session)
             if session.scene_id == HOME and is_public(session.realm_rules, session.channel_id):
                 reclaim(session.player_id, session.channel_id, session)
             session.home_seat = None

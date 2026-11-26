@@ -17,6 +17,8 @@ class Handler(PacketHandler):
 
         session.send(MsgId.PlayerPingRsp, rsp, packet_id)
         if getattr(session, "logged_in", False):
+            from private_mail import poll as check_mail
+            check_mail(session)
             from private_bless_tasks import tick as prayer_tick
             prayer_tick(session)
             from private_field_gathering import tick as gather_tick

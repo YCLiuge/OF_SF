@@ -208,3 +208,38 @@ def notify(session):
     emoji = pb.ChatUnLockExpressionNotice(status=pb.StatusCode_OK)
     emoji.expression_id.extend(sorted(data.emoji))
     session.send(MsgId.ChatUnLockExpressionNotice,emoji,0)
+
+
+def grant_new_roster(player):
+    """Grant a new private role its playable national roster and equipable weapon templates."""
+    from utils import db
+    from utils.pb_create import make_item
+    from private_field_gathering import upgrade_tools
+
+    owned_characters = {row[0] for row in db.conn.execute(
+        "SELECT character_id FROM characters WHERE player_id=?", (player,))}
+    characters = []
+    for row in _rows("Character", "character"):
+        key = row["i_d"]
+        if (key not in owned_characters and row.get("asset_full_name") and row.get("spell_i_ds")
+                and row.get("default_weapon_i_d") and row.get("item_i_d") == key):
+            characters.append(db.add_character(player, key))
+    upgrade_tools(player, characters)
+    owned_weapons = set()
+    for raw, in db.conn.execute("SELECT item_detail_blob FROM items_s WHERE player_id=?", (player,)):
+        item = pb.ItemDetail.FromString(raw).main_item
+        if item.HasField("weapon"):
+            owned_weapons.add(item.weapon.weapon_id)
+    items = res.index("Item", "item")
+    for weapon in _rows("Weapon", "weapon"):
+        key = weapon["i_d"]
+        if (key in owned_weapons or weapon.get("item_i_d") != key or not weapon.get("asset_full_name")
+                or items.get(key, {}).get("new_bag_item_tag") != pb.EBagItemTag_Weapon):
+            continue
+        item = make_item(key, 1, player)
+        db.set_item_detail(player, item.SerializeToString(), instance_id=item.main_item.weapon.instance_id)
+    config = res.index("GlobalConfig", "config", "key")
+    for key in ("UnLockHomeSet1_Item", "UnLockHomeSet2_Item", "UnLockHomeSet3_Item"):
+        template = int(config[key]["values"][0])
+        if not db.get_item_detail(player, template):
+            db.set_item_detail(player, make_item(template, 1, player).SerializeToString(), template)

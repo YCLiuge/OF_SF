@@ -215,66 +215,63 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False, *, eq
             item_detail.extra_quality = i.get("quality", 0)
             match i["new_bag_item_tag"]:
                 case EBagItemTag.EBagItemTag_Weapon:  # 武器 tag:2
-                    for weapon_i in res["Weapon"]["weapon"]["datas"]:
-                        if weapon_i["i_d"] == i["i_d"]:
-                            tmp = item_detail.main_item
-                            if not weapon_i.get("item_i_d"):
-                                continue
-                            tmp.item_id = weapon_i["item_i_d"]
-                            tmp.item_tag = EBagItemTag.EBagItemTag_Weapon
-                            weapon = tmp.weapon
-                            weapon.weapon_id = weapon_i["item_i_d"]
-                            weapon.instance_id = db.get_instance_id(player_id)
-                            f = True
-                            for prop in res["Weapon"]["weapon_property"]["datas"]:
-                                if weapon_i["weapon_property_i_d"] == prop["i_d"]:
-                                    weapon.property_index = _property_group(prop["weapon_property_group_info"], equipment_level)
-                                    group_s = prop["weapon_property_group_info"][
-                                        weapon.property_index - 1
-                                    ]
-                                    if not group_s.get("min_attack"):
-                                        continue
-                                    weapon.attack = int(
-                                        random.uniform(
-                                            group_s["min_attack"], group_s["max_attack"]
-                                        )
-                                    )
-                                    weapon.damage_balance = int(
-                                        random.uniform(
-                                            group_s["min_damage_balance"],
-                                            group_s["max_damage_balance"],
-                                        )
-                                        * 100
-                                    )
-                                    weapon.critical_ratio = int(
-                                        random.uniform(
-                                            group_s["min_critical_ratio"],
-                                            group_s["max_critical_ratio"],
-                                        )
-                                        * 100
-                                    )
-                                    weapon.level = equipment_level if equipment_level is not None else random.randint(
-                                        group_s["min_level"], group_s["max_level"]
-                                    )
-                                    weapon.star = 1
-                                    f = False
-                                    break
-                            if f:
-                                # 无属性的,鱼竿,载具等
-                                tmp.is_new = True
-                                item_detail.pack_type = 0
-                                weapon.attack = 1
-                                weapon.damage_balance = 1
-                                weapon.critical_ratio = 1
-                                weapon.level = 1
-                                weapon.star = 1
-                                weapon.durability = weapon_i["durability"] if weapon_i.get("new_weapon_type")==18 else 100
-                                weapon.property_index = 1
-                            if is_all:
-                                r.append(item_detail)
-                                item_detail = ItemDetail()
-                                break
-                            return item_detail
+                    weapon_i = res.index("Weapon", "weapon").get(i["i_d"])
+                    if weapon_i is not None:
+                        tmp = item_detail.main_item
+                        if not weapon_i.get("item_i_d"):
+                            continue
+                        tmp.item_id = weapon_i["item_i_d"]
+                        tmp.item_tag = EBagItemTag.EBagItemTag_Weapon
+                        weapon = tmp.weapon
+                        weapon.weapon_id = weapon_i["item_i_d"]
+                        weapon.instance_id = db.get_instance_id(player_id)
+                        prop = res.index("Weapon", "weapon_property").get(weapon_i["weapon_property_i_d"])
+                        group_s = {}
+                        if prop:
+                            weapon.property_index = _property_group(prop["weapon_property_group_info"], equipment_level)
+                            group_s = prop["weapon_property_group_info"][
+                                weapon.property_index - 1
+                            ]
+                        if group_s.get("min_attack"):
+                            weapon.attack = int(
+                                random.uniform(
+                                    group_s["min_attack"], group_s["max_attack"]
+                                )
+                            )
+                            weapon.damage_balance = int(
+                                random.uniform(
+                                    group_s["min_damage_balance"],
+                                    group_s["max_damage_balance"],
+                                )
+                                * 100
+                            )
+                            weapon.critical_ratio = int(
+                                random.uniform(
+                                    group_s["min_critical_ratio"],
+                                    group_s["max_critical_ratio"],
+                                )
+                                * 100
+                            )
+                            weapon.level = equipment_level if equipment_level is not None else random.randint(
+                                group_s["min_level"], group_s["max_level"]
+                            )
+                            weapon.star = 1
+                        else:
+                            # 无属性的,鱼竿,载具等
+                            tmp.is_new = True
+                            item_detail.pack_type = 0
+                            weapon.attack = 1
+                            weapon.damage_balance = 1
+                            weapon.critical_ratio = 1
+                            weapon.level = 1
+                            weapon.star = 1
+                            weapon.durability = weapon_i["durability"] if weapon_i.get("new_weapon_type")==18 else 100
+                            weapon.property_index = 1
+                        if is_all:
+                            r.append(item_detail)
+                            item_detail = ItemDetail()
+                            continue
+                        return item_detail
                 case EBagItemTag.EBagItemTag_Armor:  # 防具 tag:3
                     for armor_i in res["Armor"]["armor"]["datas"]:
                         if armor_i["i_d"] == i["i_d"]:

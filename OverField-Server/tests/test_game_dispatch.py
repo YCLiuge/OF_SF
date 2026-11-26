@@ -118,12 +118,28 @@ class PublicDiscovery(unittest.TestCase):
             for directory, stamp, content in ((cache,version,blob),(base,build,original)):
                 (directory/(PREFIX+"_"+stamp+".bytes")).write_bytes(content)
                 (directory/(PREFIX+"_"+stamp+".hash")).write_text(hashlib.md5(content).hexdigest(),encoding="ascii")
-            (base/(bundle_id+".bundle")).write_bytes(bundle)
+            original_file = base/(bundle_id+".bundle")
+            original_file.write_bytes(bundle)
+            cached_file = cache.parent/"CacheFiles"/bundle_id[:2]/bundle_id/"__data"
+            cached_file.parent.mkdir(parents=True)
+            cached_file.write_bytes(b"X"*len(bundle))
             dispatch = GameDispatch("http://127.0.0.1:18881","127.0.0.1",11033,client_root=root)
             with listening(dispatch) as port:
                 code, _, payload = http(port,"POST","/dispatch/client_hot_update")
                 self.assertEqual((code, json.loads(payload)["currentVersion"]), (200, build+"_"+version))
-                self.assertEqual(http(port,"GET","/Resources/"+build+"/"+bundle_id+".bundle")[2],bundle)
+                route = "/Resources/"+build+"/"+bundle_id+".bundle"
+                # Same-size corrupt preferred cache with valid packaged resource.
+                code,_,body = http(port,"GET",route)
+                self.assertEqual((code,body),(200,bundle))
+                self.assertTrue(dispatch.assets._bundles[bundle_id+".bundle"][0].samefile(original_file))
+                # The selected file is removed while Unity is running. Its repaired cache
+                # must serve the same content, including ranged downloads.
+                original_file.unlink()
+                cached_file.write_bytes(bundle)
+                code,_,body = http(port,"GET",route,headers={"Range":"bytes=1-3"})
+                self.assertEqual((code,body),(206,bundle[1:4]))
+                cached_file.write_bytes(b"X"*len(bundle))
+                self.assertEqual(http(port,"GET",route)[0],503)
                 self.assertEqual(http(port,"GET","/Resources/"+BUILD+"/"+bundle_id+".bundle")[0],404)
             (cache/(PREFIX+"_"+version+".bytes")).write_bytes(b"tampered manifest")
             with self.assertRaisesRegex(ValueError,"manifest digest"):

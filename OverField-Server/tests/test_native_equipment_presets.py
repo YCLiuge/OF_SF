@@ -64,7 +64,7 @@ def run(root,resources):
         b,peer,_,_ = enter(1)
         with a,b:
             with host.lock,db.conn:
-                db.add_character(pid,second)
+                peer_equipment = current(peer,second).SerializeToString()
                 initial = current(pid,first).equipment_presets[0].weapon
                 other_initial = current(pid,second).equipment_presets[0].weapon
                 head = make(pid,2111001,"armor",strength_level=3)
@@ -157,7 +157,7 @@ def run(root,resources):
             assert changed.status==pb.StatusCode_OK and changed==switch(a,26,second,2)
             assert wearer(pid,card,"poster")==wearer(pid,blade,"weapon")==second
             assert all(not p.weapon and not any(s.poster_id for s in p.posters) for p in current(pid,first).equipment_presets)
-            assert current(peer,first).equipment_presets[0].weapon and not db.get_characters(peer,second)
+            assert current(peer,first).equipment_presets[0].weapon and current(peer,second).SerializeToString() == peer_equipment
     finally:
         host.stop()
     host.start()

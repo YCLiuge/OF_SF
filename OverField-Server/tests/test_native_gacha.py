@@ -49,7 +49,7 @@ def run(root, resources):
         sock, _, pid = login(service.port, identity.issue_ticket(*profile))
         with sock:
             join(sock)
-            assert [r.gacha_id for r in call(sock, "GachaList", 4).gachas] == [2000, 3000, 3001, 3023, 203014, 203015, 3002, 4000, 9000]
+            assert [r.gacha_id for r in call(sock, "GachaList", 4).gachas] == [p["id"] for p in settings["pools"]] + [9000,9001]
             def balance(item):
                 raw = db.get_item_detail(pid, item)
                 return pb.ItemDetail.FromString(raw).main_item.base_item.num if raw else 0
@@ -64,7 +64,7 @@ def run(root, resources):
                 if pool["id"] == 3001:
                     pool.update(enabled=False)
             configure(root, settings)
-            assert [r.gacha_id for r in call(sock, "GachaList", 5).gachas] == [2000, 3000, 3023, 203014, 203015, 3002, 4000, 9000]
+            assert [r.gacha_id for r in call(sock, "GachaList", 5).gachas] == [p["id"] for p in settings["pools"] if p["enabled"]] + [9000,9001]
             assert call(sock, "Gacha", 6, gacha_id=3001, is_single=True).status == pb.StatusCode_BAD_REQ
             assert call(sock, "GachaFullPick", 7, gacha_id=2000, item_id=302002).status == pb.StatusCode_BAD_REQ
             assert call(sock, "ChooseGacha", 70, gacha_id=9000, choose_gacha_pool=3001).status == pb.StatusCode_BAD_REQ
@@ -73,7 +73,9 @@ def run(root, resources):
             ten = call(sock, "Gacha", 8, gacha_id=3000)
             assert ten.status == pb.StatusCode_OK and len(ten.items) == 10 and ten.info.gacha_times == 10
             assert all(i.main_item.character.character_id == 401004 for i in ten.items)
-            assert ten.items[0].main_item.is_new and all(i.extras[0].item_id == 34104 for i in ten.items[1:])
+            assert ten.items[0].main_item.is_new and all(i.transformed_item[0].item_id == 34104 for i in ten.items[1:])
+            assert all(i.extra_quality and i.main_item.item_tag == pb.EBagItemTag_Card for i in ten.items)
+            assert all([x.item_id for x in i.transformed_item] == [34104] and all(x.item_id!=34104 for x in i.extras) for i in ten.items[1:])
             assert balance(110) == 20 and balance(34104) == shard_before + 27
             assert call(sock, "Gacha", 8, gacha_id=3000) == ten and balance(110) == 20
             hist = call(sock, "GachaRecord", 9, gacha_id=3000, page=2)
@@ -110,7 +112,7 @@ def run(root, resources):
                 if pool["id"] in (3000, 3002):
                     pool["enabled"] = False
             configure(root, settings)
-            assert [r.gacha_id for r in call(sock, "GachaList", 20).gachas] == [2000, 3023, 203014, 203015, 4000]
+            assert [r.gacha_id for r in call(sock, "GachaList", 20).gachas] == [p["id"] for p in settings["pools"] if p["enabled"]] + [9000,9001]
             assert len(call(sock, "GachaRecord", 21, gacha_id=3000, page=1).records) == 5
     finally:
         service.stop()
@@ -278,7 +280,7 @@ def poster_bonuses(root, resources):
             if h.msg_id == MsgId.GachaRsp and h.packet_id == sequence:
                 result = pb.GachaRsp.FromString(data)
                 assert result.status == pb.StatusCode_OK
-                extras = {item.item_id: item.base_item.num for item in result.items[0].extras}
+                extras = {item.item_id: item.base_item.num for item in (*result.items[0].transformed_item, *result.items[0].extras)}
                 return result, extras, updated
         raise AssertionError("Missing recruit response")
 
@@ -289,6 +291,7 @@ def poster_bonuses(root, resources):
             join(sock)
             with game.lock, db.conn:
                 db.set_item_detail(pid, make_item(104, 10, pid).SerializeToString(), 104)
+                db.conn.execute("DELETE FROM characters WHERE player_id=? AND character_id=401004", (pid,))
                 baseline = {i: total(pid, i) for i in (107, 111, 112)}
             with patch("private_gacha.outcome", return_value=(11240, 0)):
                 first, extras, updated = draw(sock, 51)
@@ -325,6 +328,48 @@ def poster_bonuses(root, resources):
     print("PASS SR poster duplicate bonus, per-pull vouchers, SSR character duplicate and full-star grants, pack balances, replay and restart.")
 
 
+def all_banners(root, resources):
+    from utils.res_loader import res
+    identity = LocalIdentity(root / "identity.sqlite3")
+    profile = identity.create_profile("全卡池验收")
+    service = LocalGameService(identity, root, resources, port=0)
+    service.start()
+    try:
+        sock, _, pid = login(service.port, identity.issue_ticket(*profile))
+        with sock:
+            join(sock)
+            defined = res.index("Gacha", "info")
+            catalog = call(sock, "GachaList", 500)
+            assert {pool.gacha_id for pool in catalog.gachas} == set(defined)
+            seq = 501
+            for banner, entry in defined.items():
+                if entry.get("card_pool_range"):
+                    seq += 1
+                    choice = call(sock, "ChooseGacha", seq, gacha_id=banner, choose_gacha_pool=entry["card_pool_range"][0])
+                    assert choice.status == pb.StatusCode_OK, banner
+                for expected in (1, 10):
+                    key = "1" if expected == 1 else "2"
+                    if entry.get("method"+key+"_count") != expected:
+                        continue
+                    seq += 1
+                    result = call(sock, "Gacha", seq, gacha_id=banner, is_single=(expected==1))
+                    assert result.status == pb.StatusCode_OK and len(result.items) == expected, (banner,expected,result.status)
+                    assert result.info.gacha_id == banner
+                    for item in result.items:
+                        assert item.main_item.item_id in res.index("Item", "item") and item.main_item.WhichOneof("item")
+                        if item.main_item.HasField("character"):
+                            assert item.main_item.character.character_id == item.main_item.item_id
+                            assert item.transformed_item and all(r.base_item.num>0 for r in item.transformed_item)
+                    replay = call(sock, "Gacha", seq, gacha_id=banner, is_single=(expected==1))
+                    assert replay == result
+                seq += 1
+                history = call(sock, "GachaRecord", seq, gacha_id=banner, page=1)
+                assert history.records and history.status == pb.StatusCode_OK, banner
+        print(f"PASS all {len(defined)} native 1.1.12 banners, supported single/ten methods, duplicate card conversion slots, history and replay.")
+    finally:
+        service.stop()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--resources", required=True, type=Path)
@@ -337,3 +382,6 @@ if __name__ == "__main__":
         permanent_guarantees(Path(temp), args.resources)
     with TemporaryDirectory() as temp:
         post_draw_interactions(Path(temp), args.resources)
+
+    with TemporaryDirectory() as temp:
+        all_banners(Path(temp), args.resources)

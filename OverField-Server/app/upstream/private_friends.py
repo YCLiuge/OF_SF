@@ -36,7 +36,7 @@ def set_state(player,other,new_state):
 
 def at_limit(player,status):
     key="Player_Friend_Count" if status==pb.FriendStatus_FRIEND else "Player_Friend_Apply_Count"
-    cap=int(next(r["values"][0] for r in res["GlobalConfig"]["config"]["datas"] if r.get("key")==key))
+    cap=int(res.index("GlobalConfig", "config", "key")[key]["values"][0])
     used=db.conn.execute("SELECT COUNT(*) FROM friend WHERE player_id=? AND friend_status=?",(player,status)).fetchone()[0]
     return used>=cap
 

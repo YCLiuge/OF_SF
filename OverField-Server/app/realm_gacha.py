@@ -26,8 +26,8 @@ def _catalog():
     result = {r["i_d"]: {"id": r["i_d"], "groups": groups[r["method1_i_d"]],
                        "pity_group": r["big_guarantee_pool_i_d"], "featured": r.get("character_i_d1", 0),
                        "opening": r.get("opening_time"), "closing": r.get("closing_time"),
-                       "ticket": r["consume_item1_i_d"]}
-            for r in gacha["info"]["datas"] if r["i_d"] in (2000, 2002) or r.get("new_u_i_gacha_type") == 3
+                       "ticket": r.get("consume_item1_i_d") or r["consume_item2_i_d"]}
+            for r in gacha["info"]["datas"] if r["i_d"] in (1000, 2000, 2001, 2002) or r.get("new_u_i_gacha_type") == 3
             if r.get("method1_i_d") in groups and r.get("big_guarantee_pool_i_d") in groups[r["method1_i_d"]]}
 
 
@@ -52,11 +52,31 @@ def featured_pool(pool_id):
     return pool
 
 
-def defaults():
+def previous_defaults():
     permanent = {"id": 2000, "enabled": True, "pity": 70, "sr_pity": 10,
                  "weights": {"100": 9220, "200": 80, "300": 600, "400": 100}}
     featured_ids = (3000, 3001, 3023, 203014, 203015, 3002)
     return {"pools": [permanent] + [featured_pool(key) for key in featured_ids] + [fashion_pool()]}
+
+
+def defaults():
+    # Preserve the familiar permanent banner first, then all authored reward pools.
+    permanent = previous_defaults()["pools"][0]
+    pools = [permanent]
+    for key in _catalog():
+        if key == 2000:
+            continue
+        if key == FASHION:
+            pools.append(fashion_pool())
+        elif key == 1000:
+            pools.append({"id": key, "enabled": True, "pity": 50, "weights": dict(permanent["weights"])})
+        elif key in (2001, 2002):
+            groups = _catalog()[key]["groups"]
+            pools.append({"id": key, "enabled": True, "pity": 70,
+                          "weights": dict(zip(map(str, groups), (9220, 80, 600, 100)))})
+        else:
+            pools.append(featured_pool(key))
+    return {"pools": pools}
 
 
 def validate(settings):
@@ -100,6 +120,12 @@ def upgrade(conn, prefix=""):
                 current["pools"].append(fashion_pool())
                 conn.execute("UPDATE "+prefix+"private_gacha_config SET settings=? WHERE id=1",
                              (json.dumps(current,separators=(",",":")),))
+
+    if conn.execute("INSERT OR IGNORE INTO "+prefix+"gacha_config_revisions VALUES(2)").rowcount:
+        row = conn.execute("SELECT settings FROM "+prefix+"private_gacha_config WHERE id=1").fetchone()
+        if row and json.loads(row[0]) == previous_defaults():
+            conn.execute("UPDATE "+prefix+"private_gacha_config SET settings=? WHERE id=1",
+                         (json.dumps(defaults(), separators=(",", ":")),))
 
 
 def configure(state, settings=None, *, enable_featured=None, expected=None):

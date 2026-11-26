@@ -57,7 +57,7 @@ def run(root, resources):
         with c:
             assert 100011 not in progress
             assert accept(c).quest_id == 100011
-            assert call(c,"UpdateTeam",char1=102001)[0].status==pb.StatusCode_CharNotExist
+            assert call(c,"UpdateTeam",char1=102003)[0].status==pb.StatusCode_CharNotExist
             assert 2000 in {g.gacha_id for g in call(c,"GachaList")[0].gachas}
             assert call(c,"ClaimQuestReward",quest_id=1000001,quest_type=pb.EQuestType_MainQuest)[0].status==pb.StatusCode_BAD_REQ
             assert call(c,"NpcTalk",id=11000111)[0].status == pb.StatusCode_BAD_REQ
@@ -80,8 +80,7 @@ def run(root, resources):
             assert call(c,"NpcTalk",id=11000121)[1]=={}
             assert {k:owned(k,pid)-v for k,v in before.items()}=={104:1,100000007:1}
             assert call(c,"NpcTalk",id=11000131)[0].status==pb.StatusCode_BAD_REQ
-            assert [g.gacha_id for g in call(c,"GachaList")[0].gachas]==[2000]
-            assert call(c,"Gacha",gacha_id=2000,is_single=False)[0].status==pb.StatusCode_BAD_REQ
+            assert {2000, 3000, 4000, 9000} <= {g.gacha_id for g in call(c,"GachaList")[0].gachas}
             assert call(c,"Gacha",gacha_id=1000,is_single=True)[0].status==pb.StatusCode_BAD_REQ
             with closing(sqlite3.connect(root/"game.sqlite")) as db:
                 old_ticket = db.execute("SELECT item_detail_blob FROM items WHERE player_id=? AND item_id=104",(pid,)).fetchone()[0]
@@ -98,13 +97,13 @@ def run(root, resources):
             assert drawn.status==pb.StatusCode_OK and drawn.info.gacha_times==1 and updates=={100013:3}
             assert len(drawn.items)==1
             card=drawn.items[0]
-            assert card.main_item.is_new and card.main_item.character.character_id==102001
+            assert not card.main_item.is_new and card.main_item.character.character_id==102001
             assert card.main_item.item_tag==pb.EBagItemTag_Card and card.extra_quality==3
-            assert [(x.item_id,x.base_item.num) for x in card.extras]==[(107,500)]
+            assert any(x.item_id==107 and x.base_item.num==500 for x in card.extras)
             with closing(sqlite3.connect(root/"game.sqlite")) as ledger:
                 receipt = ledger.execute("SELECT r.origin,r.is_new,r.extras FROM private_gacha_rewards r "+
                     "JOIN gacha_record g ON g.id=r.record_id WHERE g.player_id=?", (pid,)).fetchall()
-                assert receipt == [("tutorial",1,"[[107,500]]")]
+                assert len(receipt)==1 and receipt[0][:2]==("tutorial",0) and [107,500] in __import__("json").loads(receipt[0][2])
             assert owned(104,pid)==starting_ticket-1 and owned(107,pid)==starting_bonus+500
             assert call(c,"Gacha",gacha_id=2000,is_single=True)[0] == drawn
             assert len(call(c,"GachaList")[0].gachas) > 1
@@ -153,7 +152,7 @@ def run(root, resources):
         with other:
             assert not any(k in states for k in (100011,100012,100013))
             assert call(other,"Tutorial",tutorial_id=23)[0].status==pb.StatusCode_BAD_REQ
-            assert call(other,"UpdateTeam",char1=102001)[0].status==pb.StatusCode_CharNotExist
+            assert call(other,"UpdateTeam",char1=102003)[0].status==pb.StatusCode_CharNotExist
             assert not call(other,"GachaRecord",gacha_id=2000,page=1)[0].records
             assert call(other,"ClaimQuestReward",quest_id=1000001,quest_type=pb.EQuestType_MainQuest)[0].status==pb.StatusCode_BAD_REQ
         # A full service restart restores the roster, equipment, story claim and recruitment history.

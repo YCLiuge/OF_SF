@@ -48,7 +48,7 @@ def run(root, resources):
                     assert response.status == pb.StatusCode_OK
                     result, = response.items
                     assert result.main_item.item_id == template and result.main_item.is_new == fresh
-                    assert {i.item_id:i.base_item.num for i in result.extras} == expected
+                    assert {i.item_id:i.base_item.num for i in (*result.transformed_item, *result.extras)} == expected
                     # A replay is the same wire response, with no second ticket or credit.
                     assert call(sock, "Gacha", seq, gacha_id=2000, is_single=True) == response
                 with game.lock:
@@ -80,7 +80,7 @@ def run(root, resources):
             selection = call(sock, "GachaFullPick", 80, gacha_id=2000, item_id=ssr)
             assert selection.status == pb.StatusCode_OK
             result, = selection.item
-            assert not result.main_item.is_new and {i.item_id:i.base_item.num for i in result.extras} == {111:40}
+            assert not result.main_item.is_new and {i.item_id:i.base_item.num for i in (*result.transformed_item, *result.extras)} == {111:40}
             assert call(sock, "GachaFullPick", 81, gacha_id=2000, item_id=ssr).status == pb.StatusCode_REPEAT_GET_REWARD
             with game.lock:
                 assert {i:amount(pid,i)-n for i,n in old.items()} == {104:0,107:0,111:40,112:0,shard:0}

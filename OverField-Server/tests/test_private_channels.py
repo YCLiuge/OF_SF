@@ -7,6 +7,7 @@ import sqlite3
 from tempfile import TemporaryDirectory
 
 from local_game_service import LocalGameService, MsgId, pb
+from local_game_wire import encode, receive
 from local_identity import LocalIdentity
 from test_game_realm import login, join_after_intro, next_msg
 from test_observed_initialization import call
@@ -30,6 +31,21 @@ def run(root,resources):
         return next_msg(sock,MsgId.SceneDataNotice,pb.SceneDataNotice).data
     def put(sock,fid):
         return call(sock,"PlaceFurniture",furniture_id=fid,furniture_item_id=t,pos={"x":4,"z":5})
+    def trace(sock, name, **fields):
+        # The ping marks the end of this operation without relying on a socket timeout.
+        req = getattr(pb, name + "Req")(**fields)
+        frame = encode(getattr(MsgId, name + "Req"), req.SerializeToString(), 385)
+        sock.sendall(frame + encode(MsgId.PlayerPingReq, pb.PlayerPingReq().SerializeToString(), 386))
+        seen = []
+        while True:
+            header, body = receive(sock)
+            if header.msg_id == MsgId.PlayerPingRsp and header.packet_id == 386:
+                break
+            seen.append(header.msg_id)
+            if header.msg_id == getattr(MsgId, name + "Rsp") and header.packet_id == 385:
+                assert getattr(pb, name + "Rsp").FromString(body).status == pb.StatusCode_OK
+        assert getattr(MsgId, name + "Rsp") in seen
+        return seen
     def bag(pid,n=None):
         with closing(sqlite3.connect(root/"game.sqlite")) as db,db:
             blob=db.execute("SELECT item_detail_blob FROM items WHERE player_id=? AND item_id=?",(pid,t)).fetchone()
@@ -72,7 +88,7 @@ def run(root,resources):
             assert bag(aid)==7
             assert switch(a,aid).channel_id==aid
             assert put(a,200).status==put(a,201).status==pb.StatusCode_OK
-            assert call(a,"GetGardenInfo").garden_info.furniture_limit_num==500
+            assert call(a,"GetGardenInfo").garden_info.furniture_limit_num==200000
             other=switch(b,0,target_player_label=aid)
             assert set(other.scene_garden_data.garden_furniture_info_map)=={200,201}
             assert put(b,202).status==pb.StatusCode_OK and put(b,203).status!=pb.StatusCode_OK
@@ -103,6 +119,33 @@ def run(root,resources):
             assert held.status==pb.StatusCode_OK and bag(bid)==6
             assert call(b,"TakeOutHandingFurniture",furniture_id=held.furniture_id).status==pb.StatusCode_OK and bag(bid)==7
             assert call(b,"TakeOutHandingFurniture",furniture_id=held.furniture_id).status!=pb.StatusCode_OK and bag(bid)==7
+            held = call(b, "HandingFurniture", item_id=t)
+            fid = held.furniture_id
+            assert call(b, "HandingFurniture", item_id=t).furniture_id == fid and bag(bid) == 6
+            animation = {"id": 7001, "value1": fid, "value2": t}
+            for _ in range(2):
+                added = trace(b, "SceneInterActionPlayStatus", push_type=pb.AddKeepingStatus, action_status=animation)
+                assert MsgId.SceneInterActionPlayStatusNotice in added
+                placed = trace(b, "PlaceFurniture", furniture_id=fid, furniture_item_id=t, pos={"x":100})
+                assert placed.index(MsgId.PlaceFurnitureRsp) < placed.index(MsgId.SceneGardenFurnitureUpdateNotice)
+                gone = trace(b, "SceneInterActionPlayStatus", push_type=pb.RemovingStatus, action_status=animation)
+                assert MsgId.SceneInterActionPlayStatusNotice in gone
+                picked = trace(b, "TakeOutFurniture", furniture_id=fid, is_put_in_package=False)
+                assert MsgId.SceneGardenFurnitureRemoveNotice not in picked and bag(bid) == 6
+            assert switch(b, 1, scene=1).scene_id == 1 and bag(bid) == 7
+            # The native channel-jump callback may cancel the old preview after its refund.
+            assert call(b, "TakeOutHandingFurniture", furniture_id=fid).status == pb.StatusCode_OK and bag(bid) == 7
+            assert not switch(b, aid).scene_garden_data.player_handing_furniture_info_map
+            assert call(b, "HandingFurniture", item_id=t).status == pb.StatusCode_OK and bag(bid) == 6
+        game.stop();game.start()
+        b,bid,scene=connect(1)
+        with b:
+            assert not scene.scene_garden_data.player_handing_furniture_info_map and bag(bid) == 7
+            again = call(b, "HandingFurniture", item_id=t)
+            assert again.status == pb.StatusCode_OK
+            assert call(b, "DungeonEnter", dungeon_id=11101, char1=101001).status == pb.StatusCode_OK
+            assert bag(bid) == 7
+            assert call(b, "DungeonExit").status == pb.StatusCode_OK
         game.stop()
         def stored_public(fid):
             with closing(sqlite3.connect(root/"game.sqlite")) as db,db:
@@ -134,9 +177,9 @@ def run(root,resources):
         a,_,_=connect(0);b,_,_=connect(1)
         with a,b:
             switch(a,aid);switch(b,aid)
-            assert call(a,"GetGardenInfo").garden_info.furniture_limit_num==0x7fffffff
+            assert call(a,"GetGardenInfo").garden_info.furniture_limit_num==200000
             assert put(a,521).status==put(a,522).status==pb.StatusCode_OK
-            assert call(b,"GetGardenInfo").garden_info.furniture_limit_num==0
+            assert call(b,"GetGardenInfo").garden_info.furniture_limit_num==200000
             assert put(b,523).status!=pb.StatusCode_OK
     finally:game.stop()
     print("PASS 3 native players: public/home admission, ownership, channel broadcasts, 3 limits, return on channel exit/dungeon entry/disconnect/power loss, legacy relocation, hand/bag transfers and restart.")

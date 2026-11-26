@@ -279,6 +279,16 @@ def preflight(url):
         raise ValueError('当前原客户端使用正式渠道登录。请选择本机验证网关；远端玩法服需使用私服签发的档案接入。')
     return info
 
+def display_arguments(mode):
+    if mode == "game":
+        return ["-window-mode", "borderless"]
+    if mode == "borderless":
+        return ["-window-mode", "borderless", "-screen-fullscreen", "1"]
+    if mode == "window":
+        return ["-screen-fullscreen", "0", "-screen-width", "1280", "-screen-height", "720"]
+    raise ValueError("请选择有效的游戏显示模式。")
+
+
 def main():
     if sys.stdout:sys.stdout.reconfigure(encoding='utf-8',errors='replace')
     if sys.stderr:sys.stderr.reconfigure(encoding='utf-8',errors='replace')
@@ -292,6 +302,7 @@ def main():
     parser.add_argument('--public-tls')
     parser.add_argument('--ca-file',type=Path)
     parser.add_argument('--compact-only', action='store_true')
+    parser.add_argument('--display', choices=('game','borderless','window'), default='game')
     parser.add_argument('--remote-ssh')
     parser.add_argument('--remote-profile',type=Path)
     parser.add_argument('--remote-ssh-port',type=int)
@@ -341,7 +352,7 @@ def main():
         print('区服已就绪，正在打开原版 Unity 客户端。',flush=True)
         game=home/'Client/launcher.exe'
         # Channel sign-in remains inside the original player and its own SDK.
-        proc=subprocess.Popen([str(game)],cwd=game.parent,close_fds=True,
+        proc=subprocess.Popen([str(game),*display_arguments(args.display)],cwd=game.parent,close_fds=True,
                               stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         if account is not None:
             try:

@@ -219,13 +219,32 @@ class Assets:
         """Open only original manifest/version metadata or an active digest-named resource."""
         if leaf in self._meta:
             path, expected = self._meta[leaf]
-            size = None
-            algorithm = "sha256"
-        elif leaf in self._bundles:
-            path, size, expected = self._bundles[leaf]
-            algorithm = "md5"
-        else:
+            return self._verified_stream(path, expected, "sha256", None)
+        if leaf not in self._bundles:
             raise FileNotFoundError(leaf)
+        primary, size, digest = self._bundles[leaf]
+        try:
+            return self._verified_stream(primary, digest, "md5", size)
+        except (OSError, ValueError):
+            # The running Unity player can prune its cache after the mirror has mounted it.
+            # Either local copy must satisfy the active manifest before any bytes are served.
+            data = self.root / "launcher_Data"
+            candidates = (
+                data / "StreamingAssets" / "yoo" / PACKAGE / leaf,
+                data / "yoo" / PACKAGE / "CacheFiles" / digest[:2] / digest / "__data",
+            )
+            for alternate in candidates:
+                if alternate == primary:
+                    continue
+                try:
+                    stream = self._verified_stream(alternate, digest, "md5", size)
+                except (OSError, ValueError):
+                    continue
+                self._bundles[leaf] = (alternate, size, digest)
+                return stream
+            raise
+
+    def _verified_stream(self, path, expected, algorithm, size):
         if not path.resolve(strict=True).is_relative_to(self.root):
             raise ValueError("Resource escapes client root")
         stream = path.open("rb")

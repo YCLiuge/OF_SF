@@ -113,8 +113,101 @@ def run(root, resources):
             assert amount(pid,101)==before+15
     finally:
         realm.stop()
+    operator_delivery(root/"operator-mail", resources)
     print("PASS five native mail operations, individual/bulk delivery, XP, rolled equipment, reliable retry, rollback, favourites limit, account isolation and restart.")
 
+
+def operator_delivery(root, resources):
+    from concurrent.futures import ThreadPoolExecutor
+    from uuid import uuid4
+    import realm_accounts
+    import realm_admin
+    from local_game_wire import encode
+
+    def send(scope, title, **extra):
+        return dict(scope=scope,title=title,body="来自服主的邮件",request_id=str(uuid4()),**extra)
+
+    def admin(name, data):
+        realm_admin.validate(data, realm_admin.OPERATIONS[name]["inputSchema"], "payload")
+        return realm_admin.run(root, name, data, lambda: None)
+
+    root.mkdir()
+    pre=send("existing","空服快照")
+    assert admin("mail.send",pre)["recipients_at_issue"]==0
+    identity=LocalIdentity(root/"identity.sqlite3")
+    realm_accounts.initialize(identity)
+    def create(label):
+        actor=identity.create_profile(label)
+        realm_accounts.register(identity,dict(username="qa"+label,password="local-test-only",nickname=label,
+                                              slot=actor[0],profile_key=actor[1]),True)
+        return actor
+    a,b=create("邮箱甲"),create("邮箱乙")
+    service=LocalGameService(identity,root,resources,port=0)
+    service.start()
+    def open_player(actor):
+        sock,_,pid=login(service.port,identity.issue_ticket(*actor))
+        join_after_intro(sock)
+        return sock,pid
+    def inbox(sock):
+        return {m.title:m for m in call(sock,"GetMails",17).mails if m.sender=="区服管理"}
+    def claim(sock,msg):
+        return call(sock,"OperateMails",22,operate_type=pb.MailOperateType_CLAIM,mail_id=msg.mail_id)
+    def amount(pid,item):
+        found = balance(pid,item)
+        return found.main_item.base_item.num if found else 0
+    try:
+        sock,pid=open_player(a)
+        with sock:
+            assert not inbox(sock)
+            only=send("account","定向",username="qa邮箱甲",rewards=[{"item":101,"quantity":7}])
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                receipts=list(pool.map(lambda _:admin("mail.send",only),range(8)))
+            assert len({r["id"] for r in receipts})==1 and receipts[0]["recipients_at_issue"]==1
+            try:admin("mail.send",{**only,"body":"冲突"})
+            except ValueError:pass
+            else:raise AssertionError("Changed replay accepted")
+            for bad in (send("account","账号缺失",username="qaunknown"),
+                        send("existing","非法模板",rewards=[{"item":4294967295,"quantity":1}]),
+                        send("ongoing","非法收件人",username="qa邮箱甲")):
+                try:admin("mail.send",bad)
+                except ValueError:pass
+                else:raise AssertionError("Invalid dispatch committed")
+            existing=send("existing","已有玩家",rewards=[{"item":102,"quantity":9}])
+            ongoing=send("ongoing","含新玩家",days=2)
+            assert admin("mail.send",existing)["recipients_at_issue"]==2
+            assert admin("mail.send",ongoing)["recipients_at_issue"]==2
+            sock.sendall(encode(MsgId.PlayerPingReq,pb.PlayerPingReq().SerializeToString(),20))
+            assert next_msg(sock,MsgId.ReceiveMailNotice,pb.ReceiveMailNotice).mail.title=="定向"
+            mails=inbox(sock);assert set(mails)=={"定向","已有玩家","含新玩家"}
+            before=amount(pid,101)
+            assert claim(sock,mails["定向"]).status==pb.StatusCode_OK
+            assert claim(sock,mails["定向"]).status==pb.StatusCode_MAIL_NO_REWARD
+            assert amount(pid,101)==before+7
+            assert call(sock,"OperateMails",24,operate_type=pb.MailOperateType_CLAIM_ALL).status==pb.StatusCode_OK
+            assert not call(sock,"OperateMails",25,operate_type=pb.MailOperateType_CLAIM_ALL).claim_result
+            assert call(sock,"OperateMails",26,operate_type=pb.MailOperateType_DELETE_ALL_READED).status==pb.StatusCode_OK
+            assert "定向" not in inbox(sock)
+        expired=send("account","已过期",username="qa邮箱乙",days=1,rewards=[{"item":101,"quantity":4}])
+        expired_id=admin("mail.send",expired)["id"]
+        with identity._write() as conn:
+            conn.execute("UPDATE realm_mail_batches SET issued=issued-172800 WHERE id=?",(expired_id,))
+        other,_=open_player(b)
+        with other:assert set(inbox(other))=={"已有玩家","含新玩家"}
+        future,_=open_player(create("邮箱丙"))
+        with future:assert set(inbox(future))=={"含新玩家"}
+        service.stop();service.start()
+        sock,same=open_player(a)
+        with sock:
+            assert pid==same and amount(pid,101)==before+7 and set(inbox(sock))=={"含新玩家"}
+            assert admin("mail.send",only)["id"]==receipts[0]["id"]
+            assert set(inbox(sock))=={"含新玩家"}
+        history=admin("mail.list",{"limit":2})["batches"]
+        assert [h["title"] for h in history]==["已过期","含新玩家"]
+        assert history[0]["rewards"]==[{"item":101,"quantity":4}]
+        assert len(admin("mail.list",{"before":history[-1]["id"]})["batches"])==3
+    finally:
+        service.stop()
+    print("PASS operator mail native online notice, offline delivery, new-player policy, concurrent retry, expiry window, claims, deletion and restart.")
 
 def box_state(pid, key):
     return pb.MailBriefData.FromString(db.get_mail(pid,key)).mail_state

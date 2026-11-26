@@ -52,6 +52,14 @@ EVENT = {"type": "object", "additionalProperties": False,
 CODE_REWARD = {"type":"object","properties":{"item":ID,"quantity":{"type":"integer","minimum":1,"maximum":1000000}},
                "required":["item","quantity"],"additionalProperties":False}
 OPERATIONS = {
+    "mail.send": operation("any","发送原生游戏邮件；相同批次号可安全重试。全服范围可选择仅现有账号，或在有效期内包含新玩家。",
+        {"request_id":STRING, "scope":{"type":"string","enum":["account","existing","ongoing"]},
+         "username":STRING, "sender":STRING, "title":STRING, "body":STRING,
+         "days":{"type":"integer","minimum":1,"maximum":365},
+         "rewards":{"type":"array","maxItems":16,"items":CODE_REWARD}},
+        ("request_id","scope","title","body")),
+    "mail.list": operation("any","按时间倒序查看服主投递记录、范围及发送时的接收人数。",
+        {"before":ID,"limit":{"type":"integer","minimum":1,"maximum":100}},read_only=True),
     "accounts.find": operation("any","精确查找本服登录账号、游戏名或公开 UID。",
         {"field":{"type":"string","enum":["username","nickname","uid"]},"value":STRING},("field","value"),read_only=True),
     "accounts.reset": operation("any","为选中的本服账号设置新密码。旧登录票和重连凭据立即失效。",
@@ -239,6 +247,9 @@ def validate(value, schema, name="input"):
 
 
 def run(state, name, data, request_stop, expected=None, live_capacity=None):
+    if name in ("mail.send","mail.list"):
+        import realm_mail
+        return realm_mail.send(state,data) if name == "mail.send" else realm_mail.recent(state,data)
     if name in ("accounts.find","accounts.reset"):
         import realm_account_admin
         if name=="accounts.find":return realm_account_admin.find(state,data["field"],data["value"])

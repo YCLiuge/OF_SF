@@ -28,7 +28,7 @@ from server.scene_data import up_scene_action
 logger = logging.getLogger(__name__)
 
 
-def inventory_notices(player_id):
+def inventory_notices(player_id, unlocks=()):
     """Build the login packets in stored order, with one packet per first-seen bag tag."""
     rows = db.db.execute(
         "SELECT item_detail_blob FROM items WHERE player_id=? "
@@ -63,6 +63,11 @@ def inventory_notices(player_id):
         from private_treasure_dig import repair
         for detail in treasures:
             repair(player_id, detail)
+    if 100000008 in unlocks:
+        # MoonStoneModel reads this item from the bag when opening the current map's tree.
+        # The realm also advertises the ability before its tutorial awards the physical marker.
+        from private_badge_tree import project_tree_marker
+        project_tree_marker(player_id, notices)
     return notices.values()
 
 
@@ -170,7 +175,9 @@ class Handler(PacketHandler):
 
         from private_bless_tree import login_notice as bless_tree_notice
         tree_progress = bless_tree_notice(player_id)
-        for packet in inventory_notices(player_id):
+        from private_channels import return_hand
+        return_hand(player_id)
+        for packet in inventory_notices(player_id, unlocks):
             session.send(MsgId.PackNotice, packet, 0, inventory_snapshot=True)
 
         from private_inventory import slots, publish
@@ -205,6 +212,8 @@ class Handler(PacketHandler):
             mp_login(session)
             from private_wishes import deliver
             deliver(session)
+            from private_mail import deliver_published
+            deliver_published(session)
 
             notice = ServerSceneSyncDataNotice()
             notice.status = StatusCode.StatusCode_OK

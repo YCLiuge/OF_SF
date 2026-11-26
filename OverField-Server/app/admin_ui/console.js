@@ -1,7 +1,9 @@
 import {editorFor} from './editors.js';
+import {composeMail} from './mail_editor.js';
+let mailForm=null;
 const el = id => document.getElementById(id);
 const groups = {
-  accounts:'玩家账号',capacity:'连接容量', realm:'区服', maintenance:'运营概览', notice:'公告', release:'版本', events:'活动', plaza:'海上舞台',
+  mail:'游戏邮件',accounts:'玩家账号',capacity:'连接容量', realm:'区服', maintenance:'运营概览', notice:'公告', release:'版本', events:'活动', plaza:'海上舞台',
   gacha:'招募', blessings:'祈愿树', rules:'玩法规则', codes:'兑换码', reports:'举报', photos:'照片墙', state:'备份'
 };
 const actions = {list:'列表', get:'查看配置', set:'修改配置', catalog:'内容目录', edit:'编辑', issue:'创建', publish:'发布',
@@ -21,7 +23,7 @@ function node(tag, text) {
   return item;
 }
 function displayName(name) {
-  const names={'accounts.find':'查询玩家账号','accounts.reset':'重置玩家密码','events.set':'活动排期','plaza.set':'舞台与活动入口','blessings.set':'祈愿树排期','gacha.set':'招募池与概率','rules.schedule':'预设玩法参数','capacity.set':'调整连接上限'};
+  const names={'mail.send':'投递游戏邮件','mail.list':'查看投递记录','accounts.find':'查询玩家账号','accounts.reset':'重置玩家密码','events.set':'活动排期','plaza.set':'舞台与活动入口','blessings.set':'祈愿树排期','gacha.set':'招募池与概率','rules.schedule':'预设玩法参数','capacity.set':'调整连接上限'};
   if(names[name])return names[name];
   const [group, action] = name.split('.');
   return (groups[group] || group) + ' · ' + (actions[action] || action);
@@ -146,6 +148,7 @@ function select(name,force=false) {
     el('execute').hidden=true;
   } else el('execute').hidden=false;
   if(name==='accounts.find')el('field-field').value='username';
+  mailForm=name==='mail.send'?composeMail(el('fields')):null;
   if (forms.has(name)) openEditor(name,version);
   if (name==='capacity.set') {
     const limit=el('field-limit'); limit.type='number'; limit.min='1'; limit.max='512';limit.step='1';
@@ -227,7 +230,7 @@ el('login').onsubmit = async event => {
     operations = spec.operations; el('token').value = ''; el('connect').hidden = true;
     el('workspace').hidden = false; el('logout').hidden = false;
     const quick=el('quick');quick.replaceChildren();
-    for (const key of forms) {
+    for (const key of [...forms,'mail.send']) {
       if (!operations[key])continue;
       const btn=node('button',displayName(key));btn.type='button';btn.dataset.route=key;
       btn.onclick=()=>select(key);quick.append(btn);
@@ -279,12 +282,18 @@ el('operation').onsubmit = async event => {
       if(value!==el('confirm-password').value)throw Error('两次输入的新密码不一致。');
     }
     const {body,query} = collect();
-    if (!op.readOnly && !window.confirm('确认执行「' + displayName(name) + '」？')) return;
+    const prompt=name==='mail.send' ? '向'+(mailForm.scope.value==='account'?mailForm.user.value:mailForm.scope.selectedOptions[0].textContent)+'发送「'+mailForm.title.value+'」？' : '确认执行「'+displayName(name)+'」？';
+    if (!op.readOnly && !window.confirm(prompt)) return;
     busy = true; el('execute').disabled = true; message('');
     const path = '/admin/v1/operations/' + name + (op.readOnly && query ? '?' + query : '');
     const result = await request(path, op.readOnly ? 'GET' : 'POST', op.readOnly ? undefined : body);
     if (name==='capacity.set' && epoch===session)await overview.refresh();
     if (epoch === session && selected === name) {el('output').hidden = false; if(name==='accounts.find')accountResults(result);
+      else if(name==='mail.send'){
+        el('result').textContent='已登记批次 '+result.id+'，发送时范围内共有 '+result.recipients_at_issue+' 名玩家。';
+        const fresh=node('button','另写一封');fresh.type='button';fresh.className='quiet light';fresh.onclick=()=>select('mail.send',true);
+        el('result').append(document.createTextNode('\n'),fresh);
+      }
       else if(name==='accounts.reset'){select('accounts.find',true);message('密码已重置，玩家需使用新密码登录。');}
       else el('result').textContent = JSON.stringify(result,null,2);}
   } catch(error) { if (epoch === session) message(error.message); }

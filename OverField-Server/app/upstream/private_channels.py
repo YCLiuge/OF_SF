@@ -34,6 +34,8 @@ def setup(rules):
     with db.conn:
         from private_garden_residents import setup as setup_residents
         setup_residents()
+        from private_home_capacity import setup as setup_capacity
+        setup_capacity()
         columns={r[1] for r in db.conn.execute("PRAGMA table_info(private_locations)")}
         if "channel" not in columns:db.conn.execute("ALTER TABLE private_locations ADD COLUMN channel INTEGER NOT NULL DEFAULT 1")
         db.conn.execute("CREATE TABLE IF NOT EXISTS realm_garden_migration (version INTEGER PRIMARY KEY)")
@@ -119,6 +121,22 @@ def bag_adjust(pid,item_id,amount):
     return item
 
 
+def return_hand(player, session=None):
+    """A scene transition destroys the client's placement preview. Refund its reservation once."""
+    row = db.conn.execute("SELECT fid,item FROM realm_hand_furniture WHERE player=?", (player,)).fetchone()
+    if row is None:
+        return
+    fid, item_id = row
+    item = bag_adjust(player, item_id, 1)
+    if item is None:
+        raise ValueError("Invalid reserved furniture template")
+    db.conn.execute("DELETE FROM realm_hand_furniture WHERE player=?", (player,))
+    if session is not None:
+        from private_request import set_after_commit
+        set_after_commit(session, "returned_hand_id", fid)
+        session.send(MsgId.PackNotice, pb.PackNotice(status=pb.StatusCode_OK, items=[item]), 0)
+
+
 def reclaim(pid,channel,player=None,*,notify_peers=False):
     rows=db.conn.execute("SELECT furniture_id,furniture_detail_blob FROM furnitures WHERE scene_id=? AND channel_id=? AND player_id=?",(HOME,channel,pid)).fetchall()
     if not rows:return
@@ -143,6 +161,8 @@ def reclaim(pid,channel,player=None,*,notify_peers=False):
 def change(s,new_scene,new_channel):
     if (s.scene_id, s.channel_id) != (new_scene, new_channel):
         s.scene_player.ClearField("status")
+        if s.scene_id == HOME:
+            return_hand(s.player_id, s)
         if s.scene_id == HOME and is_public(s.realm_rules, s.channel_id):
             reclaim(s.player_id, s.channel_id, s)
     if new_scene==HOME and s.channel_id!=new_channel:

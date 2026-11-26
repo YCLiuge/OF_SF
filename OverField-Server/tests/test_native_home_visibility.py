@@ -60,7 +60,7 @@ def run(state, resources, report):
         with owner, guest:
             assert home != visitor
             switch(owner, home)
-            assert call(owner, "GetGardenInfo").garden_info.furniture_limit_num == 2
+            assert call(owner, "GetGardenInfo").garden_info.furniture_limit_num == 200000
             first = place(owner, items[0])
             assert first.status == pb.StatusCode_OK
             fid = first.furniture_details_info.furniture_id
@@ -68,7 +68,7 @@ def run(state, resources, report):
             view = switch(guest, home)
             assert view.scene_garden_data.garden_furniture_info_map[fid].pos.x == 12
             assert view.scene_garden_data.furniture_player_map[fid] == home
-            assert call(guest, "GetGardenInfo").garden_info.furniture_limit_num == 1
+            assert call(guest, "GetGardenInfo").garden_info.furniture_limit_num == 200000
             owner2 = place(owner, items[1])
             assert owner2.status == pb.StatusCode_OK
             second = owner2.furniture_details_info.furniture_id
@@ -77,6 +77,7 @@ def run(state, resources, report):
             assert pending_furniture(guest) == []
             updated = place(owner, items[0], fid, 37)
             assert updated.status == pb.StatusCode_OK and pending_furniture(guest) == [("update",fid)]
+            assert pending_furniture(owner) == [("update", fid)]
             placed = place(guest, items[2])
             assert placed.status == pb.StatusCode_OK
             third = placed.furniture_details_info.furniture_id

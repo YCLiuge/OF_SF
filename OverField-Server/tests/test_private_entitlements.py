@@ -75,6 +75,16 @@ def run(directory,resources):
         for pid in (a,b):
             assert all(item(conn,pid,key).main_item.base_item.num==INITIAL_BALANCE for key in CURRENCY_IDS)
             assert item(conn,pid,10).main_item.base_item.num==150 and item(conn,pid,11).main_item.base_item.num==800
+        for pid in players:
+            characters = [pb.Character.FromString(blob) for (blob,) in conn.execute(
+                "SELECT character_blob FROM characters WHERE player_id=?", (pid,))]
+            assert all(item(conn,pid,key).main_item.base_item.num >= 1 for key in (104000001,104000002,104000003))
+            assert len(characters) == 29 and all(r.star==0 and r.level==1 for r in characters)
+            weapons = [pb.ItemDetail.FromString(blob).main_item.weapon for (blob,) in conn.execute(
+                "SELECT item_detail_blob FROM items_s WHERE player_id=?", (pid,))
+                if pb.ItemDetail.FromString(blob).main_item.HasField("weapon")]
+            assert len({w.weapon_id for w in weapons}) == 670 and len({w.instance_id for w in weapons}) == len(weapons)
+            assert all(r.equipment_presets[0].weapon in {w.instance_id for w in weapons} for r in characters)
         set_amount(conn,a,101,7)
         # Simulate a pre-upgrade player with currency above the grant, purchased colors,
         # a real home placement and old progression. They never reconnect during migration.

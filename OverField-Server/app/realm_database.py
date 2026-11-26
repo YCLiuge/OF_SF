@@ -34,6 +34,10 @@ def open_game_database(identity, data_dir):
         CREATE TABLE IF NOT EXISTS private_locations (
             player_id INTEGER PRIMARY KEY, scene INTEGER NOT NULL);
     """)
+    import realm_mail
+    realm_mail.schema(db.conn, attached=True)
+    db.conn.execute("""CREATE TABLE IF NOT EXISTS realm_mail_cursor (
+        player_id INTEGER PRIMARY KEY, last_batch INTEGER NOT NULL)""")
     from private_activity_fragments import setup as setup_activity_fragments
     setup_activity_fragments(db.conn)
     import private_abyss

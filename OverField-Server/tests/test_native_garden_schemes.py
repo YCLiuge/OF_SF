@@ -77,6 +77,11 @@ def run(root, resources):
             assert save(owner,2).status==ok  # a deliberately empty layout is distinct from an unused slot
             for item,fid,x in ((a,300,40),(a,301,45),(b,302,93)):
                 assert place(owner,item,fid,x).status==ok
+            info = call(owner, "GetGardenInfo", 301).garden_info
+            assert info.furniture_num == 2*points[a]+points[b] and info.furniture_limit_num == 200000
+            from unittest.mock import patch
+            with patch("private_home_capacity.maximum", return_value=info.furniture_num):
+                assert place(peer,c,401,19).status == pb.StatusCode_FurnitureNumLimit
             assert save(owner,0).status==ok and save(owner,3).status==pb.StatusCode_BAD_REQ
             assert Counter(preview(owner,0).furniture_item_id)=={a:2,b:1}
             assert clear(owner).status==ok
@@ -86,6 +91,9 @@ def run(root, resources):
             batch(peer)
             assert (balance(pid,a),balance(pid,b))==(2,1)
             assert place(peer,c,300,14).status==ok
+            with patch("private_home_capacity.maximum", return_value=points[c]):
+                assert apply(owner,0).status==pb.StatusCode_FurnitureNumLimit
+                assert balance(pid,a)==2 and balance(pid,b)==1
             before=visit(owner,pid)
             balance(pid,b,0)
             assert apply(owner,0).status==pb.StatusCode_ITEM_NOT_ENOUGH

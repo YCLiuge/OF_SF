@@ -99,6 +99,11 @@ def replace_layout(session, target):
     current = owner_layout(session)
     changes = Counter(obj.furniture_item_id for obj in current)
     changes.subtract(obj.furniture_item_id for obj in target)
+    from private_home_capacity import maximum, points, used
+    current_points = used(channel)
+    projected = current_points - sum(points(item) * diff for item, diff in changes.items())
+    if projected > maximum() and projected > current_points:
+        return pb.StatusCode_FurnitureNumLimit
     for item, diff in changes.items():
         if not diff:
             continue
@@ -153,9 +158,6 @@ def replace_layout(session, target):
     tally(pid)
     if pack.items:
         session.send(MsgId.PackNotice, pack, 0)
-    catalog = res.index("HomeItem", "home_item", "item_i_d")
-    all_items = (pb.FurnitureDetailsInfo.FromString(row[-1]).furniture_item_id for row in db.get_furniture(HOME,channel))
-    points = sum(catalog.get(item,{}).get("home_item_point_num",0) for item in all_items)
     publish(session, pb.GardenFurnitureBatchUpdateNotice(status=pb.StatusCode_OK, player_id=pid,
-            furniture_point_num=min(points,0xffffffff), new_furniture_list=target))
+            furniture_point_num=min(used(channel),0xffffffff), new_furniture_list=target))
     return pb.StatusCode_OK

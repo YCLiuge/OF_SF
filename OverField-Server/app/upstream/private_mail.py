@@ -1,6 +1,8 @@
 """Private per-character mailbox using the native MailState and five MailOperateType values."""
 from private_request import cache_after_commit
+import json
 import time
+from datetime import datetime, timezone
 
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
@@ -14,7 +16,38 @@ DELETE = pb.MailOperateType_DELETE_ALL_READED
 CLAIM = pb.MailOperateType_CLAIM
 CLAIM_ALL = pb.MailOperateType_CLAIM_ALL
 COLLECT = pb.MailOperateType_COLLECT
-INSTANCE_TYPES = {"weapon": pb.EBagItemTag_Weapon, "armor": pb.EBagItemTag_Armor, "poster": pb.EBagItemTag_Poster}
+INSTANCE_TYPES = {"weapon": pb.EBagItemTag_Weapon, "armor": pb.EBagItemTag_Armor, "poster": pb.EBagItemTag_Poster,
+                  "treasure": pb.EBagItemTag_TreasureMap}
+
+
+def deliver_published(session, *, notify=True):
+    """Materialize eligible immutable campaigns and advance the durable cursor in one transaction."""
+    from private_wishes import send_mail
+    pid = session.player_id
+    cursor, last = db.conn.execute("""SELECT coalesce((SELECT last_batch FROM realm_mail_cursor WHERE player_id=?),0),
+        coalesce((SELECT max(id) FROM authority.realm_mail_batches),0)""", (pid,)).fetchone()
+    if cursor >= last:
+        return
+    rows = db.conn.execute("""SELECT id,issued,payload FROM authority.realm_mail_batches
+        WHERE id IN (
+            SELECT batch FROM authority.realm_mail_recipients WHERE slot=? AND batch>? AND batch<=?
+            UNION ALL SELECT id FROM authority.realm_mail_batches WHERE scope='ongoing' AND id>? AND id<=?)
+        ORDER BY id""", (session.slot,cursor,last,cursor,last)).fetchall()
+    now = int(time.time())
+    for _, issued, raw in rows:
+        letter = json.loads(raw)
+        if now < issued + letter["days"] * 86400:
+            send_mail(pid, letter["title"], letter["body"], letter["rewards"], datetime.fromtimestamp(issued, timezone.utc),
+                      session if notify else None, sender=letter["sender"], overdue_days=letter["days"])
+    db.conn.execute("""INSERT INTO realm_mail_cursor VALUES(?,?)
+        ON CONFLICT(player_id) DO UPDATE SET last_batch=excluded.last_batch""", (pid,last))
+
+
+def poll(session):
+    now = time.monotonic()
+    if now >= getattr(session,"mail_poll_at",0):
+        deliver_published(session)
+        session.mail_poll_at = now + 15
 
 
 def inbox(pid):
@@ -28,6 +61,7 @@ def inbox(pid):
 
 
 def list_mails(session, req, rsp):
+    deliver_published(session, notify=False)
     rsp.mails.extend(inbox(session.player_id).values())
     return pb.StatusCode_OK
 
@@ -108,6 +142,7 @@ def claim(pid, mails, rsp):
 def operate(session, req, packet_id):
     pid, op = session.player_id, req.operate_type
     rsp = pb.OperateMailsRsp(operate_type=op, status=pb.StatusCode_OK)
+    deliver_published(session, notify=False)
     box = inbox(pid)
     mail = box.get(req.mail_id)
     notices = []

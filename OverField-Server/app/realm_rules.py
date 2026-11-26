@@ -16,7 +16,7 @@ class RealmRules:
     public_min:int=1
     public_max:int=99999
     uid_start:int=1000001
-    home_furniture_limit:int=500
+    home_furniture_limit:int=0
     visitor_furniture_limit:int=1
     public_furniture_limit:int=1
     public_furniture_scope:str="channel"

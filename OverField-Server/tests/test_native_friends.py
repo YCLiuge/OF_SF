@@ -32,6 +32,18 @@ def run(root,resources):
         b,friend=connect(1)
         c,other=connect(2)
         with a,b,c:
+            from utils import db
+            fill = list(range(8000000,8000200))
+            with host.lock,db.conn:
+                db.conn.executemany("INSERT INTO players(player_id) VALUES(?)", [(key,) for key in fill])
+                db.conn.executemany("INSERT INTO friend(player_id,friend_id,friend_status) VALUES(?,?,?)",
+                                    [(owner,key,pb.FriendStatus_FRIEND) for key in fill])
+            assert call(a,"FriendAdd",player_id=friend).status==pb.StatusCode_FRIEND_LIMIT
+            with host.lock,db.conn:
+                db.conn.execute("UPDATE friend SET friend_status=? WHERE player_id=?", (pb.FriendStatus_APPLY,owner))
+            assert call(b,"FriendAdd",player_id=owner).status==pb.StatusCode_FRIEND_APPLY_LIMIT
+            with host.lock,db.conn:
+                db.conn.executemany("DELETE FROM players WHERE player_id=?", [(key,) for key in fill])
             found=call(a,"FriendSearch",search_args="好友二")
             assert found.status==pb.StatusCode_OK and found.data.player_id==friend and found.data.is_online
             assert found.friend_status==pb.FriendStatus_NONE

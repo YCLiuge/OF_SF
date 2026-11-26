@@ -22,4 +22,4 @@ def record(db, player, banner, delta, origin="draw"):
         raise RuntimeError("Recruit reward and history must share the gameplay transaction")
     record_id = db.add_gacha_record(player, banner, delta.main_item.item_id)
     store(db.conn, record_id, origin, delta.main_item.is_new,
-          ((item.item_id, item.base_item.num) for item in delta.extras))
+          ((item.item_id, item.base_item.num) for item in (*delta.transformed_item, *delta.extras)))
