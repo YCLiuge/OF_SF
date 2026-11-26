@@ -7,6 +7,7 @@ from local_game_service import LocalGameService,MsgId,pb
 from local_game_wire import encode
 from local_identity import LocalIdentity
 from test_game_realm import join,login,next_msg
+from test_native_events import rpc, NOTICES
 from test_observed_initialization import call
 from utils import db
 from utils.pb_create import make_item
@@ -77,6 +78,19 @@ def run(root,resources):
             assert call(a,"UpdatePlayerAppearance",appearance=app).appearance==app
             assert call(b,"UpdatePlayerAppearance",appearance=app).status!=pb.StatusCode_OK
             assert call(b,"ChangePhoneCase",phone_case=7001).status!=pb.StatusCode_OK
+            # Both players visit the same solo dungeon template from the same channel.
+            # A's phone update must reach its owner only, before the success reply.
+            NOTICES[MsgId.ServerSceneSyncDataNotice] = pb.ServerSceneSyncDataNotice
+            for sock in (a,b):
+                assert call(sock,"DungeonEnter",dungeon_id=11101,char1=101001).status==pb.StatusCode_OK
+            rpc(b,"PlayerPing",30)
+            reply, frames = rpc(a,"ChangePhoneCase",31,phone_case=7001)
+            def saw_phone_update(frames):
+                return any(isinstance(frame,pb.ServerSceneSyncDataNotice) and
+                           any(action.action_type==pb.SceneActionType_UPDATE_PHONE_CASE
+                               for entry in frame.data for action in entry.server_data) for frame in frames)
+            assert reply.status==pb.StatusCode_OK and saw_phone_update(frames)
+            assert not saw_phone_update(rpc(b,"PlayerPing",32)[1])
     finally:game.stop()
     game.start()
     try:

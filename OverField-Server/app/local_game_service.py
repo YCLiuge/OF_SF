@@ -109,6 +109,7 @@ class Session:
                 self.outstanding+=len(frame)
             try:self.outbox.put_nowait(frame)
             except queue.Full:
+                with self.out_lock:self.outstanding-=len(frame)
                 self.disconnect()
                 return
 
@@ -594,6 +595,7 @@ class LocalGameService:
                 self.session_sequence += 1
                 s.admission_order = self.session_sequence
                 s.social_rooms = self.scene_members
+                s.broadcast_scene = self._broadcast_scene
                 s.campfires = self.campfires
                 s.dye_texture_dir = self.resources / "swirlnoisetexture"
                 s.entitlements = self.entitlements
@@ -771,14 +773,14 @@ class LocalGameService:
             else:
                 pending.pop(player_id,None)
 
-    def _broadcast_scene(self,key,msg_id,notice):
+    def _broadcast_scene(self,key,msg_id,notice,*,room_team=None):
         recipients=self.scene_members.get(key)
         if not recipients:
             return
         data=realm_uids.outgoing(notice).SerializeToString()
         broadcast=broadcast_frames(msg_id,data) if len(recipients)>=4 else None
         for peer in recipients:
-            if peer.running:
+            if peer.running and (room_team is None or getattr(peer,"mp_room_team",0)==room_team):
                 peer.send(msg_id,data,0,is_bin=True,broadcast=broadcast)
 
     def _drain_scene_events(self):

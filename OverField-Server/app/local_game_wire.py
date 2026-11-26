@@ -88,15 +88,20 @@ def receive(sock):
 
 
 def broadcast_frames(msg_id, body):
-    """Reuse the protobuf header for one broadcast. A sequence still belongs to one receiver."""
+    """Share immutable frames within one broadcast when receivers have the same sequence."""
     if len(body) > MAX_BODY:
         return None  # Session.send retains its normal validation order for oversized frames.
     header = PacketHead(msg_id=msg_id, body_len=len(body), packet_id=0)
+    frames = {}
 
     def encode_for(sequence):
-        header.seq_id = sequence
-        serialized = header.SerializeToString()
-        return struct.pack(">H", len(serialized)) + serialized + body
+        frame = frames.get(sequence)
+        if frame is None:
+            header.seq_id = sequence
+            serialized = header.SerializeToString()
+            frame = struct.pack(">H", len(serialized)) + serialized + body
+            frames[sequence] = frame
+        return frame
 
     return encode_for
 

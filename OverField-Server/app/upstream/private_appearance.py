@@ -4,7 +4,6 @@ from private_request import handler
 from private_chat_text import profile_signature
 from utils.res_loader import res
 from proto import net_pb2 as pb
-from server.scene_data import get_session
 from utils import db
 
 
@@ -93,9 +92,12 @@ def broadcast(session, change, outfit_update=None):
     if outfit_update is not None:
         slot,outfit=outfit_update
         getattr(record.player.team,slot).outfit_preset.CopyFrom(outfit)
-    for other in get_session():
-        if (other.scene_id,other.channel_id,other.dungeon[0])==(session.scene_id,session.channel_id,session.dungeon[0]):
-            other.send(MsgId.ServerSceneSyncDataNotice,notice,0)
+    if session.dungeon[0]:
+        # Each player owns a separate visit, even when the dungeon template matches.
+        session.send(MsgId.ServerSceneSyncDataNotice,notice,0)
+    else:
+        session.broadcast_scene((session.scene_id,session.channel_id),MsgId.ServerSceneSyncDataNotice,
+                                notice,room_team=getattr(session,"mp_room_team",0))
 
 
 WEAR_SLOTS=("hat","hair","clothes","ornament","pend_top","pend_chest","pend_pelvis","pend_up_face","pend_down_face",

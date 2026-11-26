@@ -55,7 +55,7 @@ def check_fanout():
     notice = pb.PlayerSceneSyncDataNotice(status=pb.StatusCode_OK)
     message_id = MsgId.PlayerSceneSyncDataNotice
     body = notice.SerializeToString()
-    starts = (1, 127, 16384, 0xffffffff)
+    starts = (1, 127, 16384, 0xffffffff, 127)
     with ExitStack() as stack:
         peers = []
         for i, start in enumerate(starts):
@@ -68,6 +68,7 @@ def check_fanout():
         def stage():
             LocalGameService._broadcast_scene(host, channel, message_id, notice)
         stage()
+        assert peers[1].responses[0] is peers[-1].responses[0]
         for peer, start in zip(peers, starts):
             assert peer.responses == [encode(message_id, body, 0, start)]
             assert peer.outbox.empty() and peer.outstanding == 0
@@ -83,11 +84,13 @@ def check_fanout():
             assert sent == [encode(message_id, body, 0, n) for n in (start, next_seq)]
             assert peer.outstanding == sum(map(len, sent))
         slow = peers[-1]
+        bytes_before_rejection = slow.outstanding
         for _ in range(slow.outbox.maxsize):
             slow.outbox.put_nowait(b"queued")
         stage()
         LocalGameService._publish_pending(host)
         assert not slow.running and all(p.running and p.outbox.qsize() == 1 for p in peers[:-1])
+        assert slow.outstanding == bytes_before_rejection
         oversized = bytes(MAX_BODY + 1)
         with TestCase().assertRaisesRegex(ValueError, "response too large"):
             peers[0].send(message_id, oversized, 0, is_bin=True, broadcast=broadcast_frames(message_id, oversized))
