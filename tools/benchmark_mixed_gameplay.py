@@ -46,7 +46,7 @@ def check(ok, reason):
         raise RuntimeError(reason)
 
 
-def run(server, clients, rounds, group):
+def run(server, clients, rounds, group, *, first_role=0, ready=None, details=None):
     platform = "win64" if sys.platform == "win32" else "linux-x86_64"
     components = ("app", "app/upstream", "tests", "vendor/common", "vendor/" + platform)
     sys.path[:0] = [str(server / path) for path in components]
@@ -61,21 +61,27 @@ def run(server, clients, rounds, group):
     stride = max(1000, rounds)
 
     def x_at(index, step):
-        return 10000 + index * stride + step
+        return 10000 + (first_role + index) * stride + step
 
     def channel(index):
         return 1 + index // group
 
     with TemporaryDirectory(prefix="of-mixed-tcp-") as tmp:
         root = Path(tmp)
-        configure(root, {"game_connections": clients})
+        configure(root, {"game_connections": clients, "uid_start": 1000001 + first_role})
         identity = LocalIdentity(root / "identity.sqlite3")
         host = LocalGameService(identity, root, server / "resources", port=0)
         peers = []
         players = []
         receipts = [[] for _ in range(clients)]
         movements = [set() for _ in range(clients)]
-        barrier = Barrier(clients)
+        def begin_load():
+            if ready is not None:
+                ready()
+            if details is not None:
+                details["start_ns"] = perf_counter_ns()
+
+        barrier = Barrier(clients, action=begin_load)
 
         def read_until(index, reply_id, sequence, message_type, own_x=None):
             while True:
@@ -106,7 +112,7 @@ def run(server, clients, rounds, group):
             if tag == "ChangeHead":
                 return pb.ChangeHeadReq(head=HEADS[step % len(HEADS)])
             if tag == "ChangeSign":
-                return pb.ChangeSignReq(sign=f"Mixed{index}x{step}")
+                return pb.ChangeSignReq(sign=f"Mixed{first_role + index}x{step}")
             move = pb.PlayerSceneRecordReq()
             move.data.char_recorder_data_lst.add(char_id=101001).pos.x = x_at(index, step)
             return move
@@ -116,7 +122,7 @@ def run(server, clients, rounds, group):
             barrier.wait(timeout=45)
             for step in range(rounds):
                 for offset in range(len(OPERATIONS)):
-                    tag = OPERATIONS[(offset + index) % len(OPERATIONS)]
+                    tag = OPERATIONS[(offset + first_role + index) % len(OPERATIONS)]
                     seq = 20 + step * len(OPERATIONS) + offset
                     req = payload(tag, index, step)
                     start = perf_counter_ns()
@@ -141,7 +147,7 @@ def run(server, clients, rounds, group):
         try:
             with ExitStack() as sockets:
                 for index in range(clients):
-                    profile = identity.create_profile(f"Bench{index}")
+                    profile = identity.create_profile(f"Bench{first_role + index}")
                     sock, _, uid = login(host.port, identity.issue_ticket(*profile))
                     sockets.enter_context(sock)
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -158,12 +164,20 @@ def run(server, clients, rounds, group):
 
                 lock = TimedLock(host.lock)
                 connection = TimedConnection(db.conn)
+                if details is not None:
+                    details["journal_mode"] = db.conn.execute("PRAGMA journal_mode").fetchone()[0]
+                    details["synchronous"] = db.conn.execute("PRAGMA synchronous").fetchone()[0]
                 host.lock = lock
                 db.conn = connection
                 try:
                     start = monotonic()
                     with ThreadPoolExecutor(max_workers=clients) as pool:
                         samples = list(pool.map(worker, range(clients)))
+                    if details is not None:
+                        details["end_ns"] = perf_counter_ns()
+                        if sys.platform == "win32":
+                            from benchmark_resident_memory import process_memory
+                            details["private_bytes"] = process_memory()[1]
                     elapsed = monotonic() - start
                     # All previous writes have been acknowledged by their sender. TCP preserves
                     # order, so the subsequent ping response is a barrier for each receiver.
@@ -199,7 +213,7 @@ def run(server, clients, rounds, group):
             rows = [(uid, value, head, sign, scene, chan, pb.Vector3.FromString(pose).x)
                     for uid, value, head, sign, scene, chan, pose in saved.execute(query, (PLAZA,))]
         step = rounds - 1
-        expected_rows = [(uid, f"{uid}-{step}", HEADS[step % len(HEADS)], f"Mixed{i}x{step}",
+        expected_rows = [(uid, f"{uid}-{step}", HEADS[step % len(HEADS)], f"Mixed{first_role + i}x{step}",
                           PLAZA, channel(i), x_at(i, step)) for i, uid in enumerate(players)]
         check(rows == sorted(expected_rows), "Persisted player values differ")
         check(len(connection.commits) >= clients * rounds * 3, "Missing durable writes")
@@ -207,6 +221,15 @@ def run(server, clients, rounds, group):
         for timings in samples:
             for tag, duration in timings:
                 by_operation[tag].append(duration)
+        if details is not None:
+            details["rtt_ns"] = [duration for timings in samples for _, duration in timings]
+            details["lock_wait_ns"] = lock.wait
+            details["commit_ns"] = connection.commits
+            # Local channel numbers repeat across realms. Compare the logical group across layouts.
+            details["role_proofs"] = [
+                digest((uid, receipts[i], sorted(movements[i]), value, head, sign, scene,
+                        channel_id + first_role // group, x))
+                for i, (uid, value, head, sign, scene, channel_id, x) in enumerate(rows)]
         return {
             "clients": clients, "rounds": rounds, "members_per_channel": group,
             "elapsed_seconds": round(elapsed, 4),
