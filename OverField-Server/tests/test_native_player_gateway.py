@@ -275,15 +275,17 @@ def run(root,resources,certs):
             fresh=pb.VerifyLoginTokenReq(login_token=direct.ticket)
             assert observed[0]==encode(MsgId.VerifyLoginTokenReq,fresh.SerializeToString(),1)
 
-            grant=proxy.reserve(signed["slot"],signed["ticket"])
+            grant=proxy.prepare(signed["slot"],signed["ticket"])
+            assert grant.pending and not grant.legacy
             from native_account_seats import NativeAccountSeats
             test_exe=front/"launcher.exe"
             seats=NativeAccountSeats(local,test_exe)
             seats.remote=proxy
-            seats.pending[21]=(73,grant,time.monotonic()+300)
+            seats.pending[21]=(73,grant,time.monotonic()+grant.expires_in)
             class LocalChannel:
                 def verify_channel(self,uid,token,peer):
-                    assert (uid,token,peer)==("synthetic-only-uid","synthetic-only-proof","127.0.0.1")
+                    if (uid,token,peer)!=("synthetic-only-uid","synthetic-only-proof","127.0.0.1"):
+                        raise ValueError("Channel verification required")
 
             local_game=LocalGameService(local,front,resources,port=0)
             local_game.remote_password=proxy
@@ -295,6 +297,11 @@ def run(root,resources,certs):
                 with ExitStack() as native:
                     native.enter_context(patch("native_account_seats.connection_pid",return_value=21))
                     native.enter_context(patch("native_account_seats.process_info",return_value=(test_exe,7,73)))
+                    with socket.create_connection(("127.0.0.1",local_game.port),timeout=9) as denied:
+                        invalid=pb.VerifyLoginTokenReq(sdk_uid="synthetic-only-uid",login_token="invalid-channel-proof")
+                        denied.sendall(encode(MsgId.VerifyLoginTokenReq,invalid.SerializeToString(),1))
+                        assert pb.VerifyLoginTokenRsp.FromString(receive(denied)[1]).status==pb.StatusCode_FAIL
+                        assert 21 in seats.pending
                     with socket.create_connection(("127.0.0.1",local_game.port),timeout=9) as first:
                         verify=pb.VerifyLoginTokenReq(sdk_uid="synthetic-only-uid",login_token="synthetic-only-proof",
                             device_uuid="synthetic-front-device",channel_code="synthetic-channel-name")

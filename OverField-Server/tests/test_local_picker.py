@@ -20,13 +20,33 @@ from test_game_dispatch import http, listening
 
 
 class EditorTests(TestCase):
+    def test_expired_first_launch_offers_only_its_owner_a_new_password_login(self):
+        client=Path("launcher.exe")
+        seats=NativeAccountSeats(None,client)
+        seats.picker=LocalPicker("test-patch.exe")
+        seats.pending[21]=(73,"expired receipt",10)
+        identity=[21,74]
+        with patch("native_account_seats.connection_pid",side_effect=lambda _:identity[0]), \
+             patch("native_account_seats.process_info",side_effect=lambda _:(client,7,identity[1])), \
+             patch("native_account_seats.time.monotonic",return_value=11), \
+             patch.object(seats.picker,"enter",side_effect=[False,True]) as prompt:
+            with self.assertRaises(ValueError):seats.claim(None)
+            self.assertIn(21,seats.pending)
+            prompt.assert_not_called()
+            identity[:]=[21,73]
+            with self.assertRaises(ValueError):seats.claim(None)
+            self.assertNotIn(21,seats.pending)
+            with self.assertRaises(ValueError):seats.claim(None)
+            with self.assertRaises(ValueError):seats.claim(None)
+            self.assertEqual(prompt.call_count,2)
+
     def test_only_disconnected_authenticated_process_can_resume_within_grace(self):
         client=Path("launcher.exe")
         seats=NativeAccountSeats(None,client)
         first=RemoteLogin("one","ticket-1",resume_token="secret-1")
         second=RemoteLogin("one","ticket-2",resume_token="secret-2")
         calls=[]
-        seats.remote=SimpleNamespace(resume=lambda grant:(calls.append(grant) or second))
+        seats.remote=SimpleNamespace(activate=lambda grant:grant, resume=lambda grant:(calls.append(grant) or second))
         seats.pending[21]=(73,first,300)
         owner=[21,73]
         with patch("native_account_seats.connection_pid",side_effect=lambda _:owner[0]), \
@@ -53,7 +73,7 @@ class EditorTests(TestCase):
         client=Path("launcher.exe")
         seats=NativeAccountSeats(None,client)
         seats.picker=LocalPicker("test-patch.exe")
-        seats.remote=object()
+        seats.remote=SimpleNamespace(activate=lambda grant:grant)
         seats.pending[21]=(73,RemoteLogin("private-slot","one-use-ticket"),time.monotonic()+300)
         owner=[21,73]
         foreground=[False]

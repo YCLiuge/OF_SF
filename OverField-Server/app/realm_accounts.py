@@ -22,6 +22,10 @@ SALT_SIZE = 16
 RESUME = re.compile(r"ofr_[A-Za-z0-9_-]{43}\Z", re.ASCII)
 RESUME_TTL = 8 * 3600
 RESUME_GRACE = 120
+# Only a launcher that already consumed a valid password login can obtain this receipt.
+# It cannot authenticate a game connection; the bridge redeems it after channel verification.
+FIRST_LAUNCH_TTL = 3600
+PENDING = re.compile(r"ofh_[A-Za-z0-9_-]{43}\Z", re.ASCII)
 
 
 IMPORT_ROUTES = {PREFIX+k for k in ("import-preview","import-apply","import-undo")}
@@ -36,6 +40,9 @@ class AccountError(ValueError):
 def initialize(identity):
     with identity._write() as db:
         db.execute("CREATE TABLE IF NOT EXISTS realm_launch_tickets(digest BLOB PRIMARY KEY REFERENCES tickets(ticket_hash) ON DELETE CASCADE) WITHOUT ROWID")
+        db.execute("""CREATE TABLE IF NOT EXISTS realm_first_launches(
+            slot TEXT PRIMARY KEY REFERENCES profiles(slot) ON DELETE CASCADE,
+            digest BLOB NOT NULL UNIQUE REFERENCES tickets(ticket_hash) ON DELETE CASCADE) WITHOUT ROWID""")
         db.execute("CREATE TABLE IF NOT EXISTS realm_pending_names(slot TEXT PRIMARY KEY REFERENCES profiles(slot) ON DELETE CASCADE) WITHOUT ROWID")
         db.execute("CREATE TABLE IF NOT EXISTS realm_named_profiles(slot TEXT PRIMARY KEY REFERENCES profiles(slot) ON DELETE CASCADE) WITHOUT ROWID")
         db.execute("""CREATE TABLE IF NOT EXISTS realm_import_name_reservations(
@@ -232,23 +239,61 @@ def rename_login(identity,slot,old_name,new_name):
         return True
 
 
-def reserve_native(identity,body):
+def prepare_first_launch(identity, value, slot=None):
     from local_identity import TICKET
-    slot=body.get("slot")
-    fields=set(body)-{"slot"}
-    if not isinstance(slot,str) or not SLOT.fullmatch(slot) or fields not in ({"ticket"},{"resume"}):
-        raise AccountError(401,"invalid_credentials")
-    field=next(iter(fields))
-    value=body[field]
-    if not isinstance(value,str) or not (TICKET if field=="ticket" else RESUME).fullmatch(value):
+    if not isinstance(value,str) or not TICKET.fullmatch(value):
         raise AccountError(401,"invalid_credentials")
     now=int(identity._clock())
     digest=_digest(value)
     with identity._write() as db:
-        if field=="ticket":
+        row=db.execute("""SELECT a.slot FROM tickets t JOIN realm_accounts a USING(slot) WHERE
+            t.ticket_hash=? AND t.expires>? AND NOT EXISTS(SELECT 1 FROM realm_launch_tickets WHERE digest=t.ticket_hash)""",(digest,now)).fetchone()
+        if not row or (slot is not None and slot!=row[0]):
+            raise AccountError(401,"invalid_credentials")
+        slot=row[0]
+        db.execute("DELETE FROM tickets WHERE ticket_hash=? OR ticket_hash=(SELECT digest FROM realm_first_launches WHERE slot=?)",
+                   (digest,slot))
+        pending="ofh_"+secrets.token_urlsafe(32)
+        db.execute("INSERT INTO tickets VALUES(?,?,?)",(_digest(pending),slot,now+FIRST_LAUNCH_TTL))
+        db.execute("INSERT INTO realm_first_launches VALUES(?,?)",(slot,_digest(pending)))
+    return {"realm":"overfield-local-v1","slot":slot,"pending":pending,"expires_in":FIRST_LAUNCH_TTL}
+
+
+def consume_first_launch(db, value, now, slot=None):
+    if not isinstance(value,str) or not PENDING.fullmatch(value):
+        raise AccountError(401,"invalid_credentials")
+    digest=_digest(value)
+    row=db.execute("""SELECT f.slot FROM realm_first_launches f JOIN tickets t ON t.ticket_hash=f.digest
+        WHERE f.digest=? AND t.expires>?""",(digest,now)).fetchone()
+    if not row or (slot is not None and slot!=row[0]):
+        raise AccountError(401,"invalid_credentials")
+    db.execute("DELETE FROM tickets WHERE ticket_hash=?",(digest,))
+    return row[0]
+
+
+def reserve_native(identity,body):
+    from local_identity import TICKET
+    slot=body.get("slot")
+    fields=set(body)-{"slot"}
+    if not isinstance(slot,str) or not SLOT.fullmatch(slot) or fields not in ({"ticket"},{"resume"},{"prepare"},{"pending"}):
+        raise AccountError(401,"invalid_credentials")
+    field=next(iter(fields))
+    value=body[field]
+    if field=="prepare":
+        return prepare_first_launch(identity,value,slot)
+    if not isinstance(value,str) or not {"ticket":TICKET,"resume":RESUME,"pending":PENDING}[field].fullmatch(value):
+        raise AccountError(401,"invalid_credentials")
+    now=int(identity._clock())
+    digest=_digest(value)
+    with identity._write() as db:
+        if field=="pending":
+            consume_first_launch(db,value,now,slot)
+            expires=now+RESUME_TTL
+        elif field=="ticket":
             valid=db.execute("SELECT 1 FROM tickets t JOIN realm_accounts a ON a.slot=t.slot WHERE t.ticket_hash=? AND t.slot=? AND t.expires>? AND NOT EXISTS(SELECT 1 FROM realm_launch_tickets n WHERE n.digest=t.ticket_hash)",(digest,slot,now)).fetchone()
             if not valid:
                 raise AccountError(401,"invalid_credentials")
+            db.execute("DELETE FROM tickets WHERE ticket_hash=(SELECT digest FROM realm_first_launches WHERE slot=?)",(slot,))
             expires=now+RESUME_TTL
         else:
             row=db.execute("""SELECT t.expires,r.reconnect_until FROM realm_native_resume r JOIN tickets t ON t.ticket_hash=r.digest

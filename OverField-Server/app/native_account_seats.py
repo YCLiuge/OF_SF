@@ -3,6 +3,7 @@ import ctypes
 from ctypes import wintypes as w
 from dataclasses import replace
 from functools import partial
+import http.client
 import ipaddress
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import socket
 import struct
 import threading
 import time
-from realm_accounts import AccountError
+from realm_accounts import AccountError, FIRST_LAUNCH_TTL, consume_first_launch, prepare_first_launch
 
 
 def connection_pid(sock):
@@ -82,6 +83,7 @@ class NativeAccountSeats:
         self.picker=None
         self.last_owner=None
         self.disconnected_owner=None
+        self.reauth_owner=None
         self.resume_grant=None
         self.resume_until=0
 
@@ -118,19 +120,14 @@ class NativeAccountSeats:
                 if pid in self.pending or len(self.pending)>=64:
                     raise ValueError("Duplicate or busy")
                 if self.remote:
-                    slot=self.remote.reserve(body["slot"],body["ticket"])
+                    grant=self.remote.prepare(body["slot"],body["ticket"])
+                    ttl=grant.expires_in
                 else:
-                    from local_identity import TICKET,_digest
-                    value=body["ticket"]
-                    if not isinstance(value,str) or not TICKET.fullmatch(value):
-                        raise ValueError("Invalid account ticket")
-                    with self.identity._write() as db:
-                        if not db.execute("""SELECT 1 FROM tickets t JOIN realm_accounts a USING(slot)
-                            WHERE t.ticket_hash=? AND t.expires>?""",(_digest(value),int(self.identity._clock()))).fetchone():
-                            raise ValueError("Not a password account")
-                    slot=value  # Consume at game entry so a password change can revoke a pending handoff.
-                self.pending[pid]=(born,slot,now+300)
+                    grant=prepare_first_launch(self.identity,body["ticket"])["pending"]
+                    ttl=FIRST_LAUNCH_TTL
+                self.pending[pid]=(born,grant,now+ttl)
                 self.last_owner=self.disconnected_owner=None
+                self.reauth_owner=None
                 self.resume_grant=None
         except (ValueError,OSError):
             raise AccountError(403,"invalid_native_handoff") from None
@@ -142,9 +139,23 @@ class NativeAccountSeats:
         with self.lock:
             now=time.monotonic()
             entry=self.pending.get(pid)
-            if entry and exe==self.client and born==entry[0] and entry[2]>now:
+            if entry and exe==self.client and born==entry[0]:
                 del self.pending[pid]
-                grant=entry[1] if self.remote else self.identity.resolve_ticket(entry[1])
+                try:
+                    if entry[2]<=now:
+                        raise ValueError("Private launch expired; log in again")
+                    if self.remote:
+                        grant=self.remote.activate(entry[1])
+                    else:
+                        with self.identity._write() as db:
+                            grant=consume_first_launch(db,entry[1],int(self.identity._clock()))
+                except (ValueError,OSError,http.client.HTTPException) as error:
+                    self.reauth_owner=owner
+                    self._request_login(sock)
+                    raise ValueError("Private launch expired or could not be confirmed; log in again") from error
+            elif exe==self.client and self.reauth_owner==owner:
+                self._request_login(sock)
+                raise ValueError("Private session needs a fresh login")
             elif exe==self.client and self.disconnected_owner==owner:
                 grant=None
                 if self.resume_grant and now<self.resume_until:
@@ -170,6 +181,14 @@ class NativeAccountSeats:
                 self.last_owner=owner
                 return replace(grant,on_disconnect=partial(self._disconnected,owner,grant))
             return grant
+
+    def _request_login(self,sock):
+        if self.picker:
+            try:
+                if self.picker.enter(sock,reconnect=True):
+                    self.reauth_owner=None
+            except OSError:
+                pass
 
     def _disconnected(self,owner,grant):
         with self.lock:

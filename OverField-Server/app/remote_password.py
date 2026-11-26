@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from local_identity import SLOT,TICKET
+from realm_accounts import FIRST_LAUNCH_TTL,PENDING
 from remote_realm import RemoteRealm,REALM
 from ssh_game_channel import SshChannels,port_value
 
@@ -20,6 +21,14 @@ class RemoteLogin:
     ticket:str
     on_disconnect:Callable[[],None] | None=None
     resume_token:str | None=None
+
+
+@dataclass(frozen=True)
+class PreparedLogin:
+    slot:str
+    expires_in:int
+    pending:str | None=None
+    legacy:RemoteLogin | None=None
 
 RESUME = re.compile(r"ofr_[A-Za-z0-9_-]{43}\Z", re.ASCII)
 
@@ -53,6 +62,32 @@ class RemotePassword:
             raise ValueError("Invalid private realm ticket")
         return self._exchange(slot,{"ticket":ticket})
 
+    def prepare(self,slot,ticket):
+        if not isinstance(slot,str) or not SLOT.fullmatch(slot) or not isinstance(ticket,str) or not TICKET.fullmatch(ticket):
+            raise ValueError("Invalid private realm ticket")
+        # Read the capability over the same authenticated transport. Old servers keep
+        # their existing five-minute reservation and never receive an unsupported form.
+        with self.channels.open(self.http_port) as channel:
+            conn=http.client.HTTPConnection("127.0.0.1",self.http_port,timeout=12)
+            conn.sock=channel
+            try:
+                conn.request("GET","/local/v1/region",headers={"Connection":"close"})
+                response=conn.getresponse()
+                raw=response.read(4097)
+                if response.status!=200 or len(raw)>4096:
+                    raise ValueError("Private realm capabilities unavailable")
+                region=json.loads(raw)
+                if not isinstance(region,dict) or region.get("realm")!=REALM:
+                    raise ValueError("Unexpected private realm capabilities")
+            finally:
+                conn.close()
+        if "first_launch_wait_v1" in (region.get("account_features") or ()):
+            return self._exchange(slot,{"prepare":ticket})
+        return PreparedLogin(slot,300,legacy=self.reserve(slot,ticket))
+
+    def activate(self,prepared):
+        return prepared.legacy if prepared.legacy is not None else self._exchange(prepared.slot,{"pending":prepared.pending})
+
     def resume(self,login):
         for delay in (0,.2,.5):
             if delay:
@@ -82,6 +117,11 @@ class RemotePassword:
                 data=json.loads(raw)
                 if not isinstance(data,dict) or data.get("realm")!=REALM or data.get("slot")!=slot:
                     raise ValueError("Unexpected private account response")
+                if "prepare" in credential:
+                    pending,ttl=data.get("pending"),data.get("expires_in")
+                    if not isinstance(pending,str) or not PENDING.fullmatch(pending) or type(ttl)!=int or not 1<=ttl<=FIRST_LAUNCH_TTL:
+                        raise ValueError("Invalid private launch reservation")
+                    return PreparedLogin(slot,ttl,pending=pending)
                 fresh=data.get("ticket")
                 resume=data.get("resume")
                 if not isinstance(fresh,str) or not TICKET.fullmatch(fresh) or (resume is not None and (not isinstance(resume,str) or not RESUME.fullmatch(resume))):

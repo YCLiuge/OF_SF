@@ -140,7 +140,9 @@ def run(root,resources):
                 except ValueError:pass
                 else:raise AssertionError("wrong process accepted")
             with patch("native_account_seats.process_info",side_effect=info),patch("native_account_seats.connection_pid",return_value=11):
-                assert seats.claim(None)==auth["slot"]
+                # Same interactive PID finishes a long first update after the password ticket has expired.
+                with patch.object(identity,"_clock",return_value=identity._clock()+38*60):
+                    assert seats.claim(None)==auth["slot"]
                 try:seats.claim(None)
                 except ValueError:pass
                 else:raise AssertionError("handoff replay accepted")

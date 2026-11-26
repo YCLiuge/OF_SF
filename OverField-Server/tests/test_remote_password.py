@@ -33,6 +33,16 @@ def resume_lifetime(database):
     creds={"username":"resume-fixture","password":"password-for-synthetic-resume"}
     initial=register(identity,{**creds,"nickname":"断线测试"},False)
     slot=initial["slot"]
+    from realm_accounts import FIRST_LAUNCH_TTL,change_password
+    from local_identity import InvalidTicket
+    def prepare():
+        password_ticket=login(identity,creds)["ticket"]
+        reply=reserve_native(identity,{"slot":slot,"prepare":password_ticket})
+        assert reply["expires_in"]==FIRST_LAUNCH_TTL and "ticket" not in reply and "resume" not in reply
+        denied(lambda:reserve_native(identity,{"slot":slot,"prepare":password_ticket}))
+        return reply["pending"]
+    def activate(pending,player=slot):
+        return reserve_native(identity,{"slot":player,"pending":pending})
     def start(receipt):
         return reserve_native(identity,{"slot":slot,"ticket":receipt["ticket"]})
     def resume(session,target=slot):
@@ -67,13 +77,50 @@ def resume_lifetime(database):
     with identity._write() as db:
         row=db.execute("SELECT digest FROM realm_native_resume WHERE slot=?",(slot,)).fetchone()
         assert row[0]==hashlib.sha256(new["resume"].encode()).digest()
-        db.execute("UPDATE realm_accounts SET verifier=randomblob(32) WHERE slot=?",(slot,))
+    change_password(identity,{**creds,"new_password":"rotated-synthetic-password"})
+    creds["password"]="rotated-synthetic-password"
     denied(lambda:resume(new))
+
+    pending=prepare()
+    denied(lambda:activate(pending,"ofp_"+"f"*32))
+    try:identity.resolve_ticket(pending)
+    except InvalidTicket:pass
+    else:raise AssertionError("A waiting receipt authenticated a gameplay connection")
+    with closing(sqlite3.connect(database)) as db:
+        assert db.execute("SELECT digest FROM realm_first_launches WHERE slot=?",(slot,)).fetchone()==(hashlib.sha256(pending.encode()).digest(),)
+    now[0]+=FIRST_LAUNCH_TTL-1
+    def race(_):
+        try:return activate(pending)
+        except AccountError as error:
+            assert error.status==401
+            return None
+    with ThreadPoolExecutor(max_workers=2) as threads:
+        winners=[win for win in threads.map(race,range(2)) if win]
+    assert len(winners)==1 and winners[0]["expires_in"]==300
+    assert identity.resolve_ticket(winners[0]["ticket"])==slot
+    old=prepare()
+    current=prepare()
+    denied(lambda:activate(old))
+    now[0]+=FIRST_LAUNCH_TTL
+    denied(lambda:activate(current))
+    revoked=prepare()
+    change_password(identity,{**creds,"new_password":"new-synthetic-password"})
+    denied(lambda:activate(revoked))
 
     # The front socket can reconnect just before the realm finishes saving the lost connection.
     from remote_password import RemoteLogin, SessionStillClosing
     proxy=RemotePassword(None,None,0,0)
     fixture=RemoteLogin(slot,"ticket",resume_token="resume")
+    import json
+    from unittest.mock import MagicMock
+    legacy=RemotePassword(None,MagicMock(),0,0)
+    with patch("remote_password.http.client.HTTPConnection") as connection,patch.object(legacy,"reserve",return_value=fixture) as original:
+        response=connection.return_value.getresponse.return_value
+        response.status=200
+        response.read.return_value=json.dumps({"realm":"overfield-local-v1","account_features":[]}).encode()
+        old=legacy.prepare(slot,"oft_"+"a"*43)
+        assert old.expires_in==300 and legacy.activate(old)==fixture
+        original.assert_called_once()
     with patch.object(proxy,"_exchange",side_effect=[SessionStillClosing(),fixture]) as exchange, \
          patch("remote_password.time.sleep") as delay:
         assert proxy.resume(fixture) is fixture and exchange.call_count==2
@@ -127,7 +174,9 @@ def run(root,resources):
                 status,proof=submit("register",payload)
                 assert status==201
                 assert submit("launch",{"slot":"bad","ticket":proof["ticket"]})[0]==401
-                grant=proxy.reserve(proof["slot"],proof["ticket"])
+                preparation=proxy.prepare(proof["slot"],proof["ticket"])
+                assert preparation.pending and preparation.legacy is None
+                grant=proxy.activate(preparation)
                 assert grant.resume_token
                 assert submit("launch",{"slot":proof["slot"],"resume":grant.resume_token})[0]==409
                 assert submit("launch",{"slot":proof["slot"],"ticket":proof["ticket"]})[0]==401
