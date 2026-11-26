@@ -1,5 +1,6 @@
 """Bind private gameplay operations to their native request and response messages."""
 from collections import OrderedDict
+from dataclasses import dataclass
 from hashlib import blake2s
 
 from network.msg_id import MsgId
@@ -32,14 +33,23 @@ def set_after_commit(session, attribute, value):
     session.commit_callbacks.append((setattr, (session, attribute, value)))
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedMutation:
+    request: object
+    digest: bytes
+
+
 def cached_mutation(session, name, data, packet_id, method, *, context=()):
     reply = getattr(pb, name + "Rsp")()
     cache = getattr(session, "mutation_receipts", None)
-    key = (name, *context, packet_id, blake2s(data).digest())
+    prepared = isinstance(data, PreparedMutation)
+    if packet_id:
+        digest = data.digest if prepared else blake2s(data).digest()
+        key = (name, *context, packet_id, digest)
     if packet_id and cache is not None and key in cache:
         reply.ParseFromString(cache[key])
     else:
-        request = getattr(pb, name + "Req").FromString(data)
+        request = data.request if prepared else getattr(pb, name + "Req").FromString(data)
         reply.status = method(session, request, reply)
         if packet_id and reply.status == pb.StatusCode_OK:
             cache_after_commit(session, "mutation_receipts", key, reply.SerializeToString())

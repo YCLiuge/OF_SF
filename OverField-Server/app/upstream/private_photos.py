@@ -2,6 +2,9 @@
 from datetime import timedelta
 from functools import partial
 import hashlib
+from threading import BoundedSemaphore
+from typing import NamedTuple
+from google.protobuf.message import DecodeError
 
 import photo_media
 import realm_plaza
@@ -10,6 +13,7 @@ from private_chat_text import chat_text
 from utils.res_loader import res
 from private_gameplay_transaction import Rejected, run
 from private_outfit_dye import outfit, store_outfit, worn
+from private_request import PreparedMutation
 from private_shop import now
 from proto import net_pb2 as pb
 from utils import db
@@ -142,17 +146,49 @@ def snapshot(s, req, posted):
     return result
 
 
-def upload(s, req, rsp, write):
-    title, t1, t2 = text_fields(s,req)
-    t3 = clean(s,req.tag3,limit("Label_Length"))
+# Bound parsed images retained by connection threads, including while waiting to commit.
+upload_slots = BoundedSemaphore(2)
+
+
+class PreparedUpload(NamedTuple):
+    photo: pb.UploadPhotoShareReq
+    hash_prefix: object
+
+
+def photo_hash(req):
     try:
         photo_media.dimensions(req.file)
     except ValueError:
+        return None
+    return hashlib.sha256(req.SerializeToString(deterministic=True))
+
+
+def prepare_upload(raw, packet_id):
+    try:
+        req = pb.UploadPhotoShareReq.FromString(raw)
+    except DecodeError:
+        # A locked action returns the native lock status before parsing the request.
+        return raw
+    receipt = hashlib.blake2s(raw).digest() if packet_id else b""
+    return PreparedMutation(PreparedUpload(req, photo_hash(req)), receipt)
+
+
+def upload(s, req, rsp, write):
+    if isinstance(req, PreparedUpload):
+        req, prefix = req
+    else:
+        prefix = photo_hash(req)
+    title, t1, t2 = text_fields(s,req)
+    t3 = clean(s,req.tag3,limit("Label_Length"))
+    if prefix is None:
         return pb.StatusCode_BAD_REQ
     activity = active_show(uploading=True) if req.is_activity else 0
     if req.is_activity and not activity:
         return pb.StatusCode_PS_ACTIVITY_NOT_OPEN
-    fingerprint = hashlib.sha256(req.SerializeToString(deterministic=True) + activity.to_bytes(4,"big")).digest()
+    # Activity is authoritative at commit. Preserve the exact digest of legacy rows.
+    fingerprint = prefix.copy()
+    fingerprint.update(activity.to_bytes(4,"big"))
+    fingerprint = fingerprint.digest()
     player = s.player_id
     prior = db.conn.execute("SELECT code FROM realm_photos WHERE owner=? AND fingerprint=?",(player,fingerprint)).fetchone()
     if prior:

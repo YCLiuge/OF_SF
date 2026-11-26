@@ -650,6 +650,14 @@ class LocalGameService:
         if msg_id == MsgId.SPOperateReq:
             from private_secondary_password import prepare
             body = prepare(self.lock, s, body, packet_id)
+        if msg_id == MsgId.UploadPhotoShareReq and not getattr(s, "action_challenge", False):
+            from private_photos import prepare_upload, upload_slots
+            with upload_slots:
+                prepared = prepare_upload(body, packet_id)
+                return self._dispatch_gameplay(s, msg_id, packet_id, prepared)
+        return self._dispatch_gameplay(s, msg_id, packet_id, body)
+
+    def _dispatch_gameplay(self, s, msg_id, packet_id, body):
         # Channel admission is transactional in the scene-switch handler.
         with self.lock:
             if (getattr(s, "action_challenge", False) and

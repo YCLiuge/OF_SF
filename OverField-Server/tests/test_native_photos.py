@@ -1,13 +1,14 @@
 """Exercise the original client's photo wall protocol, native media URLs and portable storage."""
 import argparse
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 import socket
 import struct
 from tempfile import TemporaryDirectory
-from threading import Thread
+from threading import Barrier, Event, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -31,6 +32,29 @@ from utils.pb_create import make_item
 # Real 320 x 180 WebP encoded by libwebp.
 WEBP = base64.b64decode("UklGRiQAAABXRUJQVlA4TBcAAAAvP8EsAAcQ/Y/+BwAU6f9/iuh/6v8PAAA=")
 OK = pb.StatusCode_OK
+
+
+def concurrent_uploads(first, second, writer):
+    both_inspecting = Barrier(3)
+    finish_inspection = Event()
+
+    def inspect(data):
+        both_inspecting.wait(timeout=5)
+        assert finish_inspection.wait(timeout=5)
+        return dimensions(data)
+
+    with patch("photo_media.dimensions", inspect), ThreadPoolExecutor(max_workers=2) as pool:
+        uploads = [pool.submit(call, sock, "UploadPhotoShare", 190, file=WEBP, title="并发测试")
+                   for sock in (first, second)]
+        try:
+            both_inspecting.wait(timeout=5)
+            saved = call(writer, "SetArchiveInfo", 191, key="UploadTest", value="committed")
+            assert (saved.status, saved.value) == (OK, "committed")
+        finally:
+            finish_inspection.set()
+        replies = [future.result(timeout=5) for future in uploads]
+    assert all(reply.status == OK for reply in replies)
+    assert replies[0].info.code != replies[1].info.code
 
 
 @contextmanager
@@ -204,6 +228,11 @@ def run(root, resources):
                 assert call(a,"UploadPhotoShare",64,**dict(upload,title="用尽名额")).status==pb.StatusCode_PS_TODAY_UPLOAD_LIMIT
             with patch("private_photos.now",return_value=datetime(2027,4,2,5,tzinfo=CN)):
                 assert call(a,"UploadPhotoShare",65,**dict(upload,title="新的一天")).status==OK
+            third = identity.create_profile("摄影丙")
+            writer, _, _ = login(game.port, identity.issue_ticket(*third))
+            with writer:
+                join_after_intro(writer)
+                concurrent_uploads(a, b, writer)
     finally:
         game.stop()
     packed=root/"backup.zip"
