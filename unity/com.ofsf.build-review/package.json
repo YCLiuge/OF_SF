@@ -1,0 +1,11 @@
+{
+  "name": "com.ofsf.build-review",
+  "version": "0.1.0",
+  "displayName": "OF_SF 构建对照",
+  "description": "Read and compare local client build reports in a Unity Editor window.",
+  "unity": "2021.3",
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "com.unity.modules.imgui": "1.0.0"
+  }
+}

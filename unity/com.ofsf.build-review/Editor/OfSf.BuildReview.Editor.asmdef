@@ -1,0 +1,5 @@
+{
+  "name": "OfSf.BuildReview.Editor",
+  "rootNamespace": "OfSf.BuildReview",
+  "includePlatforms": [ "Editor" ]
+}
