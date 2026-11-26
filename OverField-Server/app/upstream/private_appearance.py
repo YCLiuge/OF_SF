@@ -1,7 +1,7 @@
 """Native profile settings and owned character outfits for a private realm."""
 from network.msg_id import MsgId
 from private_request import handler
-from private_chat_text import chat_text
+from private_chat_text import profile_signature
 from utils.res_loader import res
 from proto import net_pb2 as pb
 from server.scene_data import get_session
@@ -24,9 +24,9 @@ def owned(player,item,tag):
 
 
 def change_sign(session,req,rsp):
-    value=chat_text(req.sign)
     limit=int(res.index("GlobalConfig","config","key")["Player_Sign_Text_Cout"]["values"][0])
-    if value is None or len(value.encode("utf-16-le"))//2>limit or not session.chat_guard.allows(value):
+    value=profile_signature(req.sign,limit,session.chat_guard)
+    if value is None:
         return pb.StatusCode_BAD_REQ
     rsp.sign=value
     db.set_players_info(session.player_id,"sign",value)

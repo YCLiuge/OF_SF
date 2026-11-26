@@ -1,0 +1,33 @@
+{
+  "id": "steam-global-26178963",
+  "channel": "Steam 国际版",
+  "build": "2026-10-24-12-00-58",
+  "files": {
+    "launcher.exe": "a3702251bd92b7ba773b00eeffef7a63a311098e96e2e83f541e7ea78070001b",
+    "GameAssembly.dll": "4787fc3abaf911890fd6bccae6d0f85904f7c959a5d14c55f5dc56b75fe82cab",
+    "launcher_Data/data.unity3d": "7088059f654139460e7d92a6bd3ae140f8f60b764894f6ad116caf086afde2c4"
+  },
+  "publisher_version": "Build 26178963",
+  "steam_appid": 3879660,
+  "steam_buildid": "26178963",
+  "product_page": "https://store.steampowered.com/app/3879660/",
+  "verified_sdk": {
+    "launcher_Data/Plugins/x86_64/steam_api64.dll": "1add7f151fa644870a735ae86e68d1f019f296130d8e7c0a7ed3ecc7482dccbc"
+  },
+  "private_login_verified": false,
+  "resources": {
+    "base_sha256": "7292d79c83697dcacfe562e9f81fa91eb8c8e679ed74c6fd2b95f19e75a25b78",
+    "bundle_count": 9809,
+    "patches": {
+      "2026-10-24-12-00-58": {
+        "sha256": "7292d79c83697dcacfe562e9f81fa91eb8c8e679ed74c6fd2b95f19e75a25b78",
+        "plaza_bundle": "8e5209607608c9f21858e9ab8cc1901c"
+      },
+      "2026-11-25-17-28-12": {
+        "sha256": "471fa0c2e6da3b620f2d509b901a375300f4fbd546d7c1e88a5031ac3951c452",
+        "plaza_bundle": "67119e90eb02d8f49e242dbf13ac9bf4",
+        "bundle_count": 9814
+      }
+    }
+  }
+}

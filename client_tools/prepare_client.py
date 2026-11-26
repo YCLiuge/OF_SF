@@ -6,18 +6,18 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import sys
 import tempfile
 from uuid import uuid4
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"OverField-Server/app"))
+from client_build_catalog import BUILD, PATCH, NOVEMBER_PATCH as NOVEMBER_UPDATE, TAPTAP_RESOURCES, channel_records
 
 from native_endpoint import KNOWN_SOURCE, export_config, validate_endpoint
 from private_channel_privacy import protect_private_channel_log
 
 LAUNCHER = "a3702251bd92b7ba773b00eeffef7a63a311098e96e2e83f541e7ea78070001b"
 ASSEMBLY = "2db98364241c95864781f77877523b9d2f728b22a91935fa30cdfb33a8b7f4ea"
-BUILD = "2026-10-21-14-05-50"
-PATCH = "2026-11-07-22-39-35"
-NOVEMBER_UPDATE = "2026-11-25-10-44-03"
-NOVEMBER_MANIFEST_SHA256 = "7c1d25a4b2efcc802a45e841cf95ae8438f317d68dd1e37ce2c6eee8ab707de6"
 RELEASE_ROOTS = {"launcher.exe","GameAssembly.dll","UnityPlayer.dll","baselib.dll","UnityCrashHandler64.exe","version"}
 RELEASE_DIRS = {"il2cpp_data","Plugins","Resources","StreamingAssets","yoo"}
 RELEASE_FILES = {"boot.config","ScriptingAssemblies.json","RuntimeInitializeOnLoads.json"}
@@ -26,11 +26,8 @@ def sha(path):
     with path.open("rb") as f:
         return hashlib.file_digest(f,"sha256").hexdigest()
 
-MANIFESTS = {
-    PATCH: "8c467ba267e06ffa4cd6e3dcb2326a6afc403c7f5e1c2dc18bcc1e83410204d9",
-    NOVEMBER_UPDATE: NOVEMBER_MANIFEST_SHA256,
-    "2026-11-25-19-54-41": "c5c6219f13c7cbac864e4cb04929979997fbe22e0d137ce5023edc89f52668c5",
-}
+MANIFESTS = {version: data.digest for version, data in TAPTAP_RESOURCES.patches.items()}
+NOVEMBER_MANIFEST_SHA256 = MANIFESTS[NOVEMBER_UPDATE]
 MANIFEST_DIR = Path("launcher_Data/yoo/DefaultPackage/ManifestFiles")
 STEAM_APP_ID = 3879660
 
@@ -67,8 +64,25 @@ def supported_manifest(source):
     return manifest.is_file() and sha(manifest) == expected
 
 
+class RecognizedChannelError(ValueError):
+    """Verified retail client identity with no tested private launch path."""
+
+
 def verify_retail(source, *, settings=True):
     version=short_text(source/"version")
+    known = [record for record in channel_records() if record["build"] == version]
+    evidence = {}
+    for record in known:
+        fingerprints = {**record["files"], **record.get("verified_sdk", {})}
+        for name, expected in fingerprints.items():
+            if name not in evidence:
+                file = plain_path(source / name)
+                evidence[name] = sha(file) if file.is_file() else None
+            if evidence[name] != expected:
+                break
+        else:
+            label = record.get("publisher_version") or version
+            raise RecognizedChannelError(f"已识别{record['channel']} {label}（构建 {version}）。此渠道的区服登录尚未验证，可从原渠道游玩。")
     if version!=BUILD:
         value=version if re.fullmatch(r"[0-9.-]{1,40}",version) else "未知"
         raise ValueError(f"此客户端的构建 {value} 尚未验证。请使用兼容的国服 PC 1.1.12。")
@@ -123,6 +137,7 @@ def installed_source(selected, *, required=True):
     matched=[]
     seen=set()
     errors=[]
+    recognized=[]
     if root.is_dir():
         for candidate in library_candidates(root,errors):
             if candidate in seen:
@@ -136,12 +151,18 @@ def installed_source(selected, *, required=True):
                 matched.append(candidate)
                 if candidate==root:
                     return root.resolve(strict=True)
+            except RecognizedChannelError as error:
+                if candidate==root:
+                    raise
+                recognized.append(error)
             except (ValueError,OSError) as error:
                 errors.append(str(error))
     if len(matched)>1:
         raise ValueError("此库有多份通过校验的客户端，请直接选择要使用的游戏安装目录。")
     if matched:
         return matched[0].resolve(strict=True)
+    if recognized:
+        raise recognized[0]
     if errors:
         raise ValueError(errors[0])
     if required:

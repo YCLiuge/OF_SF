@@ -18,6 +18,31 @@ def chat_text(value):
     return value.replace("<","＜").replace(">","＞")
 
 
+# The PC profile editor supports this TextMeshPro color form; chat keeps its existing rules.
+PROFILE_COLOR = re.compile(r"<(?:color=)?#[0-9a-f]{6}(?:[0-9a-f]{2})?>|</color>",re.I)
+
+
+def profile_signature(value,limit=60,guard=None):
+    if not isinstance(value,str) or len(value)>180:
+        return None
+    value=unicodedata.normalize("NFC",value).strip()
+    try:
+        visible=PROFILE_COLOR.sub("",value)
+        if (len(value.encode("utf-16-le"))//2>limit or chat_text(value) is None or chat_text(visible) is None
+                or guard is not None and (not guard.allows(value) or not guard.allows(visible))):
+            return None
+    except UnicodeError:
+        return None
+    # Escape player-supplied tags exactly as ordinary chat does; restore only recognized colors.
+    pieces=[]
+    start=0
+    for tag in PROFILE_COLOR.finditer(value):
+        pieces.extend((value[start:tag.start()].replace("<","＜").replace(">","＞"),tag.group()))
+        start=tag.end()
+    pieces.append(value[start:].replace("<","＜").replace(">","＞"))
+    return "".join(pieces)
+
+
 class ProtectedChat:
     def __init__(self,*secrets):
         self.digests={(len(s),hashlib.sha256(s.encode()).digest()) for s in secrets if s and len(s)<=180}

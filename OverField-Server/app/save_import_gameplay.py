@@ -55,7 +55,7 @@ def looks_for_actor(looks):
 
 def validate(data):
     from private_entitlements import CURRENCY_IDS
-    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals","pets","field_progress","fishing_rods"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
+    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals","pets","field_progress","fishing_rods","profile_sign"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
         raise ValueError("invalid data format")
     for key,limit in ARRAY_LIMITS.items():
         rows(data[key],limit)
@@ -65,6 +65,16 @@ def validate(data):
     if level not in player_levels or world not in {0,*_table("Level","world_level")}:
         raise ValueError("unknown level")
     out["player"]=[level,min(xp,max(0,player_levels[level].get("need_exp",0)-1)) if level<max(player_levels) else min(xp,100000),world]
+    if "profile_sign" in data:
+        from private_chat_text import profile_signature
+        entry=data["profile_sign"]
+        if not isinstance(entry,dict) or set(entry)!={"text","hidden"} or type(entry["hidden"]) is not bool:
+            raise ValueError("invalid profile signature")
+        limit=int(_table("GlobalConfig","config","key")["Player_Sign_Text_Cout"]["values"][0])
+        text=profile_signature(entry["text"],limit)
+        if text is None or text!=entry["text"]:
+            raise ValueError("invalid profile signature")
+        out["profile_sign"]={"text":text,"hidden":entry["hidden"]}
     if "head" in data:
         head=number(data["head"])
         if head in _table("Head","head","head_i_d"):
@@ -267,6 +277,7 @@ def validate(data):
         totals["缺少可用明细的宠物"]=pets["total"]-len(pets["entries"])
     if out.get("gather_totals"):totals["场景采集记录"]=len(out["gather_totals"])
     skipped=sum(len(data[k])-len(out[k]) for k in LABELS)-len(out.get("additional_quests",()))-len(out.get(HISTORY,()))
+    if "profile_sign" in out:totals["个人签名"]=1
     totals["穿搭预设"]=sum(len(h[6]) for h in out["heroes"])
     totals["已编队人数"]=sum(bool(i) for i in out["team"])
     totals["装备预设"]=sum(len(presets) for _,_,presets in out["loadouts"])
@@ -284,6 +295,10 @@ def restore(pid,plan):
             ON CONFLICT(player,scope,place,kind) DO UPDATE SET total=max(total,excluded.total)""",
             (pid,scene,kind,count))
     db.conn.execute("UPDATE players SET level=?,exp=?,world_level=? WHERE player_id=?",(level,exp,world,pid))
+    if "profile_sign" in plan:
+        sign=plan["profile_sign"]
+        db.conn.execute("UPDATE players SET sign=?,hide_value=(coalesce(hide_value,0)&~2)|? WHERE player_id=?",
+                        (sign["text"],2 if sign["hidden"] else 0,pid))
     if "head" in plan:
         db.set_players_info(pid,"head",plan["head"])
     for key,count in plan["stacks"]:

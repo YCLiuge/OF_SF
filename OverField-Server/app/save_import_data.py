@@ -92,6 +92,25 @@ def projected_identity(snapshot):
     return source
 
 
+def source_signature(mains,owners):
+    """Accept only consistent, explicit values from this single authenticated player."""
+    from private_chat_text import profile_signature
+    if len(owners)!=1:
+        return None
+    observed=[]
+    for source in mains:
+        if "sign" not in source or integer(source.get("player_id"),0xffffffff) not in owners:
+            continue
+        text=profile_signature(source["sign"])
+        mask=source.get("hide_value",0)
+        if text is None or text!=source["sign"] or type(mask) is not int or not 0<=mask<2**32:
+            return None
+        observed.append((text,bool(mask&2)))
+    if observed and all(entry==observed[0] for entry in observed):
+        return {"text":observed[0][0],"hidden":observed[0][1]}
+    return None
+
+
 def source_gather_totals(snapshot, main):
     scene,channel = numbers(main, ("scene_id","channel_id"))
     owner = integer(main.get("player_id"),0xffffffff)
@@ -175,6 +194,8 @@ def project(snapshot):
         raise BackupFormatError("此备份中没有成功解码的个人主存档。")
     data={"format":DATA_FORMAT,"player":numbers(main,("level","exp","world_level")),
           "heroes":[],"quests":[],"chapters":[],"achievements":[],"stacks":[],"outfits":[],"gear":[]}
+    sign=source_signature(mains,owners)
+    if sign is not None:data["profile_sign"]=sign
     active_head=integer(main.get("head"))
     if active_head:
         data["head"]=active_head

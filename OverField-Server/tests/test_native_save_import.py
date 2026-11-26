@@ -97,7 +97,28 @@ def run(root,resources):
     folder=root/"export";folder.mkdir()
     fixture=synthetic()
     from save_import_data import project
-    assert "pets" not in project(fixture)
+    assert "pets" not in project(fixture) and "profile_sign" not in project(fixture)
+    from copy import deepcopy
+    from private_chat_text import ProtectedChat,profile_signature
+    sig="<#12Ab34>相遇🌙"
+    base=fixture["decoded"]["main"]["frames"][0]["decoded"]
+    base.update(sign=sig,hide_value=3)
+    assert project(fixture)["profile_sign"]=={"text":sig,"hidden":True}
+    cases=deepcopy(fixture); frames=cases["decoded"]["main"]["frames"]
+    frames.append(deepcopy(frames[0]));frames[-1]["decoded"]["sign"]="另一条"
+    assert "profile_sign" not in project(cases)
+    frames.pop()
+    for value in ("login_token="+("a"*20),"<sprite=0>","🌙"*31,None,12,"\udfff"):
+        frames[0]["decoded"]["sign"]=value
+        assert "profile_sign" not in project(cases)
+    frames[0]["decoded"]["sign"]="";assert project(cases)["profile_sign"]["text"]==""
+    del frames[0]["decoded"]["sign"]
+    cases["decoded"]["friend"]={"name":"OtherPlayerInfoRsp","frames":[{"ok":True,"decoded":{
+        "status":{"v":1},"other_info":{"sign":"另一个玩家的签名"}}}]}
+    assert "profile_sign" not in project(cases)
+    assert profile_signature("private<#010203>value",guard=ProtectedChat("privatevalue")) is None
+    assert profile_signature("<sprite=0>")=="＜sprite=0＞"
+    assert profile_signature("</color=x>")=="＜/color=x＞"
     def record(name,data):
         return {"name":name,"frames":[{"ok":True,"decoded":{"status":{"v":1},**data}}]}
     fixture["decoded"]["pet_capacity"]=record("PetWarehouseLimitNotice",{"warehouse_limit":100})
@@ -177,6 +198,7 @@ def run(root,resources):
         assert call("import-apply",{**auth,**key})[0]==200
         assert call("import-undo",wrong)[0]==409
         pid=db.conn.execute("SELECT player_id FROM private_slots WHERE slot=?",(a["slot"],)).fetchone()[0]
+        assert db.conn.execute("SELECT sign,hide_value&2 FROM players WHERE player_id=?",(pid,)).fetchone()==(sig,2)
         from private_pets import capacity,owned_pets
         equipped_pet,=db.get_players_info(pid,"pet_instance_id")
         companion,=owned_pets(pid)
@@ -214,7 +236,10 @@ def run(root,resources):
     with world(state,resources) as (port,game):
         new=call("login",credentials)[1];auth={"import_ticket":new["import_ticket"]}
         assert call("import-apply",{**auth,**key})[0]==200
+        # Roll back just signature visibility, not independently changed privacy flags.
+        with db.conn:db.conn.execute("UPDATE players SET hide_value=hide_value|4 WHERE player_id=?",(pid,))
         assert call("import-undo",auth)[0]==200 and call("import-undo",auth)[0]==200
+        assert db.conn.execute("SELECT sign,hide_value&6 FROM players WHERE player_id=?",(pid,)).fetchone()==("",4)
         assert not any(pb.ItemDetail.FromString(raw).main_item.weapon.weapon_id in (1006005,1006006,1006010)
                        for raw in db.get_item_detail(pid,table="items_s"))
         assert not list(owned_pets(pid)) and not db.get_players_info(pid,"pet_instance_id")[0] and capacity(pid)==100
@@ -222,9 +247,12 @@ def run(root,resources):
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,5012011)).main_item.base_item.num==4
         info=call("import-preview",{**auth,"data":data})[1]
         assert info["eligible"] and call("import-apply",{**auth,"preview_id":info["preview_id"]})[0]==200
-        client,info,_=login(game.port,new["ticket"])
+        client,_,_=login(game.port,new["ticket"])
         with closing(client):
             main,scene=read_inherited_role(client,game.entitlements)
+            assert main.sign==sig and main.hide_value&2
+            assert native_call(client,"OtherPlayerInfo",player_id=main.player_id).other_info.sign==sig
+            assert native_call(client,"ChangeSign",sign="玩家已修改").sign=="玩家已修改"
             assert main.pet_instance_id and main.pet_instance_id==next(owned_pets(pid)).instance_id
             visible=next(player for player in scene.data.players if player.player_id==main.player_id)
             assert (visible.pet_item_id,visible.pet_name)==(200001009,"雪团")
@@ -236,6 +264,8 @@ def run(root,resources):
             assert call("import-undo",auth)[0]==409
         b=call("login",other)[1]
         second_auth={"import_ticket":b["import_ticket"]}
+        assert call("import-apply",{**auth,"preview_id":info["preview_id"]})[0]==200
+        assert db.conn.execute("SELECT sign FROM players WHERE player_id=?",(pid,)).fetchone()==("玩家已修改",)
         status,full_info=call("import-preview",{**second_auth,"data":complete_data})
         assert status==200 and full_info["counts"]["可恢复宠物"]==3 and not full_info["counts"].get("缺少可用明细的宠物",0)
         full_claim={**second_auth,"preview_id":full_info["preview_id"],

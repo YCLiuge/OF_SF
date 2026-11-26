@@ -68,6 +68,7 @@ def snapshot(conn,pid):
             result[table,identifier]=blob
     for table,sql in (("level","SELECT level,exp,world_level,character_id FROM players WHERE player_id=?"),
                       ("head","SELECT head FROM players WHERE player_id=?"),
+                      ("profile_sign","SELECT sign,coalesce(hide_value,0)&2 FROM players WHERE player_id=?"),
                       ("pet_equipped","SELECT pet_instance_id FROM players WHERE player_id=?"),
                       ("pet_capacity","SELECT v FROM player_kv WHERE player_id=? AND ns='pet_bag' AND k='capacity'"),
                       ("location","SELECT scene,channel FROM private_locations WHERE player_id=?"),
@@ -135,6 +136,7 @@ def restore_prior(conn,pid,table,key,value):
         return
     values=json.loads(value)
     if table=="level":conn.execute("UPDATE players SET level=?,exp=?,world_level=?,character_id=? WHERE player_id=?",(*values,pid))
+    elif table=="profile_sign":conn.execute("UPDATE players SET sign=?,hide_value=(coalesce(hide_value,0)&~2)|? WHERE player_id=?",(*values,pid))
     elif table=="head":conn.execute("UPDATE players SET head=? WHERE player_id=?",(*values,pid))
     elif table=="pet_equipped":conn.execute("UPDATE players SET pet_instance_id=? WHERE player_id=?",(*values,pid))
     elif table=="location":conn.execute("UPDATE private_locations SET scene=?,channel=? WHERE player_id=?",(*values,pid))

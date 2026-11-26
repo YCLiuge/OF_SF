@@ -17,7 +17,7 @@ import time
 from urllib.parse import urlsplit
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from prepare_client import prepare, save
+from prepare_client import ASSEMBLY, BUILD, plain_path, prepare, save, sha, short_text
 from native_endpoint import validate_endpoint
 from realm_addresses import recent, ssh_address
 
@@ -157,10 +157,11 @@ def managed_game_port():
 
 def revision(server,url,state,remote,account_native=False):
     version=hashlib.sha256()
-    for parent in (server/"app",):
-        for file in sorted(parent.rglob("*.py")):
-            version.update(str(file.relative_to(parent)).encode("utf8"))
-            version.update(file.read_bytes())
+    app=server/"app"
+    # A new verified client manifest also changes the resource mirror contract.
+    for file in sorted([*app.rglob("*.py"), *(app/"client_builds").glob("*.json")]):
+        version.update(file.relative_to(app).as_posix().encode("utf8"))
+        version.update(file.read_bytes())
     version.update((server/"of.py").read_bytes())
     version.update(b"preselected-realm-v3")
     version.update(json.dumps([url,str(state),remote,account_native,managed_game_port()],sort_keys=True).encode())
@@ -200,6 +201,12 @@ def stop_owned(server,state_dir,marker,old):
 
 
 def local_start(home,tools,src,url,remote,account_native=False):
+    # This adapter has been verified only for the national TapTap issuer.
+    # Resource-only recognition of another channel cannot select an identity provider.
+    assembly = plain_path(src/"GameAssembly.dll")
+    if short_text(src/"version") != BUILD or not assembly.is_file() or sha(assembly) != ASSEMBLY:
+        raise ValueError("此渠道尚未验证游戏账号服务，请从原渠道启动器进入。")
+
     u=urlsplit(url)
     if u.hostname not in ("127.0.0.1","localhost") or u.scheme!="http":
         raise ValueError("自动运行的本机登录服务请使用 http://127.0.0.1:端口。")

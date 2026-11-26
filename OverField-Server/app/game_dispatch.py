@@ -13,21 +13,13 @@ from urllib.parse import urlsplit
 from local_picker import LABEL as PICKER_LABEL, LocalPicker
 
 
-BUILD = "2026-10-21-14-05-50"
-PATCH = "2026-11-07-22-39-35"
-NOVEMBER_PATCH = "2026-11-25-10-44-03"
-EVENING_PATCH = "2026-11-25-19-54-41"
-PATCH_BUNDLES={PATCH:"e49d461782ed9bf3309d2c35662e132a", NOVEMBER_PATCH:"4479579c8fb33fb720ec2dadebe34778",
-               EVENING_PATCH:"63fd83b3b51cecbc1d604f40f76db609"}
+from client_build_catalog import BUILD, PATCH, NOVEMBER_PATCH, EVENING_PATCH, TAPTAP_RESOURCES, RESOURCE_SERIES
+
+PATCH_BUNDLES = {version: data.plaza_bundle for version, data in TAPTAP_RESOURCES.patches.items()}
+MANIFEST_SHA = {BUILD: TAPTAP_RESOURCES.base_digest, **{v: data.digest for v, data in TAPTAP_RESOURCES.patches.items()}}
 VERSION = BUILD + "_" + PATCH
 PREFIX = "PackageManifest_DefaultPackage"
 PACKAGE = "DefaultPackage"
-MANIFEST_SHA = {
-    BUILD: "cb7dd3bb6e9ed0702ceb3c1ca96f43998d4af904327ba4c349224947d976f8be",
-    PATCH: "8c467ba267e06ffa4cd6e3dcb2326a6afc403c7f5e1c2dc18bcc1e83410204d9",
-    NOVEMBER_PATCH:"7c1d25a4b2efcc802a45e841cf95ae8438f317d68dd1e37ce2c6eee8ab707de6",
-    EVENING_PATCH:"c5c6219f13c7cbac864e4cb04929979997fbe22e0d137ce5023edc89f52668c5",
-}
 ROUTES = {"/dispatch/get_login_url_list", "/dispatch/client_hot_update", "/dispatch/region_info",
           "/dispatch/get_notice_list", "/dispatch/get_notice_url_list"}
 HASH = re.compile(rb"\.bundle.{4}\x20\x00([a-f0-9]{32})\x08\x00[a-f0-9]{8}(.{8})", re.S)
@@ -75,13 +67,13 @@ def _issued_manifest(version, manifests, stock):
         return False
 
 
-def _stock_patch(installed,manifests,stock,private_copy):
-    allowed={v.encode():v for v in PATCH_BUNDLES}
+def _stock_patch(installed,manifests,stock,private_copy,series=TAPTAP_RESOURCES):
+    allowed={v.encode():v for v in series.patches}
     if installed in allowed:return allowed[installed]
     if private_copy and _issued_manifest(installed,manifests,stock):
         receipt=stock/(PREFIX+"_"+installed.decode("ascii")+".base")
         # Existing issued packages predate the receipt and used the November 7 manifest.
-        base=receipt.read_bytes().strip() if receipt.exists() else PATCH.encode()
+        base=receipt.read_bytes().strip() if receipt.exists() else (PATCH.encode() if series.build==BUILD else b"")
         if base in allowed:return allowed[base]
     raise ValueError("The expected active resource patch is unavailable")
 
@@ -94,7 +86,9 @@ class Assets:
         data = self.root / "launcher_Data"
         streaming = data / "StreamingAssets" / "yoo" / PACKAGE
         cache = data / "yoo" / PACKAGE
-        if (self.root / "version").read_bytes().strip() != BUILD.encode():
+        self.build = (self.root / "version").read_text(encoding="ascii").strip()
+        series = RESOURCE_SERIES.get(self.build)
+        if series is None:
             raise ValueError("Unexpected client build")
         self._meta = {}
         self.plaza_lock = Lock()
@@ -103,22 +97,27 @@ class Assets:
         self.stock = self.root / ".of-plaza-stock"
         self.private_copy = (self.root / ".of-private-client.json").is_file()
         version_file = cache / "ManifestFiles" / (PREFIX + ".version")
+        # Before its first update, the Steam build has only its packaged manifest.
+        if not version_file.exists() and self.build in series.patches:
+            version_file = streaming / (PREFIX + ".version")
         installed = version_file.read_bytes().strip()
-        self.patch=_stock_patch(installed,version_file.parent,self.stock,self.private_copy)
+        self.patch=_stock_patch(installed,version_file.parent,self.stock,self.private_copy,series)
+        digests = {self.build: series.base_digest, self.patch: series.patches[self.patch].digest}
         self.plaza_version=self.patch
         self._meta[version_file.name] = (version_file, _hash(version_file, "sha256"))
         active = None
-        for version, base in [(BUILD, streaming), (self.patch, cache / "ManifestFiles")]:
+        manifests = dict.fromkeys(((self.build, streaming), (self.patch, version_file.parent)))
+        for version, base in manifests:
             manifest = base / f"{PREFIX}_{version}.bytes"
             if not manifest.exists() and version == self.patch and self.private_copy:
                 manifest = self.stock / manifest.name
             checksum = manifest.with_suffix(".hash")
             blob = manifest.read_bytes()
-            if hashlib.sha256(blob).hexdigest() != MANIFEST_SHA[version]:
+            if hashlib.sha256(blob).hexdigest() != digests[version]:
                 raise ValueError("Unexpected original manifest digest")
             if checksum.read_bytes().strip() != hashlib.md5(blob).hexdigest().encode():
                 raise ValueError("Original manifest hash file mismatch")
-            self._meta[manifest.name] = (manifest, MANIFEST_SHA[version])
+            self._meta[manifest.name] = (manifest, digests[version])
             self._meta[checksum.name] = (checksum, _hash(checksum, "sha256"))
             if version == self.patch:
                 active = blob
@@ -126,15 +125,16 @@ class Assets:
         missing = 0
         cached_count = 0
         entries = list(HASH.finditer(active))
-        if len(entries) != 8936 or len({e[1] for e in entries}) != len(entries):
+        if len(entries) != series.patches[self.patch].bundle_count or len({e[1] for e in entries}) != len(entries):
             raise ValueError("Unexpected 1.1.12 manifest file table")
+        stock_bundle = series.patches[self.patch].plaza_bundle
         for match in entries:
             name = match[1].decode("ascii")
             length, = struct.unpack("<Q", match[2])
             patch = cache / "CacheFiles" / name[:2] / name / "__data"
             packaged = streaming / (name + ".bundle")
             candidates = [patch, packaged]
-            if self.private_copy and name == PATCH_BUNDLES[self.patch]:
+            if self.private_copy and name == stock_bundle:
                 candidates.append(self.stock / (name + ".bundle"))
             for path in candidates:
                 try:
@@ -155,13 +155,16 @@ class Assets:
     def select_plaza(self, config):
         from plaza_assets import build
         from realm_blessings import validate_plan
+        series = RESOURCE_SERIES[getattr(self, "build", BUILD)]
+        if not series.edit_plaza:
+            return self.patch
         config = validate_plan(config, active_only=True)
         with self.plaza_lock:
             if config == self.plaza_config:
                 return self.plaza_version
             if config:
                 manifest_name = PREFIX + "_" + self.patch + ".bytes"
-                stock_bundle=PATCH_BUNDLES[self.patch]
+                stock_bundle=series.patches[self.patch].plaza_bundle
                 bundle_name = stock_bundle + ".bundle"
                 with self.open_stock(manifest_name) as src:
                     manifest = src.read()
@@ -190,7 +193,7 @@ class Assets:
                         finally:
                             temporary.unlink(missing_ok=True)
                     # Continue serving the verified baseline even if a running player prunes its old cache.
-                    self._meta[manifest_name] = (self.stock / manifest_name, MANIFEST_SHA[self.patch])
+                    self._meta[manifest_name] = (self.stock / manifest_name, series.patches[self.patch].digest)
                     hash_name = manifest_name[:-6] + ".hash"
                     self._meta[hash_name] = (self.stock / hash_name, _hash(self.stock / hash_name,"sha256"))
                     self._bundles[bundle_name] = (self.stock / bundle_name, len(bundle), stock_bundle)
@@ -266,12 +269,13 @@ class GameDispatch:
             return 200, {"data": rows, "serverTime": time.time_ns() // 1_000_000}
         if route == "/dispatch/get_login_url_list":
             return 200, {"LoginUrlList": [{"loginUrl": self.origin, "name": self.region_name}]}
-        version = BUILD+"_"+getattr(self.assets,"plaza_version",PATCH)
+        build = getattr(self.assets, "build", BUILD)
+        version = build+"_"+getattr(self.assets,"plaza_version",PATCH)
         if route in ("/dispatch/region_info", "/dispatch/client_hot_update") and self.assets and self.maintenance:
             if hasattr(self.maintenance, "plaza") and hasattr(self.assets, "select_plaza"):
                 import http.client, sqlite3
                 try:
-                    version = BUILD + "_" + self.assets.select_plaza(self.maintenance.plaza())
+                    version = build + "_" + self.assets.select_plaza(self.maintenance.plaza())
                 except (OSError, ValueError, sqlite3.Error, http.client.HTTPException):
                     return 503, {"status": False, "message": "Private plaza resource plan unavailable"}
         if route == "/dispatch/region_info":
@@ -291,7 +295,7 @@ class GameDispatch:
 
 
 def _resource(handler, dispatch, route):
-    prefix = "/Resources/" + BUILD + "/"
+    prefix = "/Resources/" + getattr(dispatch.assets, "build", BUILD) + "/"
     name = route[len(prefix):] if route.startswith(prefix) else ""
     if not name or "/" in name or "\\" in name or dispatch.assets is None:
         handler._reply(404, {"error": "resource not found"})

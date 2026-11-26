@@ -1,0 +1,31 @@
+{
+  "id": "bilibili-cn-1.1.12",
+  "channel": "B站国服",
+  "build": "2026-10-21-14-06-13",
+  "files": {
+    "launcher.exe": "a3702251bd92b7ba773b00eeffef7a63a311098e96e2e83f541e7ea78070001b",
+    "GameAssembly.dll": "3dd689f53d310f04fc31c1f2e95efd0fec880e05bdea67ff171009d5f5c93a8f",
+    "launcher_Data/data.unity3d": "12f217ac8045976f1fe68f0e2e3cc5263faacb34301be47ac76522446b3200bc"
+  },
+  "publisher": "上海宽娱数码科技有限公司",
+  "product_id": 114015,
+  "launcher_game_id": 13380,
+  "publisher_version": "1.1.12.0",
+  "bundled_manifest_sha256": "c2e09ac78f589ca1c84260c25d36cc5eb3534a9a7e1c2b155e5d195f5608c326",
+  "product_page": "https://www.biligame.com/detail/?id=114015",
+  "verified_sdk": {
+    "launcher_Data/Plugins/x86_64/PCGameSDK.dll": "c75fb3d291af28cb31b22613eccdcbe12f7702cb634f96f72b786ea80f29f549",
+    "launcher_Data/Plugins/x86_64/BLPlatform64/PCGamePlatform.exe": "a996730a46d45071e66d7754e505aaaf05f828cd1c306a53a74e6da653a9f01e"
+  },
+  "private_login_verified": false,
+  "resources": {
+    "base_sha256": "c2e09ac78f589ca1c84260c25d36cc5eb3534a9a7e1c2b155e5d195f5608c326",
+    "bundle_count": 8936,
+    "patches": {
+      "2026-11-25-19-54-31": {
+        "sha256": "254efb92ca46620ff3ea3d000ea1494c772acaccdaad4f5b48ca0e674c7b464c",
+        "plaza_bundle": "63fd83b3b51cecbc1d604f40f76db609"
+      }
+    }
+  }
+}
