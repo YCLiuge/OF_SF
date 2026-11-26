@@ -133,6 +133,28 @@ def run(state, resources):
             assert amount(pid,120000004)>0
             assert {info.ability_id for info in call(a,"PlayerAbilityList").ability_list}==set(ABILITY_BY_ITEM.values())
             assert not call(b,"PlayerAbilityList").ability_list and not call(b,"AbilityBadgeList",scene_id=1).ability_badge_pages[0].is_reward
+            # Historical saves may hold a token before the associated ability row exists.
+            items = list(ABILITY_BY_ITEM)[:3]
+            existing, missing, empty = items
+            with game.lock, db.conn:
+                for item in items:
+                    fund(bid, item, int(item != empty))
+                db.conn.execute("INSERT INTO player_kv VALUES(?,'ability',?,1)", (bid, str(ABILITY_BY_ITEM[existing])))
+                # These bytes are outside the client's tree catalog but inside its numeric range.
+                db.set_achieve(bid, 50001009, b"\xff")
+            assert call(b,"AbilityBadgeList").status == pb.StatusCode_OK
+            recovered = call(b, "PlayerAbilityList")
+            assert {v.ability_id: v.level for v in recovered.ability_list} == {
+                ABILITY_BY_ITEM[existing]: 1, ABILITY_BY_ITEM[missing]: 0}
+            statements = []
+            with game.lock:
+                db.conn.set_trace_callback(statements.append)
+            try:
+                assert call(b, "PlayerAbilityList") == recovered
+            finally:
+                with game.lock:
+                    db.conn.set_trace_callback(None)
+            assert not any(s.startswith(("INSERT", "UPDATE", "DELETE")) for s in statements)
     finally:
         game.stop()
     game.start()

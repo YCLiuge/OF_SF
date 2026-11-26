@@ -6,7 +6,7 @@ from network.packet_handler import PacketHandler, packet_handler
 from proto import net_pb2 as pb
 from private_badge_config import ABILITY_BY_ITEM, NODE_REWARDS
 from utils.res_loader import res
-from private_initial_queries import badges
+from private_initial_queries import badge_catalog, badges
 import private_shop as shop
 from utils import db
 
@@ -138,10 +138,7 @@ def starter_talk(session, req, packet_id):
 
 
 def list_badges(session, req, rsp):
-    unlock_conditions = {key for group in res.index("MoonStone", "stone_unlock_data").values()
-                         for node in group.get("stone_unlock_data_group_info", ())
-                         for key in node.get("unlock_achieve_i_d", ())}
-    for key in unlock_conditions:
+    for key in badge_catalog().materialized:
         _achieve_count(session.player_id, key)
     status = badges(session, req, rsp)
     taken = _claimed(session.player_id, "badge_page")
@@ -152,17 +149,29 @@ def list_badges(session, req, rsp):
 
 def list_abilities(session, req, rsp):
     player = session.player_id
-    abilities = {r["need_item_i_d"]:r["i_d"] for r in res.index("Ability","ability").values()}
-    marks = ",".join("?" for _ in abilities)
-    inventory = db.conn.execute(f"SELECT item_id,item_detail_blob FROM items WHERE player_id=? AND item_id IN ({marks})",
-                                (player,*abilities))
-    for key, blob in inventory:
-        info = pb.ItemDetail.FromString(blob).main_item
-        if info.WhichOneof("item") == "base_item" and info.base_item.num:
-            db.conn.execute("INSERT OR IGNORE INTO player_kv VALUES(?,'ability',?,0)", (player,str(abilities[key])))
-    limits = {r["i_d"]: max(t["level"] for t in r["level_info"]) for r in res.index("Ability", "ability").values()}
-    for key, val in db.conn.execute("SELECT k,v FROM player_kv WHERE player_id=? AND ns='ability' ORDER BY CAST(k AS INTEGER)",
-                                    (player,)):
+    rules = res.index("Ability", "ability").values()
+    abilities = {r["need_item_i_d"]: str(r["i_d"]) for r in rules}
+    query = "SELECT k,v FROM player_kv WHERE player_id=? AND ns='ability' ORDER BY CAST(k AS INTEGER)"
+    rows = db.conn.execute(query, (player,)).fetchall()
+    known = {key for key, _ in rows}
+    if not known.issuperset(abilities.values()):
+        marks = ",".join("?" for _ in abilities)
+        inventory = db.conn.execute(f"SELECT item_id,item_detail_blob FROM items WHERE player_id=? AND item_id IN ({marks})",
+                                    (player, *abilities))
+        learned = set()
+        for key, blob in inventory:
+            ability = abilities[key]
+            if ability in known:
+                continue
+            item = pb.ItemDetail.FromString(blob).main_item
+            if item.WhichOneof("item") == "base_item" and item.base_item.num:
+                learned.add(ability)
+        if learned:
+            db.conn.executemany("INSERT OR IGNORE INTO player_kv VALUES(?,'ability',?,0)",
+                                ((player, ability) for ability in learned))
+            rows = db.conn.execute(query, (player,)).fetchall()
+    limits = {r["i_d"]: max(t["level"] for t in r["level_info"]) for r in rules}
+    for key, val in rows:
         if str(key).isdecimal() and str(val).isdecimal() and int(val) <= limits.get(int(key), -1):
             rsp.ability_list.add(ability_id=int(key), level=int(val))
     return pb.StatusCode_OK
