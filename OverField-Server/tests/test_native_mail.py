@@ -62,6 +62,8 @@ def run(root, resources):
                 before_exp = db.get_players_info(pid,"level,exp")
                 weapon = make_item(1101104,1,pid)
                 weapon.main_item.weapon.strength_level = 6
+                weapon.main_item.weapon.wearer_id = 101001
+                weapon.main_item.temp_pack_index = 2
                 old_instance = weapon.main_item.weapon.instance_id
                 db.set_item_detail(pid,weapon.SerializeToString(),instance_id=old_instance)
                 mail = add(pid,25)
@@ -93,6 +95,7 @@ def run(root, resources):
             assert all_result.status == pb.StatusCode_OK and {m.mail_id for m in all_result.mails}=={24,25}
             copied=next(r for r in all_result.claim_result if r.main_item.WhichOneof("item")=="weapon")
             assert copied.main_item.weapon.strength_level==6 and copied.main_item.weapon.instance_id!=old_instance
+            assert copied.main_item.weapon.wearer_id==0 and copied.main_item.temp_pack_index==0
             assert op(a,pb.MailOperateType_CLAIM_ALL).status==pb.StatusCode_OK
             assert set(op(a,pb.MailOperateType_DELETE_ALL_READED).deleted_mail_ids)=={21,22,25}
             assert set(box(a))=={24,26}
@@ -114,6 +117,7 @@ def run(root, resources):
     finally:
         realm.stop()
     operator_delivery(root/"operator-mail", resources)
+    pet_delivery(root/"pet-mail", resources)
     print("PASS five native mail operations, individual/bulk delivery, XP, rolled equipment, reliable retry, rollback, favourites limit, account isolation and restart.")
 
 
@@ -208,6 +212,97 @@ def operator_delivery(root, resources):
     finally:
         service.stop()
     print("PASS operator mail native online notice, offline delivery, new-player policy, concurrent retry, expiry window, claims, deletion and restart.")
+
+def pet_delivery(root, resources):
+    from uuid import uuid4
+    import realm_admin
+    import realm_accounts
+    from private_pets import capacity
+
+    root.mkdir()
+    identity = LocalIdentity(root / "identity.sqlite3")
+    realm_accounts.initialize(identity)
+    owner = identity.create_profile("宠物领件人")
+    realm_accounts.register(identity, dict(username="pet.mail", password="local-test-only", nickname="宠物领件人",
+                                          slot=owner[0], profile_key=owner[1]), True)
+    service = LocalGameService(identity, root, resources, port=0)
+    species = 200001001
+
+    def grant(**obj):
+        data = dict(scope="account", username="pet.mail", title="宠物礼物", body="来自区服的宠物", request_id=str(uuid4()), **obj)
+        return realm_admin.run(root, "mail.send", data, lambda: None)
+
+    def pets(sock):
+        result = call(sock, "GetPet", 60, start_index=0, end_index=1000)
+        assert result.status == pb.StatusCode_OK
+        return {pet.instance_id: pet for pet in result.pets}
+
+    def read_coin(pid):
+        return balance(pid,101).main_item.base_item.num
+
+    service.start()
+    try:
+        sock, _, pid = login(service.port, identity.issue_ticket(*owner))
+        with sock:
+            join_after_intro(sock)
+            assert not pets(sock)
+            with service.lock, db.conn:
+                db.del_mail(pid,1)
+                before = read_coin(pid)
+                pet = make_item(species,1,pid)
+                pet.main_item.pet.name = "雪团"
+                pet.main_item.pet.level = 9
+                pet.main_item.pet.catch_scene_id = 3
+                pet.main_item.temp_pack_index = 10
+                pet.pack_type = pb.ItemDetail.PackType_TempStorageArea
+                exact = pb.MailBriefData(mail_id=81, title="宠物归还", send_time=int(time.time()))
+                exact.reward.add().CopyFrom(pet)
+                db.set_mail(pid,81,exact.SerializeToString())
+            single = call(sock,"OperateMails",61,operate_type=pb.MailOperateType_CLAIM,mail_id=81)
+            assert single.status == pb.StatusCode_OK and len(single.claim_result)==1
+            received = single.claim_result[0]
+            assert received.pack_type==pb.ItemDetail.PackType_Inventory and received.main_item.temp_pack_index==0
+            assert received.main_item.pet == pet.main_item.pet
+            assert pets(sock) == {pet.main_item.pet.instance_id: pet.main_item.pet}
+
+            with service.lock, db.conn:
+                broken = pb.MailBriefData(mail_id=82, title="错误附件", send_time=int(time.time()))
+                broken.items.add(item_id=101,num=11)
+                broken.reward.add().CopyFrom(pet)
+                broken.reward[0].main_item.pet.item_id += 1
+                db.set_mail(pid,82,broken.SerializeToString())
+            invalid = call(sock,"OperateMails",62,operate_type=pb.MailOperateType_CLAIM,mail_id=82)
+            assert invalid.status==pb.StatusCode_CFG_NOT_FOUND and not invalid.claim_result and not invalid.mails
+            with service.lock, db.conn:
+                assert read_coin(pid)==before and box_state(pid,82)!=pb.MailState_CLAIMED
+                db.del_mail(pid,82)
+                # Leave just one vacancy for a single two-pet letter.
+                for _ in range(capacity(pid)-2):
+                    extra = make_item(species,1,pid)
+                    db.set_item_detail(pid,extra.SerializeToString(),instance_id=extra.main_item.pet.instance_id)
+            assert grant(rewards=[{"item":101,"quantity":7},{"item":species,"quantity":2}])["recipients_at_issue"]==1
+            batch = call(sock,"OperateMails",63,operate_type=pb.MailOperateType_CLAIM_ALL)
+            assert batch.status==pb.StatusCode_PET_GRID_FULL and not batch.mails and not batch.claim_result
+            held = pets(sock)
+            assert len(held)==capacity(pid)-1 and read_coin(pid)==before
+            freed = next(key for key in held if key!=pet.main_item.pet.instance_id)
+            assert call(sock,"PetDecompose",64,pet_instance_ids=[freed]).status==pb.StatusCode_OK
+            batch = call(sock,"OperateMails",65,operate_type=pb.MailOperateType_CLAIM_ALL)
+            assert batch.status==pb.StatusCode_OK and read_coin(pid)==before+7
+            new = [item.main_item.pet for item in batch.claim_result if item.main_item.HasField("pet")]
+            assert len(new)==2 and new[0].instance_id!=new[1].instance_id and all(x.item_id==species for x in new)
+            assert len(pets(sock))==capacity(pid) and not call(sock,"OperateMails",66,operate_type=pb.MailOperateType_CLAIM_ALL).claim_result
+        service.stop()
+        service.start()
+        sock, _, same = login(service.port,identity.issue_ticket(*owner))
+        with sock:
+            join_after_intro(sock)
+            assert same==pid and read_coin(pid)==before+7 and len(pets(sock))==capacity(pid)
+            assert pets(sock)[pet.main_item.pet.instance_id] == pet.main_item.pet
+    finally:
+        service.stop()
+    print("PASS native exact and operator pet mail, permanent bag routing, capacity retries, atomic currency and relog.")
+
 
 def box_state(pid, key):
     return pb.MailBriefData.FromString(db.get_mail(pid,key)).mail_state

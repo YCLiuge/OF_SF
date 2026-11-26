@@ -10,6 +10,8 @@ from utils import db
 from utils.res_loader import res
 from private_dungeons import _table, credit_player_experience
 from private_shop import award, UnsupportedGoods
+from private_pets import has_room
+from utils.pb_create import make_item
 
 READ = pb.MailOperateType_READ
 DELETE = pb.MailOperateType_DELETE_ALL_READED
@@ -17,7 +19,7 @@ CLAIM = pb.MailOperateType_CLAIM
 CLAIM_ALL = pb.MailOperateType_CLAIM_ALL
 COLLECT = pb.MailOperateType_COLLECT
 INSTANCE_TYPES = {"weapon": pb.EBagItemTag_Weapon, "armor": pb.EBagItemTag_Armor, "poster": pb.EBagItemTag_Poster,
-                  "treasure": pb.EBagItemTag_TreasureMap}
+                  "treasure": pb.EBagItemTag_TreasureMap, "pet": pb.EBagItemTag_Pet}
 
 
 def deliver_published(session, *, notify=True):
@@ -72,8 +74,15 @@ def save(pid, mail, rsp):
 
 
 def templates(pid, item_id, count, receipt, pack):
-    if item_id not in _table("Item","item") or count <= 0:
+    row = _table("Item","item").get(item_id)
+    if row is None or count <= 0:
         raise UnsupportedGoods
+    if row.get("new_bag_item_tag") == pb.EBagItemTag_Pet:
+        if item_id not in _table("Pet","pet"):
+            raise UnsupportedGoods
+        for _ in range(count):
+            attachment(pid, make_item(item_id, 1, pid), receipt, pack)
+        return
     # Route through the same warehouse inventory grants as other native item delivery.
     award(pid, {item_id: count}, receipt, pack)
 
@@ -82,6 +91,8 @@ def attachment(pid, detail, receipt, pack):
     item = detail.main_item
     kind = item.WhichOneof("item")
     if kind == "base_item":
+        if item.base_item.item_id not in (0, item.item_id):
+            raise UnsupportedGoods
         templates(pid, item.item_id, item.base_item.num, receipt, pack)
         return
     if kind not in INSTANCE_TYPES or INSTANCE_TYPES[kind] != item.item_tag:
@@ -92,7 +103,15 @@ def attachment(pid, detail, receipt, pack):
     stored = pb.ItemDetail()
     stored.CopyFrom(detail)
     stored.pack_type = pb.ItemDetail.PackType_Inventory
+    stored.main_item.temp_pack_index = 0
     instance = getattr(stored.main_item, kind)
+    template_field = "item_id" if kind in ("treasure", "pet") else kind + "_id"
+    if getattr(instance, template_field) != item.item_id:
+        raise UnsupportedGoods
+    if kind == "pet" and item.item_id not in _table("Pet","pet"):
+        raise UnsupportedGoods
+    if kind in ("weapon", "armor", "poster"):
+        instance.wearer_id = 0
     # Dropped equipment can carry rolled attributes. Preserve them even when its old ID is occupied.
     if not instance.instance_id or db.get_item_detail(pid,instance_id=instance.instance_id):
         instance.instance_id = db.get_instance_id(pid)
@@ -105,6 +124,19 @@ def attachment(pid, detail, receipt, pack):
     receipt.items.add().CopyFrom(stored)
 
 
+def pets_in_mail(mails):
+    species = _table("Pet", "pet")
+    incoming_pets = sum(item.num for mail in mails for item in mail.items if item.item_id in species)
+    for mail in mails:
+        for detail in mail.reward:
+            item = detail.main_item
+            if item.HasField("pet"):
+                incoming_pets += 1
+            elif item.HasField("base_item") and item.item_id in species:
+                incoming_pets += item.base_item.num
+    return incoming_pets
+
+
 def claim(pid, mails, rsp):
     receipt = pb.ShopBuyRsp()
     pack = pb.PackNotice(status=pb.StatusCode_OK)
@@ -112,6 +144,10 @@ def claim(pid, mails, rsp):
         db.conn.execute("BEGIN")
     db.conn.execute("SAVEPOINT mail_attachments")
     try:
+        incoming = pets_in_mail(mails)
+        if incoming and not has_room(pid, incoming):
+            rsp.status = pb.StatusCode_PET_GRID_FULL
+            return []
         for mail in mails:
             for item in mail.items:
                 templates(pid, item.item_id, item.num, receipt, pack)

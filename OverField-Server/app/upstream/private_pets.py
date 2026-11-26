@@ -29,6 +29,11 @@ def owned_pets(pid):
             yield item.pet
 
 
+def has_room(pid, incoming):
+    remaining = capacity(pid) - incoming
+    return remaining >= 0 and not any(index >= remaining for index, _ in enumerate(owned_pets(pid)))
+
+
 def page(session, req, rsp):
     if req.end_index and req.start_index>req.end_index:
         return pb.StatusCode_BAD_REQ
@@ -102,8 +107,7 @@ def capture(session, req, rsp):
         return pb.StatusCode_BAD_REQ
     if _table("Scene","scene").get(session.scene_id,{}).get("new_scene_type") != 1:
         return pb.StatusCode_BAD_REQ
-    limit = capacity(pid)
-    if any(index>=limit for index,_ in enumerate(owned_pets(pid),1)):
+    if not has_room(pid, 1):
         return pb.StatusCode_PET_GRID_FULL
     costs, status = payments(pid, {req.catcher_id:tool["need_item_count"]})
     if costs is None:
