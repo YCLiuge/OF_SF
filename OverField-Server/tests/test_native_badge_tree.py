@@ -20,10 +20,10 @@ def run(state, resources):
     slots = [identity.create_profile(k) for k in ("星云甲", "星云乙")]
     game = LocalGameService(identity,state,resources,port=0)
 
-    def connect(index):
+    def connect(index, earned=False):
         sock, _, pid = login(game.port, identity.issue_ticket(*slots[index]))
         main = call(sock, "PlayerMainData")
-        assert main.status == pb.StatusCode_OK and 100000008 in main.unlock_functions
+        assert main.status == pb.StatusCode_OK and (100000008 in main.unlock_functions) == earned
         markers = []
         while True:
             head, body = receive(sock)
@@ -32,7 +32,7 @@ def run(state, resources):
             if head.msg_id == MsgId.PackNotice:
                 markers.extend(item.main_item.base_item.num for item in pb.PackNotice.FromString(body).items
                                if item.main_item.item_id == 100000008)
-        assert markers == [1], markers
+        assert markers == ([1] if earned else []), markers
         return sock, pid
 
     def amount(pid, item):
@@ -83,12 +83,14 @@ def run(state, resources):
             next_msg(a,MsgId.PlayerSceneSyncDataNotice,pb.PlayerSceneSyncDataNotice)
             assert starter(a,pb.NpcTalkReq.NpcTalkType_Mechanism).status == pb.StatusCode_BAD_REQ
             assert starter(a).status == pb.StatusCode_OK and amount(pid,301)==6
+            gained = next_msg(a, MsgId.PlayerUnlockFunctionNotice, pb.PlayerUnlockFunctionNotice)
+            assert list(gained.unlock_functions) == [100000008] and amount(pid,100000008) == 1
             assert starter(a).status == pb.StatusCode_OK and amount(pid,301)==6
             assert activate(a,1,2).status == pb.StatusCode_ABILITY_BADGE_ACTIVE_PRE_CONDITION_NOT_FINISH
             assert activate(a,1,1).status == pb.StatusCode_ABILITY_BADGE_ACTIVE_PRE_CONDITION_NOT_FINISH
             assert activate(a,1,3).status == pb.StatusCode_CFG_NOT_FOUND  # Decorative grid cell.
             assert call(a,"AbilityBadgePageReward",page=1).status==pb.StatusCode_ABILITY_BADGE_PAGE_BOX_ACTIVE_LIMIT
-            assert activate(b,1,31).status == pb.StatusCode_ITEM_NOT_ENOUGH
+            assert activate(b,1,31).status == pb.StatusCode_ABILITY_BADGE_NOT_UNLOCK
             node=activate(a,1,31)
             assert node.status==pb.StatusCode_OK and [i.main_item.item_id for i in node.items]==[101000000]
             left=amount(pid,301)
@@ -135,13 +137,31 @@ def run(state, resources):
         game.stop()
     game.start()
     try:
-        a,pid=connect(0)
+        a,pid=connect(0, earned=True)
         with a:
             view=call(a,"AbilityBadgeList",scene_id=0)
             assert len(view.ability_badge_pages)==8 and all(page.is_reward for page in view.ability_badge_pages)
             assert 50101010 in view.ability_badge_reward_achieve_ids and len(call(a,"PlayerAbilityList").ability_list)==75
             assert claim(a,[50101010]).status==pb.StatusCode_ABILITY_BADGE_ACHIEVE_REWARDED
             assert activate(a,1,31).status==pb.StatusCode_OK
+        # Previously all functions were written to every player, even before the first map.
+        with game.lock, db.conn:
+            db.set_players_info(bid, "unlock_functions", [100000008, 915])
+            db.set_ability_tree(bid, 1, [99999])
+        b,_=connect(1)
+        b.close()
+        # A restored, valid node alone is sufficient evidence for a historical partial save.
+        with game.lock, db.conn:
+            db.set_ability_tree(bid, 1, [31])
+        b,_=connect(1, earned=True)
+        with b:
+            assert list(call(b,"AbilityBadgeList",scene_id=1).ability_badge_pages[0].active_box_ids) == [31]
+        with game.lock, db.conn:
+            db.set_ability_tree(bid, 1, [])
+            q = pb.Quest(quest_id=100031, status=pb.QuestStatus_Finish)
+            db.set_quest(bid, 100031, q.SerializeToString())
+        b,_=connect(1, earned=True)
+        b.close()
     finally:
         game.stop()
     print("PASS native star tree: 8 pages, all 198 configured nodes, 75 earned abilities, prerequisites, balances, one-time NPC, claims, role isolation and restart.")

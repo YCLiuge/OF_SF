@@ -89,7 +89,7 @@ def run(root, resources):
         game.start()
         a,pid,main,scene=connect(0)
         with a:
-            assert set(main.unlock_functions)=={915,*[row["i_d"] for row in unlocks]}
+            assert set(main.unlock_functions)=={915,*[row["i_d"] for row in unlocks if row["i_d"] != 100000008]}
             assert balance(pid,template)==1
             single=call(a,"TreasureBoxPickup",box_type=1,box_index=box.index,pick_index=1)
             assert single.status==pb.StatusCode_OK and len(single.items)==1 and balance(pid,101)==initial+10

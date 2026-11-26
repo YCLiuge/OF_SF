@@ -10,6 +10,9 @@ from private_initial_queries import badges
 import private_shop as shop
 from utils import db
 
+TREE_UNLOCK = 100000008
+STARTER_QUEST = 100031
+
 
 def _area(page):
     return res.index("MoonStone", "stone_area_data", "scene_i_d").get(page)
@@ -25,10 +28,28 @@ def _owned(player, item):
     return detail is not None and detail.main_item.WhichOneof("item") == "base_item" and detail.main_item.base_item.num > 0
 
 
+def earned_tree_access(player):
+    """Old realms marked every menu as unlocked, including before any tree page existed."""
+    if _owned(player, TREE_UNLOCK):
+        return True
+    raw = db.get_quest(player, STARTER_QUEST)
+    if raw:
+        quest = pb.Quest.FromString(raw)
+        completed = (pb.QuestStatus_Completed, pb.QuestStatus_Finish)
+        if quest.status in completed or any(c.condition_id == 11000311 and c.status in completed
+                                            for c in quest.conditions):
+            return True
+    if db.conn.execute("SELECT 1 FROM claimed_rewards WHERE player_id=? AND system='badge_starter' AND key=?",
+                       (player, str(STARTER_QUEST))).fetchone():
+        return True
+    return any(set(boxes).intersection(NODE_REWARDS[page]) for page, boxes in db.get_ability_tree(player).items()
+               if page in NODE_REWARDS and isinstance(boxes, (list, tuple, set)))
+
+
 def project_tree_marker(player, notices):
-    """Expose the realm's existing unlock to the native UI without claiming the tutorial reward."""
+    """Supply the native inventory marker for an earned unlock in a partial historical save."""
     from utils.pb_create import make_item
-    marker = make_item(100000008, 1, player)
+    marker = make_item(TREE_UNLOCK, 1, player)
     tag = marker.main_item.item_tag
     packet = notices.get(tag)
     if packet is None:
@@ -100,11 +121,18 @@ def starter_talk(session, req, packet_id):
         session.send(MsgId.NpcTalkRsp, pb.NpcTalkRsp(status=pb.StatusCode_BAD_REQ), packet_id)
         return
     pack = pb.PackNotice(status=pb.StatusCode_OK)
-    if _mark(player, "badge_starter", 100031) and not _owned(player,100000008) and not _active(player,1):
-        shop.award(player, {100000008:1, 301:1}, pb.ShopBuyRsp(), pack)
+    if _mark(player, "badge_starter", STARTER_QUEST) and not _owned(player,TREE_UNLOCK) and not _active(player,1):
+        shop.award(player, {TREE_UNLOCK:1, 301:1}, pb.ShopBuyRsp(), pack)
+    functions = list(db.get_players_info(player, "unlock_functions")[0] or ())
+    new_unlock = TREE_UNLOCK not in functions
+    if new_unlock:
+        db.set_players_info(player, "unlock_functions", [*functions, TREE_UNLOCK])
     session.send(MsgId.NpcTalkRsp, pb.NpcTalkRsp(status=pb.StatusCode_OK), packet_id)
     if pack.items:
         session.send(MsgId.PackNotice, pack, 0)
+    if new_unlock:
+        session.send(MsgId.PlayerUnlockFunctionNotice,
+                     pb.PlayerUnlockFunctionNotice(status=pb.StatusCode_OK, unlock_functions=[TREE_UNLOCK]), 0)
     from private_story_objectives import learned
     learned(session)
 

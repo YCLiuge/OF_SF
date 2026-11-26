@@ -86,6 +86,9 @@ class Handler(PacketHandler):
         )
         configured = [row["i_d"] for row in res["PlayerUnlock"]["player_unlock"]["datas"]]
         unlocks = list(dict.fromkeys([*(infos[1] or ()), *configured]))
+        from private_badge_tree import TREE_UNLOCK, earned_tree_access
+        if TREE_UNLOCK in unlocks and not earned_tree_access(player_id):
+            unlocks.remove(TREE_UNLOCK)
         if unlocks != infos[1]:
             db.set_players_info(player_id, "unlock_functions", unlocks)
         rsp.unlock_functions.extend(unlocks)

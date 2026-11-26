@@ -55,7 +55,7 @@ def looks_for_actor(looks):
 
 def validate(data):
     from private_entitlements import CURRENCY_IDS
-    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals","pets","field_progress","fishing_rods","profile_sign"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
+    if type(data) is not dict or set(data)-{"team","loadouts","progress_location","head","gather_totals","pets","field_progress","fishing_rods","profile_sign","badge_tree"}!={"format","player",*ARRAY_LIMITS} or data["format"]!=DATA_FORMAT:
         raise ValueError("invalid data format")
     for key,limit in ARRAY_LIMITS.items():
         rows(data[key],limit)
@@ -270,6 +270,15 @@ def validate(data):
             if restored[key]:totals[label] = len(restored[key])
         if any(restored[k] for k in restored if k != "scene"):
             out["field_progress"] = restored
+    if "badge_tree" in data:
+        from save_import_badges import validate as validate_badges
+        tree=validate_badges(data["badge_tree"])
+        if any(tree.values()):
+            out["badge_tree"]=tree
+            totals.update({label:count for label,count in (
+                ("星云树节点",sum(len(nodes) for _,nodes,_ in tree["pages"])),
+                ("星云树已领奖页面",sum(int(reward) for _,_,reward in tree["pages"])),
+                ("星云树成就进度",len(tree["achievements"])),("星云树已领成就",len(tree["claimed"]))) if count})
     if "pets" in data:
         from save_import_pets import validate as validate_pets
         pets=out["pets"]=validate_pets(data["pets"])
@@ -420,6 +429,9 @@ def restore(pid,plan):
     if "field_progress" in plan:
         from save_import_field import restore as restore_field
         restore_field(pid, plan["field_progress"])
+    if "badge_tree" in plan:
+        from save_import_badges import restore as restore_badges
+        restore_badges(pid,plan["badge_tree"])
     if "pets" in plan:
         from save_import_pets import restore as restore_pets
         restore_pets(pid,plan["pets"])

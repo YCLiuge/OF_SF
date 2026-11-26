@@ -26,7 +26,7 @@ def documents(snapshot, message):
             if not isinstance(frame,dict) or frame.get("ok") is not True:
                 continue
             data=frame.get("decoded")
-            if isinstance(data,dict) and data.get("status",{}).get("v")==1:
+            if isinstance(data,dict) and integer(data.get("status"))==1:
                 yield data
 
 
@@ -182,6 +182,33 @@ def source_field_progress(snapshot, main):
                 "goals":[[k[0], k[1], v] for k, v in sorted(goals.items())]}
 
 
+def source_badge_tree(snapshot,owner):
+    pages,achievements,claimed={},{},set()
+    def entries(record,key,limit):
+        values=record.get(key,[])
+        if not isinstance(values,list) or len(values)>limit:
+            raise BackupFormatError("星云树记录格式无效或条目超出上限。")
+        return values
+    for reply in documents(snapshot,"AbilityBadgeListRsp"):
+        source=integer(reply.get("player_id"),0xffffffff)
+        if source and source!=owner:
+            continue
+        for page in entries(reply,"ability_badge_pages",16):
+            if not isinstance(page,dict) or not (sid:=integer(page.get("page"))):
+                continue
+            nodes,reward=pages.setdefault(sid,(set(),False))
+            nodes.update(k for value in entries(page,"active_box_ids",256) if (k:=integer(value)))
+            pages[sid]=(nodes,reward or page.get("is_reward") is True)
+        for ach in entries(reply,"ability_badge_achieves",2048):
+            if isinstance(ach,dict):
+                key,count=numbers(ach,("achieve_id","count"))
+                if key and count:achievements[key]=max(achievements.get(key,0),count)
+        claimed.update(k for value in entries(reply,"ability_badge_reward_achieve_ids",2048) if (k:=integer(value)))
+    rows=[[k,sorted(nodes),reward] for k,(nodes,reward) in sorted(pages.items()) if nodes or reward]
+    if rows or achievements or claimed:
+        return {"pages":rows,"achievements":[[k,v] for k,v in sorted(achievements.items())],"claimed":sorted(claimed)}
+
+
 def project(snapshot):
     if not isinstance(snapshot,dict) or snapshot.get("format")!="overfield-snapshot/1":
         raise BackupFormatError("请选择全进度工具导出的 snapshot.json 或完整 ZIP。")
@@ -194,6 +221,8 @@ def project(snapshot):
         raise BackupFormatError("此备份中没有成功解码的个人主存档。")
     data={"format":DATA_FORMAT,"player":numbers(main,("level","exp","world_level")),
           "heroes":[],"quests":[],"chapters":[],"achievements":[],"stacks":[],"outfits":[],"gear":[]}
+    tree=source_badge_tree(snapshot,integer(main.get("player_id"),0xffffffff))
+    if tree:data["badge_tree"]=tree
     sign=source_signature(mains,owners)
     if sign is not None:data["profile_sign"]=sign
     active_head=integer(main.get("head"))

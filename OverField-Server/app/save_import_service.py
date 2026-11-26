@@ -63,6 +63,8 @@ def snapshot(conn,pid):
         result[HISTORY,int(key)]=raw
     from save_import_field import snapshot as snapshot_field
     snapshot_field(conn,pid,result)
+    from save_import_badges import snapshot as snapshot_badges
+    snapshot_badges(conn,pid,result)
     for table,(key,col) in BLOBS.items():
         for identifier,blob in conn.execute(f"SELECT {key},{col} FROM {table} WHERE player_id=?",(pid,)):
             result[table,identifier]=blob
@@ -98,6 +100,9 @@ def restore_prior(conn,pid,table,key,value):
         return
     if table.startswith("field_"):
         from save_import_field import undo
+        return undo(conn,pid,table,key,value)
+    if table in ("badge_nodes","badge_page","badge_achieve"):
+        from save_import_badges import undo
         return undo(conn,pid,table,key,value)
     if table=="pet_capacity":
         if value is None:

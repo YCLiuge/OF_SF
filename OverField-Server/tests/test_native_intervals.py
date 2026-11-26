@@ -132,7 +132,7 @@ def run(root,resources):
                 rows=json.loads((resources/"data/PlayerUnlock.json").read_bytes())["player_unlock"]["datas"]
                 configured={row["i_d"] for row in rows}
                 assert again==owner and 100000023 in configured
-                assert set(profile.unlock_functions)==configured|{100000000}
+                assert set(profile.unlock_functions)==(configured - {100000008}) | {100000000}
                 assert call(a,"SelfIntervalInit").interval.create_time==next_state.interval.create_time
                 former=call(b,"FriendIntervalInit").join_infos[0]
                 assert former.create_time==int(token)

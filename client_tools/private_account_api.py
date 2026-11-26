@@ -94,11 +94,15 @@ def import_backup(action, inp, config):
         except (OSError,KeyError,ValueError,TypeError,RuntimeError,zipfile.BadZipFile):
             return {"ok":False,"code":"invalid_backup","message":"无法读取全进度备份。请选择结果 ZIP、snapshot.json 或结果目录。"}
         data=form["data"]
-        if "profile_sign" in data or "pets" in data or "field_progress" in data or "fishing_rods" in data or "uid" in data.get("identity", {}):
+        if "profile_sign" in data or "pets" in data or "field_progress" in data or "fishing_rods" in data or "badge_tree" in data or "uid" in data.get("identity", {}):
             status,region=request(config,"GET","/local/v1/region",max_bytes=32768)
             if status!=200 or region.get("realm")!=PRIVATE_REALM:
                 return {"ok":False,"code":"import_capabilities_unavailable","message":"无法读取所选区服的存档导入能力，请重新测试连接。"}
             features=region.get("save_import_features",[])
+            if "badge_tree" in data and "badge_tree" not in features:
+                tree=data.pop("badge_tree")
+                omitted["旧服跳过的星云树记录"]=sum(len(nodes)+int(taken) for _,nodes,taken in tree["pages"])+len(tree["claimed"])+len(tree["achievements"])
+                compatibility.append("该区服版本无法继承备份中的星云树节点、页面领奖和成就记录。")
             if not isinstance(features,list) or any(not isinstance(feature,str) for feature in features):
                 return {"ok":False,"code":"import_capabilities_unavailable","message":"所选区服的存档导入能力格式无效，请联系服主。"}
             identity = data.get("identity", {})

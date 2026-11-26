@@ -349,6 +349,74 @@ def check_gateway(root,resources):
           "PASS: gateway limits, ticket scope and cleanup; TLS certificate generation unavailable.")
 
 
+def check_badge_tree(root,resources):
+    from save_import_data import project
+    from test_game_realm import join
+    fixture=synthetic()
+    base=fixture["decoded"]["main"]["frames"][0]["decoded"]
+    owner=base["player_id"]
+    assert "badge_tree" not in project(fixture)
+    tree={"status":1,"ability_badge_pages":[{"page":1,"active_box_ids":[31,3,31],"is_reward":True},
+        {"page":1001,"active_box_ids":[3]},{"page":99999,"active_box_ids":[1]}],
+        "ability_badge_achieves":[{"achieve_id":50101010,"count":1},{"achieve_id":50001000,"count":5},{"achieve_id":99999,"count":100}],
+        "ability_badge_reward_achieve_ids":[50101010,99999,50101010]}
+    fixture["decoded"]["tree"]={"name":"AbilityBadgeListRsp","frames":[{"ok":True,"decoded":tree},
+        {"ok":True,"decoded":dict(tree,player_id=owner+1,ability_badge_pages=[{"page":1,"active_box_ids":[5]}])},
+        {"ok":True,"decoded":{"status":{"v":2},"ability_badge_pages":[{"page":1,"active_box_ids":[8]}]}}]}
+    data=project(fixture)
+    data.pop("identity",None)
+    assert data["badge_tree"]["pages"]==[[1,[3,31],True],[1001,[3],False],[99999,[1],False]]
+    assert data["badge_tree"]["claimed"]==[99999,50101010]
+    with world(root,resources) as (port,game):
+        def action(name,body):return request(port,"POST","/local/v1/accounts/"+name,body)
+        def register(i):
+            status,account=action("register",{"username":"tree-save-"+i,"password":"synthetic-save-password","nickname":"星云"+i})
+            assert status==201
+            return account
+        a,b=register("A"),register("B")
+        auth={"import_ticket":a["import_ticket"]}
+        def preview(payload):
+            return action("import-preview",{**auth,"data":payload})
+        invalid=deepcopy(data);invalid["badge_tree"]["pages"][0][1]=[True]
+        assert preview(invalid)[0]==400
+        def apply():
+            status,v=preview(data)
+            assert status==200 and v["eligible"] and v["counts"]["星云树节点"]==2 and v["counts"]["星云树已领奖页面"]==1
+            assert v["counts"]["星云树已领成就"]==1 and v["counts"]["星云树成就进度"]==2
+            form={**auth,"preview_id":v["preview_id"]}
+            assert action("import-apply",form)[0]==200 and action("import-apply",form)[0]==200
+        apply()
+        assert action("import-undo",auth)[0]==200
+        with game.lock,db.conn:
+            pid=db.conn.execute("SELECT player_id FROM private_slots WHERE slot=?",(a["slot"],)).fetchone()[0]
+            assert not db.get_ability_tree(pid,1)
+            assert not db.conn.execute("SELECT 1 FROM claimed_rewards WHERE player_id=? AND system IN ('badge_page','badge_achieve')",(pid,)).fetchone()
+            db.set_ability_tree(pid,1,[2])
+            db.conn.execute("INSERT INTO claimed_rewards(player_id,system,key) VALUES(?,'badge_achieve','50101011')",(pid,))
+        apply()
+        assert action("import-undo",auth)[0]==200
+        with game.lock:
+            assert db.get_ability_tree(pid,1)==[2]
+            assert db.conn.execute("SELECT key FROM claimed_rewards WHERE player_id=? AND system='badge_achieve'",(pid,)).fetchall()==[("50101011",)]
+        apply()
+        for account in (a,b):
+            with closing(login(game.port,account["ticket"])[0]) as sock:
+                join(sock)
+                listed=native_call(sock,"AbilityBadgeList")
+                pages={p.page:p for p in listed.ability_badge_pages}
+                if account is a:
+                    assert list(pages[1].active_box_ids)==[2,31] and pages[1].is_reward
+                    assert list(pages[1001].active_box_ids)==[3] and not pages[1001].is_reward
+                    assert set(listed.ability_badge_reward_achieve_ids)=={50101010,50101011}
+                    assert any(x.achieve_id==50101010 and x.count>=1 for x in listed.ability_badge_achieves)
+                    assert native_call(sock,"AbilityBadgePageReward",page=1).status==pb.StatusCode_ABILITY_BADGE_PAGE_REWARDED
+                    assert native_call(sock,"AbilityBadgeAchieveReward",achieve_ids=[50101010]).status==pb.StatusCode_ABILITY_BADGE_ACHIEVE_REWARDED
+                else:
+                    assert all(not p.active_box_ids and not p.is_reward for p in pages.values())
+                    assert not listed.ability_badge_reward_achieve_ids
+    print("PASS star-tree import: per-page national IDs, earned flags, role isolation, repeat, preservation and undo.")
+
+
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--resources",required=True,type=Path)
@@ -356,3 +424,5 @@ if __name__=="__main__":
     with TemporaryDirectory() as tmp:
         run(Path(tmp),args.resources)
         check_gateway(Path(tmp),args.resources)
+        tree=Path(tmp)/'tree';tree.mkdir()
+        check_badge_tree(tree,args.resources)
