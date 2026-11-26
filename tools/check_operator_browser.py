@@ -23,7 +23,7 @@ from test_realm_admin_http import ports, request
 profile, game, owner = ports()
 token = secrets.token_urlsafe(40)
 env = {k:v for k,v in os.environ.items() if not k.startswith('OF_')}
-env.update(OF_HTTP_PORT=str(profile),OF_GAME_PORT=str(game),OF_ADMIN_PORT=str(owner),OF_ADMIN_TOKEN=token)
+env.update(OF_ACCOUNT_REGISTRATION="open",OF_HTTP_PORT=str(profile),OF_GAME_PORT=str(game),OF_ADMIN_PORT=str(owner),OF_ADMIN_TOKEN=token)
 browser = Path(os.environ['ProgramFiles(x86)'])/'Microsoft/Edge/Application/msedge.exe'
 def until(fn, seconds=35):
     limit=time.monotonic()+seconds
@@ -74,6 +74,9 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         def get(name):return request(owner,'GET','/admin/v1/operations/'+name,token)[1]['result']
         def post(name,data):return request(owner,'POST','/admin/v1/operations/'+name,token,data)[1]['result']
         verify(js,until,get,post)
+        from admin_console_browser_checks import verify_password_reset
+        verify_password_reset(js,until,lambda name,body:request(profile,"POST","/local/v1/accounts/"+name,data=body))
+
         command('Emulation.setDeviceMetricsOverride',dict(width=390,height=844,deviceScaleFactor=1,mobile=True))
         assert js("document.documentElement.scrollWidth<=document.documentElement.clientWidth")
         js("document.getElementById('logout').click()")

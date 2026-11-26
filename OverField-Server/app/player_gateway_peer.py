@@ -13,6 +13,15 @@ HEADER = "X-OF-Gateway-Rate"
 FORMAT = re.compile(r"([0-9]{1,12})\.([a-f0-9]{64})\.([a-f0-9]{64})\Z")
 
 
+def account_body_limit(path):
+    if path == "/local/v1/accounts/import-preview":
+        return 2 * 1024 * 1024
+    if path == "/local/v1/accounts/change-password":
+        # Two 128-character passwords may both use escaped UTF-16 surrogate pairs in JSON.
+        return 4096
+    return 2048
+
+
 def prepare(identity):
     with identity._write() as db:
         db.execute("""CREATE TABLE IF NOT EXISTS realm_gateway_key(

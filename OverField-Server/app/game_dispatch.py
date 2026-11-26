@@ -16,7 +16,9 @@ from local_picker import LABEL as PICKER_LABEL, LocalPicker
 BUILD = "2026-10-21-14-05-50"
 PATCH = "2026-11-07-22-39-35"
 NOVEMBER_PATCH = "2026-11-25-10-44-03"
-PATCH_BUNDLES={PATCH:"e49d461782ed9bf3309d2c35662e132a", NOVEMBER_PATCH:"4479579c8fb33fb720ec2dadebe34778"}
+EVENING_PATCH = "2026-11-25-19-54-41"
+PATCH_BUNDLES={PATCH:"e49d461782ed9bf3309d2c35662e132a", NOVEMBER_PATCH:"4479579c8fb33fb720ec2dadebe34778",
+               EVENING_PATCH:"63fd83b3b51cecbc1d604f40f76db609"}
 VERSION = BUILD + "_" + PATCH
 PREFIX = "PackageManifest_DefaultPackage"
 PACKAGE = "DefaultPackage"
@@ -24,6 +26,7 @@ MANIFEST_SHA = {
     BUILD: "cb7dd3bb6e9ed0702ceb3c1ca96f43998d4af904327ba4c349224947d976f8be",
     PATCH: "8c467ba267e06ffa4cd6e3dcb2326a6afc403c7f5e1c2dc18bcc1e83410204d9",
     NOVEMBER_PATCH:"7c1d25a4b2efcc802a45e841cf95ae8438f317d68dd1e37ce2c6eee8ab707de6",
+    EVENING_PATCH:"c5c6219f13c7cbac864e4cb04929979997fbe22e0d137ce5023edc89f52668c5",
 }
 ROUTES = {"/dispatch/get_login_url_list", "/dispatch/client_hot_update", "/dispatch/region_info",
           "/dispatch/get_notice_list", "/dispatch/get_notice_url_list"}

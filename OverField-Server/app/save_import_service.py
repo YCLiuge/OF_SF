@@ -27,6 +27,11 @@ def error(status,code):
 def schema(conn):
     role_identity.schema(conn)
     conn.execute("CREATE TABLE IF NOT EXISTS private_import_tickets(hash BLOB PRIMARY KEY,slot TEXT NOT NULL,expires INTEGER NOT NULL) WITHOUT ROWID")
+    conn.execute("""CREATE TABLE IF NOT EXISTS private_gift_tickets(digest BLOB PRIMARY KEY,slot TEXT NOT NULL,
+        expires INTEGER NOT NULL,request_id TEXT,shop INTEGER,grid INTEGER,pool INTEGER,epoch INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID""")
+    for table in ("private_import_tickets","private_gift_tickets"):
+        if "epoch" not in {r[1] for r in conn.execute("PRAGMA table_info("+table+")")}:
+            conn.execute("ALTER TABLE "+table+" ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0")
     conn.execute("CREATE TABLE IF NOT EXISTS private_import_preview(slot TEXT PRIMARY KEY,id TEXT NOT NULL,plan TEXT NOT NULL,counts TEXT NOT NULL,expires INTEGER NOT NULL) WITHOUT ROWID")
     conn.execute("CREATE TABLE IF NOT EXISTS private_import_receipt(slot TEXT PRIMARY KEY,player INTEGER NOT NULL,id TEXT NOT NULL,counts TEXT NOT NULL,state TEXT NOT NULL,sealed INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID")
     conn.execute("CREATE TABLE IF NOT EXISTS private_import_delta(slot TEXT NOT NULL,kind TEXT NOT NULL,k INTEGER NOT NULL,prior BLOB,applied BLOB,PRIMARY KEY(slot,kind,k)) WITHOUT ROWID")
@@ -146,7 +151,8 @@ class ImportService:
     def __init__(self):
         self.game=None
 
-    def issue(self,slot):
+    def issue(self,slot,login_ticket):
+        from realm_accounts import issue_epoch
         from utils import db
         game=self.game
         if not game:return {}
@@ -155,7 +161,8 @@ class ImportService:
         with game.lock:
             if game.closing.is_set() or db.conn is None:return {}
             with db.conn:
-                db.conn.execute("INSERT INTO private_import_tickets VALUES(?,?,?)",(hashlib.sha256(ticket.encode()).digest(),slot,now+TTL))
+                epoch=issue_epoch(db.conn,slot,login_ticket)
+                db.conn.execute("INSERT INTO private_import_tickets(hash,slot,expires,epoch) VALUES(?,?,?,?)",(hashlib.sha256(ticket.encode()).digest(),slot,now+TTL,epoch))
         return {"import_ticket":ticket,"import_expires_in":TTL}
 
     def request(self,action,body):
@@ -175,7 +182,8 @@ class ImportService:
             if game.closing.is_set() or db.conn is None:error(503,"import_service_unavailable")
             account=db.conn.execute("""SELECT t.slot,p.nickname FROM private_import_tickets t
                      JOIN authority.realm_accounts a ON a.slot=t.slot JOIN authority.profiles p ON p.slot=a.slot
-                     WHERE t.hash=? AND t.expires>?""",(hash_key,int(time.time()))).fetchone()
+                     LEFT JOIN authority.realm_password_epochs e ON e.slot=t.slot
+                     WHERE t.hash=? AND t.expires>? AND t.epoch=coalesce(e.epoch,0)""",(hash_key,int(time.time()))).fetchone()
             if not account:error(401,"import_login_required")
             return account
         if action=="import-preview":

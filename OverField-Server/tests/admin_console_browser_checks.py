@@ -64,3 +64,21 @@ def verify(js, until, get, post):
     change('#field-limit','137');js("document.querySelector('#operation').requestSubmit()")
     until(lambda:js("document.querySelector('.metrics div:last-child b').textContent.endsWith('/ 137')"))
     assert get('capacity.get')['limit']==137
+
+def verify_password_reset(js,until,player):
+    import json
+    user="console-reset";old="temporary-original";new="temporary-new-password"
+    assert player("register",dict(username=user,password=old,nickname="口令回归"))[0]==201
+    js("document.querySelector('nav [title=\"accounts.find\"]').click()")
+    js("document.querySelector('#field-value').value="+json.dumps(user)+";document.querySelector('#operation').requestSubmit()")
+    until(lambda:js("!!document.querySelector('#result button')"))
+    assert js("document.querySelector('#result button').textContent").startswith(user)
+    js("document.querySelector('#result button').click()")
+    assert js("document.querySelector('#new_password').type==='password' && document.querySelector('#confirm-password').type==='password'")
+    js("document.querySelector('#new_password').value="+json.dumps(new)+";document.querySelector('#confirm-password').value='different-test-password';document.querySelector('#operation').requestSubmit()")
+    until(lambda:js("document.querySelector('#status').textContent.includes('不一致')"))
+    js("document.querySelector('#confirm-password').value="+json.dumps(new)+";document.querySelector('#operation').requestSubmit()")
+    until(lambda:js("document.querySelector('#status').textContent.includes('密码已重置')"))
+    assert js("!document.querySelector('#new_password') && !document.querySelector('main').textContent.includes("+json.dumps(new)+")")
+    assert player("login",dict(username=user,password=old))[0]==401
+    assert player("login",dict(username=user,password=new))[0]==200

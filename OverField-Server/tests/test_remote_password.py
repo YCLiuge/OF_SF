@@ -19,6 +19,7 @@ from local_identity import LocalIdentity
 from local_game_wire import encode,receive
 from remote_password import RemotePassword
 from test_game_realm import join
+from test_native_gacha import call
 from test_private_profiles import request
 from test_remote_realm import free_ports,ObservedSocket
 
@@ -142,8 +143,17 @@ def run(root,resources):
                     assert pb.PlayerLoginRsp.FromString(b).player_name==payload["nickname"]
                     main,scene=join(c)
                     assert main.player_name==payload["nickname"] and main.player_id==1000000+index
-                    if index==2:
-                        from test_native_gacha import call
+                    if index==1:
+                        changed=call(c,"ChangeSign",12,sign="罗塔测试🌙")
+                        assert changed.status==pb.StatusCode_OK and changed.sign=="罗塔测试🌙"
+                        assert call(c,"ChangeSign",13,sign="development-proof").status==pb.StatusCode_BAD_REQ
+                        assert call(c,"ChangeSign",14,sign="甲"*61).status==pb.StatusCode_BAD_REQ
+                        profile=call(c,"OtherPlayerInfo",15,player_id=main.player_id)
+                        assert profile.other_info.sign=="罗塔测试🌙"
+                        with closing(sqlite3.connect(remote/"game.sqlite")) as saved:
+                            assert saved.execute("SELECT sign FROM players WHERE player_id=?", (main.player_id,)).fetchone()==("罗塔测试🌙",)
+                    else:
+                        assert main.sign==""
                         assert call(c,"PlayerOffline",19).status==pb.StatusCode_OK
                 assert disconnected.wait(0.5 if index==2 else 4)==(index==1)
                 assert seats.grant is None
@@ -169,8 +179,10 @@ def run(root,resources):
                     assert pb.VerifyLoginTokenRsp.FromString(receive(again)[1]).user_id==1000000+index
                     again.sendall(encode(MsgId.PlayerLoginReq,pb.PlayerLoginReq().SerializeToString(),2))
                     assert pb.PlayerLoginRsp.FromString(receive(again)[1]).player_name==payload["nickname"]
-                    assert join(again)[0].player_id==1000000+index
-                    from test_native_gacha import call
+                    resumed=join(again)[0]
+                    assert resumed.player_id==1000000+index and resumed.sign=="罗塔测试🌙"
+                    assert call(again,"ChangeSign",16,sign="").status==pb.StatusCode_OK
+                    assert call(again,"OtherPlayerInfo",17,player_id=resumed.player_id).other_info.sign==""
                     assert call(again,"PlayerOffline",20).status==pb.StatusCode_OK
                 assert submit("launch",{"slot":proof["slot"],"resume":accepted[0].resume_token})[0]==401
             with closing(sqlite3.connect(front/"game.sqlite")) as db:

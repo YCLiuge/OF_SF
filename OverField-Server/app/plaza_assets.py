@@ -8,13 +8,18 @@ from realm_plaza import KOI, koi_deadline, controlled_activities, photo_deadline
 
 STOCK_BUNDLE = "e49d461782ed9bf3309d2c35662e132a"
 NOVEMBER_BUNDLE = "4479579c8fb33fb720ec2dadebe34778"
+EVENING_BUNDLE = "63fd83b3b51cecbc1d604f40f76db609"
 # TextAsset payload bounds verified against each digest-pinned serialized file.
 SHEETS = {"BlessingTree":(11185388,19948), "Scene": (10000616, 21774), "Activity": (8130600, 19041), "SeasonalMiniGames": (7522068, 191),
           "ActivityJinli": (11632344,39), "NPC": (11760004,14188), "ActivityFashionShow": (719004,186)}
 SHEETS_NOVEMBER = {"BlessingTree":(11186676,19948), "Scene":(10002432,21245), "Activity":(8132416,19041),
                    "SeasonalMiniGames":(7523836,191),"ActivityJinli":(11633632,39),"NPC":(11761292,14188),
                    "ActivityFashionShow":(719004,186)}
-KNOWN_BUNDLES = {STOCK_BUNDLE:(SHEETS,b"39ae3d4a",0xb04965e4), NOVEMBER_BUNDLE:(SHEETS_NOVEMBER,b"af6e22c5",0xbad7850d)}
+SHEETS_EVENING = {"BlessingTree":(11267716,19948), "Scene":(10083472,21245), "Activity":(8213456,19041),
+                  "SeasonalMiniGames":(7604876,191),"ActivityJinli":(11714672,39),"NPC":(11842332,14188),
+                  "ActivityFashionShow":(719004,186)}
+KNOWN_BUNDLES = {STOCK_BUNDLE:(SHEETS,b"39ae3d4a",0xb04965e4), NOVEMBER_BUNDLE:(SHEETS_NOVEMBER,b"af6e22c5",0xbad7850d),
+                 EVENING_BUNDLE:(SHEETS_EVENING,b"cd728b48",0x41ded439)}
 # The 11/25 table rescheduled rows 45–58. Each replacement refers to the identical prefab path.
 NOVEMBER_THEME_ROWS={45:22,46:23,47:20,49:21,50:4,51:5,52:6,53:7,54:8,55:9,56:10,57:11,58:23}
 OFF_START, OFF_END = "2000-01-01 00:00:00", "2000-01-01 00:00:01"
@@ -100,7 +105,7 @@ def edit_dates(node, sheets, sheet, group, start_field, rows):
 def _stage_dates(node, config, sheets):
     interval = (config["opens_at"], config["closes_at"])
     theme = 25 if config["theme"] == 2 else config["theme"]  # first Halloween edition has no native dates.
-    if sheets is SHEETS_NOVEMBER:
+    if sheets is SHEETS_NOVEMBER or sheets is SHEETS_EVENING:
         theme=NOVEMBER_THEME_ROWS.get(theme,theme)
     if {260326150,260815150}.intersection(config["activities"]):
         edit_dates(node, sheets, "NPC", 1, 4, {10301: interval})

@@ -17,7 +17,8 @@ class GiftService:
     def __init__(self):
         self.game = None
 
-    def issue(self,slot):
+    def issue(self,slot,login_ticket):
+        from realm_accounts import issue_epoch
         from utils import db
         game=self.game
         if not game or game.closing.is_set() or not SLOT.fullmatch(slot):
@@ -28,12 +29,10 @@ class GiftService:
             if game.closing.is_set() or db.conn is None:
                 return {}
             with db.conn:
-                db.conn.execute("""CREATE TABLE IF NOT EXISTS private_gift_tickets(
-                    digest BLOB PRIMARY KEY, slot TEXT NOT NULL, expires INTEGER NOT NULL,
-                    request_id TEXT, shop INTEGER, grid INTEGER, pool INTEGER) WITHOUT ROWID""")
+                epoch=issue_epoch(db.conn,slot,login_ticket)
                 db.conn.execute("DELETE FROM private_gift_tickets WHERE expires<=?",(now,))
-                db.conn.execute("INSERT INTO private_gift_tickets(digest,slot,expires) VALUES(?,?,?)",
-                                (hashlib.sha256(ticket.encode("ascii")).digest(),slot,now+TTL))
+                db.conn.execute("INSERT INTO private_gift_tickets(digest,slot,expires,epoch) VALUES(?,?,?,?)",
+                                (hashlib.sha256(ticket.encode("ascii")).digest(),slot,now+TTL,epoch))
         return {"gift_ticket":ticket,"gift_expires_in":TTL}
 
     def catalog(self):
@@ -73,11 +72,11 @@ class GiftService:
                 raise AccountError(503,"gift_service_unavailable")
             with db.conn:
                 table=db.conn.execute("SELECT 1 FROM sqlite_schema WHERE name='private_gift_tickets'").fetchone()
-                row=db.conn.execute("SELECT slot,expires,request_id,shop,grid,pool FROM private_gift_tickets WHERE digest=? AND expires>?",
+                row=db.conn.execute("SELECT t.slot,t.expires,t.epoch,t.request_id,t.shop,t.grid,t.pool FROM private_gift_tickets t LEFT JOIN authority.realm_password_epochs e ON e.slot=t.slot WHERE t.digest=? AND t.expires>? AND t.epoch=coalesce(e.epoch,0)",
                                     (digest,now)).fetchone() if table else None
                 if not row:
                     raise AccountError(401,"gift_login_required")
-                slot,expiry,previous,*params=row
+                slot,expiry,epoch,previous,*params=row
                 player=db.conn.execute("""SELECT p.player_id FROM private_slots p JOIN players g ON g.player_id=p.player_id
                     JOIN authority.realm_accounts a ON a.slot=p.slot WHERE p.slot=?
                     AND NOT EXISTS(SELECT 1 FROM authority.realm_pending_names n WHERE n.slot=p.slot)""",(slot,)).fetchone()
@@ -92,8 +91,8 @@ class GiftService:
                         raise AccountError(409,"gift_unavailable")
                     db.conn.execute("UPDATE private_gift_tickets SET request_id=?,shop=?,grid=?,pool=? WHERE digest=?",
                                     (request_id,shop,grid,pool,digest))
-                    db.conn.execute("INSERT INTO private_gift_tickets(digest,slot,expires) VALUES(?,?,?)",
-                                    (hashlib.sha256(successor.encode("ascii")).digest(),slot,expiry))
+                    db.conn.execute("INSERT INTO private_gift_tickets(digest,slot,expires,epoch) VALUES(?,?,?,?)",
+                                    (hashlib.sha256(successor.encode("ascii")).digest(),slot,expiry,epoch))
             session=game.active.get(slot)
             if not replay and session and session.logged_in and session.running:
                 for cmd,message in [(MsgId.PaySendGoodsNotice,delivery),(MsgId.PackNotice,inventory),*extra]:

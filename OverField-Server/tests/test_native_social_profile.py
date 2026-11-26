@@ -60,6 +60,7 @@ def run(root, resources):
             assert call(a,"ChangePlayerSex",206,sex=88).status == pb.StatusCode_BAD_REQ
             view = info(b,owner).other_info
             assert view.hide_value == 3 and not view.birthday and not view.sign and not view.account_type
+            assert info(a,owner).other_info.sign == "测试签名"
             assert view.sex == pb.ESexType_Female
             assert not call(b,"FriendSearch",207,search_args=str(owner)).data.sign
             assert info(a,0).status != pb.StatusCode_OK

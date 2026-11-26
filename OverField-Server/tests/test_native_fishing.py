@@ -134,7 +134,7 @@ def run(root,resources):
     seq=count(200)
     clock=[1000.0]
     date=[datetime(2026,11,24,18,0,tzinfo=shop.CN)]
-    NOTICES.update({getattr(MsgId,n):getattr(pb,n) for n in ("FishingResultNotice","LifeProficiencyNotice","LifeAchieveNotice","PackNotice")})
+    NOTICES.update({getattr(MsgId,n):getattr(pb,n) for n in ("FishingResultNotice","LifeProficiencyNotice","LifeAchieveNotice","PackNotice","ChatMsgNotice")})
     def ask(s,n,**f):
         return rpc(s,n,next(seq),**f)
     def opened(ident):
@@ -169,6 +169,37 @@ def run(root,resources):
             with a,b:
                 prepare(pid)
                 prepare(other)
+                with host.lock,db.conn:
+                    life=base(pid,fishing.KIND)
+                    life.level=10
+                    db.set_life(pid,fishing.KIND,life.SerializeToString())
+                    set_balance(pid,11,776)
+                    set_balance(pid,5021002,6076)
+                    twins=[make_item(1006010,1,pid) for _ in range(2)]
+                    assert all(t.main_item.weapon.durability==1500 for t in twins)
+                    twins[1].main_item.weapon.durability=0
+                    for t in twins:
+                        db.set_item_detail(pid,t.SerializeToString(),instance_id=t.main_item.weapon.instance_id)
+                args=dict(fishing_pond_id=1001,fishing_rod_id=1006010,fishing_box_id=5021002)
+                assert ask(a,"CharacterGatherWeaponUpdate",character_id=101001,weapon_id=twins[1].main_item.weapon.instance_id)[0].status==pb.StatusCode_OK
+                denied,notes=ask(a,"Fishing",**args)
+                assert denied.status==pb.StatusCode_FAIL and any(isinstance(n,pb.ChatMsgNotice) and n.type==pb.ChatChannel_System and "耐久度已耗尽" in n.msg.text for n in notes)
+                assert not any(isinstance(n,pb.ChatMsgNotice) for n in ask(b,"PlayerPing")[1])
+                with host.lock:
+                    assert (balance(pid,11),balance(pid,5021002))==(776,6076)
+                assert ask(a,"CharacterGatherWeaponUpdate",character_id=101001,weapon_id=twins[0].main_item.weapon.instance_id)[0].status==pb.StatusCode_OK
+                with patch("private_fishing.random.random",return_value=.999):
+                    accepted=ask(a,"Fishing",**args)[0]
+                assert accepted.status==pb.StatusCode_OK
+                empty=accepted.fishing_event_result
+                assert not empty.fish_infos and empty.cost_endurance==0
+                assert finish(a,empty.cost_time)[0].status==pb.StatusCode_OK
+                with host.lock,db.conn:
+                    assert (balance(pid,11),balance(pid,5021002))==(775,6075)
+                    assert pb.ItemDetail.FromString(db.get_item_detail(pid,instance_id=twins[0].main_item.weapon.instance_id)).main_item.weapon.durability==1500
+                    life.level=1
+                    db.set_life(pid,fishing.KIND,life.SerializeToString())
+                prepare(pid)
                 with host.lock:
                     fragments_before = balance(pid, 124)
                 catch_catalog()
@@ -204,7 +235,8 @@ def run(root,resources):
                     info.level=1
                     db.set_life(pid,fishing.KIND,info.SerializeToString())
                 assert cast(a,fishing_box_id=6021).status==pb.StatusCode_ITEM_NOT_ENOUGH
-                assert cast(a,fishing_rod_id=1004001).status==pb.StatusCode_ITEM_NOT_ENOUGH
+                assert cast(a,fishing_rod_id=1004001).status==pb.StatusCode_GATHER_WEAPON_TYPE_DIFFER
+                assert cast(a,fishing_rod_id=0).status==pb.StatusCode_GATHER_WEAPON_NOT_WEAR
                 with host.lock,db.conn:
                     set_balance(pid,11,0)
                 assert cast(a).status==pb.StatusCode_EnergyNotEnough
@@ -311,7 +343,10 @@ def run(root,resources):
                         resp = cast(b,fishing_box_id=5021003,fishing_rod_id=rod_id)
                     assert resp.status == pb.StatusCode_OK
                     preview = resp.fishing_event_result
-                    assert preview.cost_endurance == 5 and (100,1) in [(e.i_d,e.index) for e in preview.fishing_event_list]
+                    events=[(e.i_d,e.index) for e in preview.fishing_event_list]
+                    assert preview.cost_endurance == (5 if other_fish else 0)
+                    assert ((100,1) in events)==bool(other_fish)
+                    assert bool(other_fish) or ((100,3) in events and all(event!=300 for event,_ in events))
                     assert [f.i_d for f in preview.fish_infos] == ([other_fish]*2 if other_fish else [])
                     if other_fish == 5023020:
                         assert all(170 <= f.length <= 240 for f in preview.fish_infos)
@@ -324,8 +359,8 @@ def run(root,resources):
                         assert progress(other,100210901) == large_count
                         assert balance(other,11) == 80-i and balance(other,5021003) == 12-i
                         wear = pb.ItemDetail.FromString(db.get_item_detail(other,instance_id=rod_id)).main_item.weapon.durability
-                        assert wear == 40-5*i
-                    assert any(item.main_item.weapon.instance_id==rod_id for item in result.items if item.main_item.HasField("weapon"))
+                        assert wear == 40-5*min(i,4)
+                    assert any(item.main_item.weapon.instance_id==rod_id for item in result.items if item.main_item.HasField("weapon"))==bool(landed)
                 assert counts(b) == {5023020:2,5022001:2,5023006:4}
                 previous=counts(a)
                 assert cast(a).status==pb.StatusCode_OK
@@ -344,7 +379,7 @@ def run(root,resources):
                 assert counts(b)=={5023020:2,5022001:2,5023006:4}
                 with host.lock:
                     assert progress(other,100210901)==4 and balance(other,5021003)==7
-                    assert pb.ItemDetail.FromString(db.get_item_detail(other,instance_id=rod_id)).main_item.weapon.durability==15
+                    assert pb.ItemDetail.FromString(db.get_item_detail(other,instance_id=rod_id)).main_item.weapon.durability==20
         finally:
             host.stop()
     configure(root,{"fishing_min_level":7})

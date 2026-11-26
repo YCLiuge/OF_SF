@@ -232,8 +232,9 @@ def project(snapshot):
                     part=item.get(typ,{})
                     equipment=integer(part.get(typ+"_id"))
                     if equipment and type(part.get("instance_id")) is int:
-                        if typ=="weapon" and "durability" in part:
-                            durability[part["instance_id"]]=integer(part["durability"],0xffffffff)
+                        if typ=="weapon" and ("durability" in part or msg=="GetWeaponRsp"):
+                            # A complete proto3 weapon omits scalar durability when it is zero.
+                            durability[part["instance_id"]]=integer(part.get("durability"),0xffffffff)
                         gear[(typ,part["instance_id"])]=[{"weapon":1,"armor":2,"poster":3}[typ],equipment,*numbers(part,keys)]
     data["stacks"]=[[k,v] for k,v in sorted(stacks.items()) if v]
     ordered=sorted(gear,key=lambda key:(gear[key],key))
@@ -261,6 +262,11 @@ def project(snapshot):
                     if pos<size and ref:slots[start+pos]=ref
             if any(slots):equipped.append([index,slots])
         if equipped:data["loadouts"].append([integer(actor.get("character_id")),active,equipped])
+    bound={entry[1] for entry in fishing_rods}
+    for (kind,instance),index in references.items():
+        if (kind=="weapon" and 1006001<=data["gear"][index-1][1]<=1006010
+                and index not in bound and instance in durability):
+            fishing_rods.append([0,index,durability[instance]])
     if fishing_rods:
         data["fishing_rods"]=fishing_rods
     dye=snapshot.get("customisation",{}).get("dye",{})

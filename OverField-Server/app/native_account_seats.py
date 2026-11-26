@@ -120,10 +120,15 @@ class NativeAccountSeats:
                 if self.remote:
                     slot=self.remote.reserve(body["slot"],body["ticket"])
                 else:
-                    slot=self.identity.resolve_ticket(body["ticket"])
+                    from local_identity import TICKET,_digest
+                    value=body["ticket"]
+                    if not isinstance(value,str) or not TICKET.fullmatch(value):
+                        raise ValueError("Invalid account ticket")
                     with self.identity._write() as db:
-                        if not db.execute("SELECT 1 FROM realm_accounts WHERE slot=?",(slot,)).fetchone():
+                        if not db.execute("""SELECT 1 FROM tickets t JOIN realm_accounts a USING(slot)
+                            WHERE t.ticket_hash=? AND t.expires>?""",(_digest(value),int(self.identity._clock()))).fetchone():
                             raise ValueError("Not a password account")
+                    slot=value  # Consume at game entry so a password change can revoke a pending handoff.
                 self.pending[pid]=(born,slot,now+300)
                 self.last_owner=self.disconnected_owner=None
                 self.resume_grant=None
@@ -139,7 +144,7 @@ class NativeAccountSeats:
             entry=self.pending.get(pid)
             if entry and exe==self.client and born==entry[0] and entry[2]>now:
                 del self.pending[pid]
-                grant=entry[1]
+                grant=entry[1] if self.remote else self.identity.resolve_ticket(entry[1])
             elif exe==self.client and self.disconnected_owner==owner:
                 grant=None
                 if self.resume_grant and now<self.resume_until:

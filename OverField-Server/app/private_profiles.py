@@ -11,6 +11,7 @@ import sqlite3
 import ssl
 from urllib.parse import urlsplit
 
+from player_gateway_peer import account_body_limit
 from game_dispatch import handle_game_dispatch
 from realm_maintenance import Maintenance, public_get
 from realm_accounts import AccountService, AccountError, ROUTES as ACCOUNT_ROUTES
@@ -134,7 +135,7 @@ class ProfileHandler(BaseHTTPRequestHandler):
             self._reply(400, {"error": "expected fixed-length JSON body"})
             return
         length = int(lengths[0])
-        if length > (2*1024*1024 if self.path == "/local/v1/accounts/import-preview" else 2048):
+        if length > account_body_limit(self.path):
             self._reply(413, {"error": "body too large"})
             return
         if self.headers.get_content_type() != "application/json":
@@ -224,7 +225,7 @@ def create_profile_server(identity, *, bind_host="127.0.0.1", port=18881,
     service.account_registration = service.registration if account_policy is None else account_policy=="open"
     service.region = {"realm": REALM, "game_host": advertised, "game_port": game_port,
                       "game_protocol": "overfield-packethead-protobuf", "client_version": "1.1.12",
-                        "save_import_features": ["pets", "field_progress", "public_uid_label", "fishing_rods"],"account_features":["captcha_lookup_v1"]}
+                        "save_import_features": ["pets", "field_progress", "public_uid_label", "fishing_rods"],"account_features":["captcha_lookup_v1","password_change_v1"]}
     service.hostnames = frozenset(hosts)
     service.tls_context = tls_context
     return service

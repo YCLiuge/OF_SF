@@ -15,7 +15,7 @@ from local_identity import SLOT, PROFILE_KEY, _digest, _name
 from profile_issuance import authorizes_game_key
 
 PREFIX = "/local/v1/accounts/"
-ROUTES = {PREFIX+k for k in ("challenge","lookup","register","login","bind","launch","claim-gift","import-preview","import-apply","import-undo")}
+ROUTES = {PREFIX+k for k in ("challenge","lookup","register","login","change-password","bind","launch","claim-gift","import-preview","import-apply","import-undo")}
 USER = re.compile(r"[A-Za-z0-9_.\-\u3400-\u4dbf\u4e00-\u9fff]{3,40}\Z")
 N, R, P = 32768, 8, 1
 SALT_SIZE = 16
@@ -52,6 +52,11 @@ def initialize(identity):
             digest BLOB NOT NULL UNIQUE REFERENCES tickets(ticket_hash) ON DELETE CASCADE,
             game_digest BLOB NOT NULL, reconnect_until INTEGER NOT NULL DEFAULT 0
         ) WITHOUT ROWID""")
+        db.execute("""CREATE TABLE IF NOT EXISTS realm_password_epochs(slot TEXT PRIMARY KEY REFERENCES
+            realm_accounts(slot) ON DELETE CASCADE, epoch INTEGER NOT NULL) WITHOUT ROWID""")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS realm_rotate_password_epoch AFTER UPDATE OF verifier ON realm_accounts
+            WHEN NEW.verifier!=OLD.verifier BEGIN INSERT INTO realm_password_epochs VALUES(NEW.slot,1)
+            ON CONFLICT(slot) DO UPDATE SET epoch=epoch+1; END""")
         db.execute("""CREATE TRIGGER IF NOT EXISTS realm_password_changed AFTER UPDATE OF verifier
             ON realm_accounts WHEN NEW.verifier!=OLD.verifier BEGIN
             DELETE FROM tickets WHERE slot=NEW.slot; END""")
@@ -72,15 +77,19 @@ def username_key(value):
     return username_spelling(value).lower()
 
 
-def credentials(body):
-    user=username_spelling(body.get("username"))
-    p=body.get("password")
+def password_bytes(p):
     if not isinstance(p,str) or not 8 <= len(p) <= 128:
         raise AccountError(400,"invalid_password")
     try:
         password = p.encode("utf8")
     except UnicodeError:
         raise AccountError(400,"invalid_password") from None
+    return password
+
+
+def credentials(body):
+    user=username_spelling(body.get("username"))
+    password=password_bytes(body.get("password"))
     # Preserve the legacy representation of ASCII-only accounts.
     return (user.lower() if user.isascii() else user),password
 
@@ -154,23 +163,56 @@ def register(identity,body,bind):
         return ticket(identity,db,slot,"" if deferred else display)
 
 
-def login(identity,body):
-    if set(body)!={"username","password"}:
-        raise AccountError(400,"invalid_request")
-    user,password=credentials(body)
+def verify_password(identity,user,password):
     with closing(sqlite3.connect(identity.path)) as db:
         row=db.execute("SELECT a.slot,a.salt,a.verifier,a.n,a.r,a.p FROM realm_accounts a WHERE a.username=? COLLATE NOCASE",(user,)).fetchone()
     # Keep the same KDF cost for unknown names. Never run unbounded parameters from stored data.
     candidate=derive(password,row[1] if row else bytes(SALT_SIZE))
     if not hmac.compare_digest(candidate,row[2] if row else bytes(32)) or not row or row[3:]!=(N,R,P):
         raise AccountError(401,"invalid_credentials")
+    return row[0],row[2]
+
+
+def change_password(identity,body):
+    if set(body)!={"username","password","new_password"}:
+        raise AccountError(400,"invalid_request")
+    user,old=credentials(body)
+    new=password_bytes(body["new_password"])
+    slot,previous=verify_password(identity,user,old)
+    if hmac.compare_digest(old,new):
+        raise AccountError(400,"password_unchanged")
+    salt=secrets.token_bytes(SALT_SIZE)
+    verifier=derive(new,salt)
+    with identity._write() as db:
+        updated=db.execute("""UPDATE realm_accounts SET salt=?,verifier=?,n=?,r=?,p=?
+            WHERE username=? COLLATE NOCASE AND slot=? AND verifier=?""",(salt,verifier,N,R,P,user,slot,previous))
+        if updated.rowcount!=1:
+            raise AccountError(401,"invalid_credentials")
+    return {"changed":True,"reauthenticate":True}
+
+
+def login(identity,body):
+    if set(body)!={"username","password"}:
+        raise AccountError(400,"invalid_request")
+    user,password=credentials(body)
+    slot,previous=verify_password(identity,user,password)
     with identity._write() as db:
         current=db.execute("SELECT p.nickname FROM realm_accounts a JOIN profiles p ON p.slot=a.slot WHERE a.username=? COLLATE NOCASE AND a.slot=? AND a.verifier=?",
-                           (user,row[0],row[2])).fetchone()
+                           (user,slot,previous)).fetchone()
         if not current:
             raise AccountError(401,"invalid_credentials")
-        pending=db.execute("SELECT 1 FROM realm_pending_names WHERE slot=?",(row[0],)).fetchone()
-        return ticket(identity,db,row[0],"" if pending else current[0])
+        pending=db.execute("SELECT 1 FROM realm_pending_names WHERE slot=?",(slot,)).fetchone()
+        return ticket(identity,db,slot,"" if pending else current[0])
+
+
+def issue_epoch(conn,slot,login_ticket):
+    # Verify the login that initiated issuance again, after acquiring the gameplay writer.
+    row=conn.execute("""SELECT coalesce(v.epoch,0) FROM authority.tickets t
+        LEFT JOIN authority.realm_password_epochs v ON v.slot=t.slot
+        WHERE t.slot=? AND t.ticket_hash=?""",(slot,_digest(login_ticket))).fetchone()
+    if not row:
+        raise AccountError(401,"invalid_credentials")
+    return row[0]
 
 
 def rename_login(identity,slot,old_name,new_name):
@@ -272,7 +314,7 @@ class AccountService:
         bucket, limit = peer, 30
         shared=gateway_source in self.shared_sources
         if gateway_source is not None:
-            family = action if action in ("challenge","lookup","register","login") else "other"
+            family = "login" if action=="change-password" else (action if action in ("challenge","lookup","register","login") else "other")
             bucket = (gateway_source, family)
             if shared:
                 limit=120 if family in ("challenge","lookup","register") else 240
@@ -315,20 +357,24 @@ class AccountService:
             from player_captcha import username
             user=username(body)
             form=dict(body)
-            signing_in=action=="login"
+            signing_in=action in ("login","change-password")
             required=public and (not signing_in or self.captcha.login_challenge(source,user,shared=shared))
-            self.captcha.verify(form,user,source,"login" if signing_in else "register",required)
+            self.captcha.verify(form,user,source,action if signing_in else "register",required)
             try:
-                result=login(self.identity,form) if signing_in else register(self.identity,form,action=="bind")
+                if action=="change-password":
+                    result=change_password(self.identity,form)
+                else:
+                    result=login(self.identity,form) if signing_in else register(self.identity,form,action=="bind")
             except AccountError as error:
                 if signing_in and public and error.code=="invalid_credentials":
                     self.captcha.failed(source,user)
                 raise
             if signing_in and public:self.captcha.succeeded(source,user)
+            if action=="change-password":return result
             if self.gifts.game is not None:
-                result.update(self.gifts.issue(result["slot"]))
+                result.update(self.gifts.issue(result["slot"],result["ticket"]))
             if self.imports.game is not None:
-                result.update(self.imports.issue(result["slot"]))
+                result.update(self.imports.issue(result["slot"],result["ticket"]))
             return result
         finally:
             self.workers.release()

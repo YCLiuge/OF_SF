@@ -52,6 +52,12 @@ EVENT = {"type": "object", "additionalProperties": False,
 CODE_REWARD = {"type":"object","properties":{"item":ID,"quantity":{"type":"integer","minimum":1,"maximum":1000000}},
                "required":["item","quantity"],"additionalProperties":False}
 OPERATIONS = {
+    "accounts.find": operation("any","精确查找本服登录账号、游戏名或公开 UID。",
+        {"field":{"type":"string","enum":["username","nickname","uid"]},"value":STRING},("field","value"),read_only=True),
+    "accounts.reset": operation("any","为选中的本服账号设置新密码。旧登录票和重连凭据立即失效。",
+        {"username":STRING,"account_ref":STRING,"password_version":{"type":"integer","minimum":0},
+         "new_password":{"type":"string","format":"password","minLength":8,"maxLength":128,"writeOnly":True}},
+        ("username","account_ref","password_version","new_password")),
     "reports.list": operation("any","查询玩家主动提交的举报，可分页查看待处理或已处理的记录。",
                               {"before":ID,"limit":{"type":"integer","minimum":1,"maximum":100},
                                "resolved":{"type":"boolean"}},read_only=True),
@@ -233,6 +239,10 @@ def validate(value, schema, name="input"):
 
 
 def run(state, name, data, request_stop, expected=None, live_capacity=None):
+    if name in ("accounts.find","accounts.reset"):
+        import realm_account_admin
+        if name=="accounts.find":return realm_account_admin.find(state,data["field"],data["value"])
+        return realm_account_admin.reset(state,data)
     if name in ("capacity.get", "capacity.set"):
         if live_capacity is not None:
             return live_capacity(data.get("limit"))

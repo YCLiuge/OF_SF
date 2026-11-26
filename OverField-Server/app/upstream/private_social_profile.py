@@ -45,7 +45,7 @@ def profile(session, req, rsp):
     other, player = req.player_id, session.player_id
     if not other or not peer_exists(other):
         return pb.StatusCode_FRIEND_SEARCH_FAIL
-    make_PlayerBriefInfo(other, rsp.other_info)
+    make_PlayerBriefInfo(other, rsp.other_info, viewer_id=player)
     fields = db.get_friend_info(player, other, "friend_status,alias,friend_tag,friend_intimacy,friend_background")
     if fields[0] is not None:
         rsp.friend_status, rsp.alias, rsp.friend_tag, rsp.friend_intimacy, rsp.friend_background = fields

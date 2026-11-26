@@ -128,8 +128,13 @@ def run():
                     for _ in range(3):
                         assert post("login",{"username":name,"password":"wrong-value"})==(401,{"error":"invalid_credentials"})
                     assert post("login",{"username":name,"password":"wrong-value"})==(428,{"error":"captcha_required"})
-                assert post("login",dict(form,**solve(u,"login")))[0]==200
-                assert post("login",form)[0]==200
+                change=dict(form,new_password="🌙"*128)
+                assert post("change-password",change)==(428,{"error":"captcha_required"})
+                assert post("change-password",dict(change,**solve(u,"change-password")))==(200,{"changed":True,"reauthenticate":True})
+                change=dict(form,password=change["new_password"],new_password="🌱"*128)
+                assert len(json.dumps(change).encode())>2048
+                assert post("change-password",change)==(200,{"changed":True,"reauthenticate":True})
+                assert post("login",dict(form,password=change["new_password"]))[0]==200
         finally:
             srv.shutdown();srv.server_close();worker.join()
     transport="TLS" if cert else "signed loopback fixture (certificate generator unavailable)"

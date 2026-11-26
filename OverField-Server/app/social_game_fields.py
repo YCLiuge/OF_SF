@@ -42,6 +42,13 @@ class SocialGameFields:
                 msg.text=text
             else:
                 msg.expression=0
+        elif isinstance(msg, pb.ChangeSignReq):
+            from private_chat_text import chat_text
+            signature = chat_text(msg.sign)
+            if signature is None or guard is not None and not guard.allows(signature):
+                return False
+            clean(msg)
+            msg.sign = signature
         elif isinstance(msg,pb.GmCodeReq):
             from private_chat_text import chat_text
             value=chat_text(msg.param)

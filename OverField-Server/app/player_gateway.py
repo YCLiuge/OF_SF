@@ -20,7 +20,7 @@ from proto import net_pb2 as pb
 
 GET = {"/local/v1/region", "/private/plaza", "/private/gifts", "/private/maintenance"}
 IMPORT_PREVIEW = "/local/v1/accounts/import-preview"
-POST = {"/local/v1/accounts/"+action for action in ("challenge","lookup","register","login","bind","launch","claim-gift",
+POST = {"/local/v1/accounts/"+action for action in ("challenge","lookup","register","login","change-password","bind","launch","claim-gift",
                                                    "import-preview", "import-apply", "import-undo")}
 ATTACHMENT = re.compile(r"/private/(?:releases|notice-images)/[0-9a-f]{64}\Z")
 
@@ -73,7 +73,7 @@ class Gate:
             raise ValueError()
         length = headers.get("content-length", "0")
         preview = method == "POST" and path == IMPORT_PREVIEW
-        maximum = 2 * 1024 * 1024 if preview else 2048
+        maximum = player_gateway_peer.account_body_limit(path)
         if not re.fullmatch(r"[0-9]{1,7}", length) or int(length) > maximum:
             return await reject(writer, 413)
         if method in ("GET","HEAD") and int(length) or method == "POST" and (

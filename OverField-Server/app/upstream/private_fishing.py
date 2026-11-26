@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from functools import lru_cache
 import random
-from time import monotonic
+from time import monotonic, time
 
 from network.msg_id import MsgId
 from private_crafts import base,daily_proficiency,MAX_COUNT
@@ -61,9 +61,19 @@ def rod(player,requested,scene_team):
         return None
     raw=db.get_item_detail(player,instance_id=requested)
     if raw:
-        return real(pb.ItemDetail.FromString(raw))
+        selected=real(pb.ItemDetail.FromString(raw))
+        if selected:
+            return selected
     if table.get(requested,{}).get("new_weapon_type")!=18:
         return None
+    # The picker may send a template. Prefer the currently equipped instance even when
+    # exhausted; silently using another copy changes the wrong item's durability.
+    lead=scene_team.char1
+    for instance in (lead.gather_weapon,lead.character_appearance.fishing_rod_instance_id):
+        raw=db.get_item_detail(player,instance_id=instance) if instance else None
+        selected=real(pb.ItemDetail.FromString(raw)) if raw else None
+        if selected and selected[0]==requested:
+            return selected
     # The original city loadout can store a starter tool template directly on the actor.
     # Resolve a real inventory instance first when both representations are present.
     exhausted=None
@@ -137,6 +147,13 @@ def plan(level,bait,day,skills):
         elif kind==4:
             sizes[(int(value)-30400)//100+1]+=skills.get(int(value),0)
     if random.random()>=max(0,min(1,chance)):
+        # The final two phase-300 texts describe wear or a bonus fish. Neither applies
+        # to an empty hook. Phase 100/3 is the authored lost-bait alternative to 100/1.
+        del result.fishing_event_list[-1]
+        first=result.fishing_event_list[0]
+        if first.index==1:
+            first.index=3
+        result.cost_endurance=0
         return result
     quality = None if bait == 6021 else _table("Item","item")[bait].get("quality",0)
     limited=bait==6021 and seasonal_bait()
@@ -149,6 +166,16 @@ def plan(level,bait,day,skills):
     for fish in random.choices(candidates,weights=weights,k=quantity):
         result.fish_infos.add(i_d=fish["i_d"],length=random.uniform(fish["min_size"],fish["max_size"]))
     return result
+
+
+def exhausted_rod(session):
+    # FishingRsp has no free-text field or dedicated durability error code.
+    note=pb.ChatMsgNotice(status=pb.StatusCode_OK,type=pb.ChatChannel_System)
+    note.msg.name="系统"
+    note.msg.text="鱼竿耐久度已耗尽，请更换鱼竿。"
+    note.msg.send_time=int(time()*1000)
+    session.send(MsgId.ChatMsgNotice,note,0)
+    return pb.StatusCode_FAIL
 
 
 def request(session,req,rsp):
@@ -171,8 +198,12 @@ def request(session,req,rsp):
     if not life or life.level<BAIT_LEVELS[bait]:
         return pb.StatusCode_LifeLvNotEnough
     tool=rod(pid,req.fishing_rod_id,session.scene_player.team) if req.fishing_rod_id else None
-    if not tool or not tool[2]:
-        return pb.StatusCode_ITEM_NOT_ENOUGH
+    if not tool:
+        if _table("Weapon","weapon").get(req.fishing_rod_id,{}).get("new_weapon_type") not in (None,18):
+            return pb.StatusCode_GATHER_WEAPON_TYPE_DIFFER
+        return pb.StatusCode_GATHER_WEAPON_NOT_WEAR
+    if not tool[2]:
+        return exhausted_rod(session)
     tier=_table("Fishing","fishing_level")[life.level]
     energy=tier["need_item_i_d"],tier["need_item_count"]
     for item,qty,status in ((energy[0],energy[1],pb.StatusCode_EnergyNotEnough),(bait,1,pb.StatusCode_ITEM_NOT_ENOUGH)):
@@ -265,8 +296,10 @@ def settle(session,cast,rsp,pending):
     if cast.instance:
         raw=db.get_item_detail(pid,instance_id=cast.instance)
         item=pb.ItemDetail.FromString(raw) if raw else None
-        if not item or not item.main_item.HasField("weapon") or item.main_item.weapon.weapon_id!=cast.rod or item.main_item.weapon.durability<=0:
-            return pb.StatusCode_ITEM_NOT_ENOUGH
+        if not item or not item.main_item.HasField("weapon") or item.main_item.weapon.weapon_id!=cast.rod:
+            return pb.StatusCode_GATHER_WEAPON_NOT_WEAR
+        if not item.main_item.weapon.durability:
+            return exhausted_rod(session)
         if cast.preview.cost_endurance:
             item.main_item.weapon.durability=max(0,item.main_item.weapon.durability-cast.preview.cost_endurance)
             db.set_item_detail(pid,item.SerializeToString(),instance_id=cast.instance)

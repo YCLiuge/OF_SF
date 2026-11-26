@@ -1,12 +1,12 @@
 import {editorFor} from './editors.js';
 const el = id => document.getElementById(id);
 const groups = {
-  capacity:'连接容量', realm:'区服', maintenance:'运营概览', notice:'公告', release:'版本', events:'活动', plaza:'海上舞台',
+  accounts:'玩家账号',capacity:'连接容量', realm:'区服', maintenance:'运营概览', notice:'公告', release:'版本', events:'活动', plaza:'海上舞台',
   gacha:'招募', blessings:'祈愿树', rules:'玩法规则', codes:'兑换码', reports:'举报', photos:'照片墙', state:'备份'
 };
 const actions = {list:'列表', get:'查看配置', set:'修改配置', catalog:'内容目录', edit:'编辑', issue:'创建', publish:'发布',
   withdraw:'撤回', enable:'开启卡池', resolve:'标记已处理', backup:'备份存档', restore:'还原存档', schedule:'预设下次启动', status:'运行状态', stop:'正常停服'};
-const labels = {id:'编号',file:'服务器上的文件路径',archive:'服务器上的备份路径',title:'标题',body:'正文',images:'服务器上的图片路径',
+const labels = {username:'登录账号',account_ref:'账号标识',password_version:'密码版本',new_password:'新密码',field:'查询条件',value:'查询内容',id:'编号',file:'服务器上的文件路径',archive:'服务器上的备份路径',title:'标题',body:'正文',images:'服务器上的图片路径',
   version:'版本号',notes:'更新说明',sha256:'SHA-256',limit:'每页条数',before:'上一页最后一项编号',enabled:'启用',
   code:'兑换码或分享码',quota:'总名额',kind:'类型',rewards:'奖励',expires_at:'到期时间',trees:'祈愿树排期',pools:'卡池配置',
   resolved:'已处理',events:'活动配置',stages:'舞台配置'};
@@ -21,7 +21,7 @@ function node(tag, text) {
   return item;
 }
 function displayName(name) {
-  const names={'events.set':'活动排期','plaza.set':'舞台与活动入口','blessings.set':'祈愿树排期','gacha.set':'招募池与概率','rules.schedule':'预设玩法参数','capacity.set':'调整连接上限'};
+  const names={'accounts.find':'查询玩家账号','accounts.reset':'重置玩家密码','events.set':'活动排期','plaza.set':'舞台与活动入口','blessings.set':'祈愿树排期','gacha.set':'招募池与概率','rules.schedule':'预设玩法参数','capacity.set':'调整连接上限'};
   if(names[name])return names[name];
   const [group, action] = name.split('.');
   return (groups[group] || group) + ' · ' + (actions[action] || action);
@@ -108,7 +108,7 @@ function field(key, spec, required) {
   let input;
   if (spec.enum || type === 'boolean') {
     input = node('select'); input.add(new Option('请选择',''));
-    for (const value of spec.enum || [true,false]) input.add(new Option(value === true ? '是' : value === false ? '否' : String(value),String(value)));
+    for (const value of spec.enum || [true,false]) input.add(new Option(value === true ? '是' : value === false ? '否' : ({username:'登录账号',nickname:'游戏名',uid:'公开 UID'})[value] || String(value),String(value)));
   } else if (lines || ['object','array'].includes(type) || ['body','notes'].includes(key)) {
     input = node('textarea'); input.rows = lines ? 3 : 5;
     if (lines) input.placeholder = '每行一个文件路径，最多 ' + spec.maxItems + ' 张';
@@ -140,6 +140,12 @@ function select(name,force=false) {
   el('output').hidden = true; el('result').textContent = '';
   el('execute').textContent = op.readOnly ? '查询' : op.availability === 'stopped' ? '请通过 CLI 执行' : displayName(name);
   el('execute').disabled = busy || op.availability === 'stopped'; message(''); navigation();
+  if(name==='accounts.reset'){
+    const choice=el('fields'); choice.replaceChildren(node('p','请先查找账号，在结果中选择要重置密码的玩家。'));
+    const find=node('button','查找账号');find.type='button';find.onclick=()=>select('accounts.find');choice.append(find);
+    el('execute').hidden=true;
+  } else el('execute').hidden=false;
+  if(name==='accounts.find')el('field-field').value='username';
   if (forms.has(name)) openEditor(name,version);
   if (name==='capacity.set') {
     const limit=el('field-limit'); limit.type='number'; limit.min='1'; limit.max='512';limit.step='1';
@@ -167,6 +173,31 @@ async function openEditor(name,version) {
     if(selectionVersion!==version)return;
     const retry=node('button','重试');retry.type='button';retry.onclick=()=>select(name,true);
     fields.replaceChildren(node('p',error.message),retry);
+  }
+}
+function chooseAccount(row){
+  select('accounts.reset');
+  const fields=el('fields');fields.replaceChildren(node('p',accountLabel(row)));
+  for(const name of ['username','account_ref','password_version']){
+    const hidden=node('input');hidden.type='hidden';hidden.name=name;hidden.dataset.type=name==='password_version'?'integer':'string';
+    hidden.value=String(row[name]);fields.append(hidden);
+  }
+  for(const [id,title] of [['new_password','新密码'],['confirm-password','再次输入新密码']]){
+    const input=node('input');input.type='password';input.autocomplete='new-password';input.required=true;input.id=id;
+    if(id==='new_password'){input.name=id;input.dataset.type='string';}
+    const label=node('label',title);label.htmlFor=id;fields.append(label,input);
+  }
+  el('execute').hidden=false;
+}
+function accountLabel(row){
+  return row.username+' · '+(row.nickname||'尚未取名')+' · '+(row.uid?'UID '+row.uid:'尚未创建角色');
+}
+function accountResults(result){
+  const host=el('result');host.replaceChildren();
+  if(!result.accounts.length){host.textContent='没有找到匹配账号。';return;}
+  for(const row of result.accounts){
+    const select=node('button',accountLabel(row)+' · 重置密码');select.type='button';
+    select.onclick=()=>chooseAccount(row);host.append(select,document.createTextNode('\n'));
   }
 }
 function collect() {
@@ -241,13 +272,21 @@ el('operation').onsubmit = async event => {
     return;
   }
   try {
+    if(name==='accounts.reset'){
+      if(!el('new_password'))return;
+      const value=el('new_password').value;
+      if([...value].length<8 || [...value].length>128)throw Error('请输入 8 至 128 个字符的新密码。');
+      if(value!==el('confirm-password').value)throw Error('两次输入的新密码不一致。');
+    }
     const {body,query} = collect();
     if (!op.readOnly && !window.confirm('确认执行「' + displayName(name) + '」？')) return;
     busy = true; el('execute').disabled = true; message('');
     const path = '/admin/v1/operations/' + name + (op.readOnly && query ? '?' + query : '');
     const result = await request(path, op.readOnly ? 'GET' : 'POST', op.readOnly ? undefined : body);
     if (name==='capacity.set' && epoch===session)await overview.refresh();
-    if (epoch === session && selected === name) {el('output').hidden = false; el('result').textContent = JSON.stringify(result,null,2);}
+    if (epoch === session && selected === name) {el('output').hidden = false; if(name==='accounts.find')accountResults(result);
+      else if(name==='accounts.reset'){select('accounts.find',true);message('密码已重置，玩家需使用新密码登录。');}
+      else el('result').textContent = JSON.stringify(result,null,2);}
   } catch(error) { if (epoch === session) message(error.message); }
   finally { if (epoch === session) {busy = false; el('execute').disabled = operations[selected].availability === 'stopped' || (forms.has(selected) && !editor?.dirty);} }
 };

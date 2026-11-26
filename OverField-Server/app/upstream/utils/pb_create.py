@@ -268,7 +268,7 @@ def make_item(item_id, num=1, player_id=0, item_detail=None, is_all=False, *, eq
                                 weapon.critical_ratio = 1
                                 weapon.level = 1
                                 weapon.star = 1
-                                weapon.durability = 100
+                                weapon.durability = weapon_i["durability"] if weapon_i.get("new_weapon_type")==18 else 100
                                 weapon.property_index = 1
                             if is_all:
                                 r.append(item_detail)
@@ -729,7 +729,7 @@ def make_SceneDataNotice(session):
     return rsp
 
 
-def make_PlayerBriefInfo(player_id, info=None, *, online=None):
+def make_PlayerBriefInfo(player_id, info=None, *, online=None, viewer_id=None):
     if info is None:
         info = PlayerBriefInfo()
     info.is_online = (scene_data.online_session(player_id) is not None) if online is None else online
@@ -759,7 +759,7 @@ def make_PlayerBriefInfo(player_id, info=None, *, online=None):
     from private_appearance import phone_case
     info.phone_case=phone_case(player_id)
     from proto import net_pb2 as pb
-    if info.hide_value & pb.HideType_SIGN_Type:
+    if player_id != viewer_id and info.hide_value & pb.HideType_SIGN_Type:
         info.ClearField("sign")
     if info.hide_value & pb.HideType_Account_Type:
         info.ClearField("account_type")

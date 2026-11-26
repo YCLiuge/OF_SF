@@ -187,19 +187,20 @@ def validate(data):
     if "fishing_rods" in data:
         rods={}
         wear={}
-        for entry in rows(data["fishing_rods"],ARRAY_LIMITS["heroes"]):
+        for entry in rows(data["fishing_rods"],ARRAY_LIMITS["heroes"]+ARRAY_LIMITS["gear"]):
             actor,source_index,remaining=numbers(entry,3)
             index=gear_index.get(source_index)
-            if actor not in actors or not index:continue
+            if (actor and actor not in actors) or not index:continue
             kind,template,*_=out["gear"][index-1]
             cfg=_table("Weapon","weapon").get(template,{})
             if kind!=1 or cfg.get("new_weapon_type")!=18 or cfg.get("new_weapon_system_type")!=6:continue
             remaining=min(remaining,cfg["durability"])
-            if actor in rods or (index in wear and wear[index]!=remaining):
+            if (actor and actor in rods) or (index in wear and wear[index]!=remaining):
                 raise ValueError("conflicting fishing rod equipment")
-            rods[actor]=index
+            if actor:rods[actor]=index
             wear[index]=remaining
         out["fishing_rods"]=[[actor,index,wear[index]] for actor,index in sorted(rods.items())]
+        out["fishing_rods"].extend([0,index,wear[index]] for index in sorted(wear.keys()-set(rods.values())))
     team=numbers(data.get("team",[0,0,0]),3)
     members=[i for i in team if i]
     out["team"]=team if members and team[0] and set(members)<=actors and len(members)==len(set(members)) else []
@@ -242,7 +243,9 @@ def validate(data):
                 selected[kind]=max(count,selected.get(kind,0))
         out["gather_totals"]=[[scene,kind,value] for kind,value in sorted(selected.items())]
     totals={"队长等级":out["player"][0],**{LABELS[k]:len(out[k]) for k in LABELS}}
-    if out.get("fishing_rods"):totals["探索员鱼竿"]=len(out["fishing_rods"])
+    if out.get("fishing_rods"):
+        totals["探索员鱼竿"]=sum(bool(actor) for actor,_,_ in out["fishing_rods"])
+        totals["鱼竿耐久"]=len({index for _,index,_ in out["fishing_rods"]})
     if out.get("fishing_level_floor"):totals["钓获记录证实的最低钓鱼等级"]=out["fishing_level_floor"]
     for kind,key,label in (("persistent","additional_quests","支线、委托及番外等一次性任务"),("history",HISTORY,"未激活的历史任务")):
         values=[record for ident,(category,record) in supplementary.items() if category==kind and ident not in ambiguous]
@@ -353,6 +356,7 @@ def restore(pid,plan):
         detail.main_item.weapon.durability=remaining
         db.set_item_detail(pid,detail.SerializeToString(),instance_id=instance)
     for actor,index,_ in rods:
+        if not actor:continue
         char=pb.Character.FromString(db.get_characters(pid,actor)[0])
         char.character_appearance.fishing_rod_instance_id=instances[index-1]
         db.set_character(pid,actor,char.SerializeToString())

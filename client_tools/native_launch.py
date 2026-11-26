@@ -291,7 +291,7 @@ def main():
     parser.add_argument('--remote-pair-first',action='store_true')
     args=parser.parse_args()
     remote=remote_settings(args)
-    home=args.home.resolve();url=validate_endpoint(args.endpoint);src=args.source.resolve()
+    home=args.home.resolve();url=validate_endpoint(args.endpoint);src=args.source.absolute()
     if args.local_server and not loopback(urlsplit(url).hostname):raise ValueError('远程区服请取消“在本机运行区服”。')
     if not loopback(urlsplit(url).hostname):
         raise ValueError('异地的玩法服务需通过已配置的本机身份网关接入；请填写其回环派发地址。')

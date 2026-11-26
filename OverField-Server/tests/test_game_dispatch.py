@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
 
-from game_dispatch import Assets, BUILD, PATCH, NOVEMBER_PATCH, PATCH_BUNDLES, MANIFEST_SHA, VERSION, PREFIX, GameDispatch
+from game_dispatch import Assets, BUILD, PATCH, NOVEMBER_PATCH, EVENING_PATCH, PATCH_BUNDLES, MANIFEST_SHA, VERSION, PREFIX, GameDispatch
 
 
 @contextmanager
@@ -114,8 +114,9 @@ class PublicDiscovery(unittest.TestCase):
             (stock / (name + ".sha256")).write_text(hashlib.sha256(blob).hexdigest())
             self.assertTrue(_issued_manifest(version, root, stock))
             self.assertEqual(_stock_patch(version,root,stock,True),PATCH)
-            (stock/(name+".base")).write_text(NOVEMBER_PATCH)
-            self.assertEqual(_stock_patch(version,root,stock,True),NOVEMBER_PATCH)
+            for patch in (NOVEMBER_PATCH,EVENING_PATCH):
+                (stock/(name+".base")).write_text(patch)
+                self.assertEqual(_stock_patch(version,root,stock,True),patch)
             (stock/(name+".base")).write_text("unpublished-version")
             with self.assertRaises(ValueError):_stock_patch(version,root,stock,True)
             with self.assertRaises(ValueError):_stock_patch(version,root,stock,False)
@@ -166,7 +167,7 @@ class MountedClient(unittest.TestCase):
                 row={key:(raw[a:b].decode() if b else a) for key,a,b in _fields(raw,left,right)}
                 rows[row[1]]=row[2]
         for key,theme in themes().items():
-            native_key=NOVEMBER_THEME_ROWS.get(key,key) if original.patch==NOVEMBER_PATCH else key
+            native_key=NOVEMBER_THEME_ROWS.get(key,key) if original.patch in (NOVEMBER_PATCH,EVENING_PATCH) else key
             self.assertEqual(rows[native_key],theme["asset_path"])
         with TemporaryDirectory() as dir_:
             s=copy(original)

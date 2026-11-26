@@ -85,7 +85,7 @@ class PlayerCaptcha:
     def issue(self,body,source,*,shared=False):
         user=username(body)
         purpose=body.get("purpose")
-        if set(body)!={"purpose","username"} or purpose not in ("lookup","register","login"):
+        if set(body)!={"purpose","username"} or purpose not in ("lookup","register","login","change-password"):
             raise AccountError(400,"invalid_request")
         with self.lock:
             now=monotonic()

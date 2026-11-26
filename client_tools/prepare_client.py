@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import tempfile
 from uuid import uuid4
 
@@ -25,18 +26,127 @@ def sha(path):
     with path.open("rb") as f:
         return hashlib.file_digest(f,"sha256").hexdigest()
 
+MANIFESTS = {
+    PATCH: "8c467ba267e06ffa4cd6e3dcb2326a6afc403c7f5e1c2dc18bcc1e83410204d9",
+    NOVEMBER_UPDATE: NOVEMBER_MANIFEST_SHA256,
+    "2026-11-25-19-54-41": "c5c6219f13c7cbac864e4cb04929979997fbe22e0d137ce5023edc89f52668c5",
+}
+MANIFEST_DIR = Path("launcher_Data/yoo/DefaultPackage/ManifestFiles")
+STEAM_APP_ID = 3879660
+
+
+def plain_path(path):
+    """Reject reparse points before reading a child; Path.resolve() would hide the link."""
+    path = Path(path).absolute()
+    if ".." in path.parts:
+        raise ValueError("请选择不含上级跳转的实体安装目录。")
+    for component in (*reversed(path.parents), path):
+        try:
+            info = component.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            break
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise ValueError("安装路径包含链接或挂载点，请直接选择游戏的实体目录。")
+    return path
+
+
+def short_text(file, limit=128):
+    file=plain_path(file)
+    if not file.is_file() or file.stat().st_size>limit:
+        return ""
+    return file.read_bytes().decode("utf-8-sig",errors="replace").strip()
+
+
 def supported_manifest(source):
-    folder = source / "launcher_Data/yoo/DefaultPackage/ManifestFiles"
-    label = folder / "PackageManifest_DefaultPackage.version"
-    if not label.is_file():
+    folder = source / MANIFEST_DIR
+    version = short_text(folder / "PackageManifest_DefaultPackage.version")
+    expected = MANIFESTS.get(version)
+    if expected is None:
         return False
-    version = label.read_text(encoding="utf-8-sig").strip()
-    if version == PATCH:
-        return True
-    if version != NOVEMBER_UPDATE:
-        return False
-    manifest = folder / ("PackageManifest_DefaultPackage_" + version + ".bytes")
-    return manifest.is_file() and sha(manifest) == NOVEMBER_MANIFEST_SHA256
+    manifest = plain_path(folder / ("PackageManifest_DefaultPackage_" + version + ".bytes"))
+    return manifest.is_file() and sha(manifest) == expected
+
+
+def verify_retail(source, *, settings=True):
+    version=short_text(source/"version")
+    if version!=BUILD:
+        value=version if re.fullmatch(r"[0-9.-]{1,40}",version) else "未知"
+        raise ValueError(f"此客户端的构建 {value} 尚未验证。请使用兼容的国服 PC 1.1.12。")
+    if not supported_manifest(source):
+        raise ValueError("客户端的活动资源清单未通过验证。请在原渠道完成国服 1.1.12 更新。")
+    files=[("launcher.exe",LAUNCHER),("GameAssembly.dll",ASSEMBLY)]
+    if settings:
+        files.append(("launcher_Data/data.unity3d",KNOWN_SOURCE))
+    for name,expected in files:
+        file=plain_path(source/name)
+        if not file.is_file() or sha(file)!=expected:
+            raise ValueError(f"{name} 的国服 PC 1.1.12 指纹不匹配，当前渠道版本尚未验证。")
+
+
+def library_candidates(root, errors):
+    yield root
+    yield root/"PC Games"/"176228"
+    if root.name.casefold()=="pc games":
+        yield root/"176228"
+
+    games=root/"Data/download/games"
+    if root.name.casefold()=="data":games=root/"download/games"
+    elif root.name.casefold()=="download":games=root/"games"
+    elif root.name.casefold()=="games":games=root
+    elif root.name.isascii() and root.name.isdecimal():yield root/"install"
+    try:
+        if plain_path(games).is_dir():
+            # Only immediate numeric install slots from this library.
+            for item in games.iterdir():
+                if item.name.isascii() and item.name.isdecimal():
+                    yield item/"install"
+    except (ValueError,OSError) as error:
+        errors.append(str(error))
+
+    cache=root if root.name.casefold()=="steamapps" else root/"steamapps"
+    common=root if root.name.casefold()=="common" else cache/"common"
+    yield common/"OverField"
+    try:
+        acf=plain_path(cache/f"appmanifest_{STEAM_APP_ID}.acf")
+        if acf.is_file() and acf.stat().st_size<=65536:
+            value=acf.read_bytes().decode("utf-8-sig",errors="replace")
+            if re.search(r'(?im)^\s*"appid"\s+"3879660"\s*$',value):
+                match=re.search(r'(?im)^\s*"installdir"\s+"([^"]+)"\s*$',value)
+                if match and re.fullmatch(r'[^<>:"/\\|?*\x00-\x1f]{1,120}',match[1]) and not match[1].endswith((".", " ")):
+                    yield common/match[1]
+    except (ValueError,OSError) as error:
+        errors.append(str(error))
+
+
+def installed_source(selected, *, required=True):
+    root=plain_path(selected)
+    matched=[]
+    seen=set()
+    errors=[]
+    if root.is_dir():
+        for candidate in library_candidates(root,errors):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                exe=plain_path(candidate/"launcher.exe")
+                if not exe.is_file() or not plain_path(candidate/"launcher_Data").is_dir():
+                    continue
+                verify_retail(candidate)
+                matched.append(candidate)
+                if candidate==root:
+                    return root.resolve(strict=True)
+            except (ValueError,OSError) as error:
+                errors.append(str(error))
+    if len(matched)>1:
+        raise ValueError("此库有多份通过校验的客户端，请直接选择要使用的游戏安装目录。")
+    if matched:
+        return matched[0].resolve(strict=True)
+    if errors:
+        raise ValueError(errors[0])
+    if required:
+        raise ValueError("没有找到兼容的《开放空间》PC 安装。请选择游戏实体目录、渠道启动器目录或游戏库。")
+    return None
 
 
 def save(path, data):
@@ -59,11 +169,11 @@ def channel_runtime_state(relative):
 def asset_paths(src):
     dd=src/"launcher_Data"
     for item in sorted(RELEASE_ROOTS):
-        yield src/item
+        yield plain_path(src/item)
     for item in sorted(RELEASE_FILES):
-        yield dd/item
+        yield plain_path(dd/item)
     for directory in sorted(RELEASE_DIRS):
-        root=dd/directory
+        root=plain_path(dd/directory)
         if not root.is_dir():
             raise ValueError("游戏目录不完整，缺少 "+directory)
         for parent, dirs, files in os.walk(root,followlinks=False):
@@ -200,11 +310,8 @@ def _from_installed(source, home, endpoint, progress, *, compact_only=False):
             old["freshSdkCache"]=True
             save(meta_path,old)
         return old
-    if (src==dest or not (src/"version").is_file() or
-        (src/"version").read_text(encoding="utf-8-sig").strip()!=BUILD or
-        not supported_manifest(src) or
-        sha(src/"launcher.exe")!=LAUNCHER or sha(src/"GameAssembly.dll")!=ASSEMBLY):
-        raise ValueError("需要 TapTap 国服 PC 1.1.12 的原版程序与已支持的 11 月 7 日或 25 日资源清单。")
+    if src==dest:
+        raise ValueError("请先选择原版安装目录。")
     inputs=list(asset_paths(src))
     if compact_only:
         compact_space(src,home,inputs,original)
@@ -254,6 +361,7 @@ def _from_installed(source, home, endpoint, progress, *, compact_only=False):
             os.replace(tmp,out);copied+=length
         finally:
             tmp.unlink(missing_ok=True)
+    verify_retail(partial,settings=False)
     dd=partial/"launcher_Data"
     # app.info and the Unity PlayerSettings use the same private company for local saves.
     (dd/"app.info").write_bytes("OFPriv\n开放空间".encode("utf8"))
@@ -359,20 +467,28 @@ def _install_media(media,home,endpoint,progress):
 
 def prepare(source,home,endpoint,progress=print,*,compact_only=False):
     from client_media import locate
-    src=Path(source).resolve()
+    src=plain_path(source)
     home=Path(home).resolve()
-    if (home/"Client").exists():
-        # A migrated kit can run entirely from the already imported private copy.
-        use_src=src if (src/"launcher.exe").is_file() and src!=home/"Client" else home/"Client"
-        result=_from_installed(use_src,home,endpoint,progress,compact_only=compact_only)
-    elif (src/"launcher.exe").is_file():
-        result=_from_installed(src,home,endpoint,progress,compact_only=compact_only)
+    dest=home/"Client"
+    retail=installed_source(src,required=False) if src!=dest else None
+    if dest.exists():
+        # A migrated kit can run from its private copy when the original is no longer mounted.
+        if retail is None and src not in (home,dest):
+            config=home/"client-config.json"
+            record=json.loads(config.read_bytes()) if config.is_file() else {}
+            last_source=record.get("source")
+            missing_original=not src.exists() and isinstance(last_source,str) and Path(last_source)==src
+            if not missing_original and locate(src,home)!=src:
+                raise ValueError("所选位置没有经过校验的客户端。请选择原游戏的实体目录或此副本的工作目录。")
+        result=_from_installed(retail or dest,home,endpoint,progress,compact_only=compact_only)
+    elif retail is not None:
+        result=_from_installed(retail,home,endpoint,progress,compact_only=compact_only)
     else:
         if compact_only:
             raise ValueError("轻量玩家补丁需要本机已安装的国服 PC 1.1.12。请选择原游戏目录。")
         media=locate(src,home)
         if media is None:
-            raise ValueError("请选择已安装的 TapTap 客户端，或选择配套原版 ISO / ZIP 安装媒体。")
+            raise ValueError("请选择兼容的游戏安装目录、渠道启动器目录或配套原版 ISO / ZIP 安装媒体。")
         result=_install_media(media,home,endpoint,progress)
     protect_private_channel_log(home)
     return result

@@ -31,6 +31,7 @@ OPERATIONS={"register":"/local/v1/accounts/register","login":"/local/v1/accounts
 
 
 IMPORT_OPS = ("import-preview","import-apply","import-undo")
+OPERATIONS["change-password"] = "/local/v1/accounts/change-password"
 OPERATIONS.update({key:"/local/v1/accounts/"+key for key in IMPORT_OPS})
 IMPORT_TICKET = re.compile(r"ofi_[A-Za-z0-9_-]{43}",re.ASCII)
 PREVIEW_ID = re.compile(r"ofv_[a-f0-9]{32}",re.ASCII)
@@ -309,6 +310,15 @@ def handle(inp):
         if type(doc.get("exists")) is not bool or not isinstance(doc.get("account_proof"),str) or not 1<=len(doc["account_proof"])<=512:
             raise ValueError("私服账号查询结果无效。")
         return {"ok":True,"exists":doc["exists"],"account_proof":doc["account_proof"]}
+    if action=="change-password":
+        if "password_change_v1" not in (server.get("account_features") or []):
+            return {"ok":False,"code":"unsupported_password_change","message":"此区服尚未支持玩家修改密码，请联系管理员。"}
+        form={k:inp[k] for k in ("username","password","new_password","challenge_id","answer") if k in inp}
+        status,doc=request(config,"POST",OPERATIONS[action],form)
+        if status!=200:return refusal(status,doc)
+        if doc.get("changed") is not True or doc.get("reauthenticate") is not True:
+            raise ValueError("区服改密回执格式不正确，请重新登录。")
+        return {"ok":True}
     if action in IMPORT_OPS:
         return import_backup(action,inp,config)
     if action=="gifts":

@@ -280,6 +280,13 @@ def main():
     fishing=commands.add_parser("recover-fishing-level",help="Check a sealed import's retained catch records while the realm is stopped")
     fishing.add_argument("--uid",type=int,required=True)
     fishing.add_argument("--apply",action="store_true")
+    proof=commands.add_parser("fishing-rod-proof",help="Export only the equipment fingerprint and backed-up rod durability")
+    proof.add_argument("--source",type=Path,required=True)
+    proof.add_argument("--out",type=Path,required=True)
+    rods=commands.add_parser("recover-fishing-rods",help="Preview or apply legacy rod durability differences on a stopped realm")
+    rods.add_argument("--proof",type=Path,required=True)
+    rods.add_argument("--before",type=Path,required=True,help="Original realm backup ZIP from before the rods were used")
+    rods.add_argument("--apply",action="store_true")
     args=parser.parse_args()
     state=args.state.resolve()
     if args.command=="postgres-report":
@@ -297,6 +304,16 @@ def main():
     if args.command=="recover-fishing-level":
         from save_import_fishing import recover_offline
         print(json.dumps(recover_offline(state,ROOT/"resources",args.uid,apply=args.apply)))
+        return
+    if args.command=="fishing-rod-proof":
+        from save_import_rod_wear import export_proof
+        proof=export_proof(args.source,ROOT/"resources")
+        with args.out.open("x",encoding="utf-8") as out:json.dump(proof,out,separators=(",",":"))
+        print(json.dumps({"rods":len(proof["rods"])}))
+        return
+    if args.command=="recover-fishing-rods":
+        from save_import_rod_wear import recover_offline
+        print(json.dumps(recover_offline(state,ROOT/"resources",args.proof,args.before,apply=args.apply)))
         return
     if args.command in (None,"start"):return serve(state)
     if args.command=="player-gateway":

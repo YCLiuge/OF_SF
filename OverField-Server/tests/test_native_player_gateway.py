@@ -241,6 +241,14 @@ def run(root,resources,certs):
             status,signed=account_route("login",login_fields)
             assert status==200 and signed["slot"]==created["slot"]
 
+            assert "password_change_v1" in account("GET","/local/v1/region")[1]["account_features"]
+            password_test={"username":"tls-renew","password":"temporary-before-reset"}
+            assert request(http_port,"POST","/local/v1/accounts/register",{**password_test,"nickname":"轮换测试"})[0]==201
+            assert account_route("change-password",{**password_test,"new_password":"temporary-after-reset"})==(200,{"changed":True,"reauthenticate":True})
+            assert account_route("login",password_test)[0]==401
+            assert account_route("login",{**password_test,"password":"temporary-after-reset"})[0]==200
+            assert account("POST","/admin/v1/operations/accounts.reset",{})[0]==404
+
             local=LocalIdentity(front/"identity.sqlite3")
             proxy=RemotePassword(local,channels,http_port,game_port)
             direct=proxy.reserve(created["slot"],created["ticket"])

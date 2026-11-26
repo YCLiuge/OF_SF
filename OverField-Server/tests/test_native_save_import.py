@@ -126,6 +126,9 @@ def run(root,resources):
     fixture["decoded"]["main"]["frames"][0]["decoded"]["characters"][0]["character_appearance"]={"fishing_rod_instance_id":rod_id}
     fixture["decoded"]["pack"]["frames"][0]["decoded"]["items"].append({"main_item":{"item_id":1006005,
         "weapon":{"weapon_id":1006005,"instance_id":rod_id,"level":25,"star":1,"durability":321}}})
+    fixture["decoded"]["rod_inventory"]=record("GetWeaponRsp",{"items":[
+        {"main_item":{"item_id":1006006,"weapon":{"weapon_id":1006006,"instance_id":rod_id+1,"level":16,"star":1,"durability":202}}},
+        {"main_item":{"item_id":1006010,"weapon":{"weapon_id":1006010,"instance_id":rod_id+2,"level":1,"star":1}}}]})
     (folder/"snapshot.json").write_text(json.dumps(fixture),encoding="utf8")
     (folder/"private-server-import.json").write_text("DO-NOT-COPY",encoding="utf8")
     archive=root/"export.zip"
@@ -189,6 +192,9 @@ def run(root,resources):
         assert imported_rod and imported_rod!=rod_id
         weapon=pb.ItemDetail.FromString(db.get_item_detail(pid,instance_id=imported_rod)).main_item.weapon
         assert (weapon.weapon_id,weapon.durability)==(1006005,321)
+        unbound=[pb.ItemDetail.FromString(raw).main_item.weapon for raw in db.get_item_detail(pid,table="items_s")]
+        assert {(w.weapon_id,w.durability) for w in unbound if w.weapon_id in (1006006,1006010)}=={(1006006,202),(1006010,0)}
+        assert info["counts"]["探索员鱼竿"]==1 and info["counts"]["鱼竿耐久"]==3
         selected=hero.outfit_presets[hero.in_use_outfit_preset_index]
         assert (selected.preset_index,selected.pend_top,selected.pend_up_face)==(2,4200744,4011044),selected
         assert selected.pend_down_face==4200045 and selected.clothes_dye_scheme_index==1
@@ -209,6 +215,8 @@ def run(root,resources):
         new=call("login",credentials)[1];auth={"import_ticket":new["import_ticket"]}
         assert call("import-apply",{**auth,**key})[0]==200
         assert call("import-undo",auth)[0]==200 and call("import-undo",auth)[0]==200
+        assert not any(pb.ItemDetail.FromString(raw).main_item.weapon.weapon_id in (1006005,1006006,1006010)
+                       for raw in db.get_item_detail(pid,table="items_s"))
         assert not list(owned_pets(pid)) and not db.get_players_info(pid,"pet_instance_id")[0] and capacity(pid)==100
         assert db.conn.execute("SELECT level FROM players WHERE player_id=?",(pid,)).fetchone()[0]==10
         assert pb.ItemDetail.FromString(db.get_item_detail(pid,5012011)).main_item.base_item.num==4
