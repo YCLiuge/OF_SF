@@ -1,7 +1,7 @@
 """Drive the real owner console DOM; the caller supplies its isolated browser and API."""
 def verify(js, until, get, post):
     def open_form(name):
-        js("document.querySelector('#quick [data-route=\""+name+"\"]').click()")
+        js("document.querySelector('nav [title=\""+name+"\"]').click()")
         until(lambda: js("document.querySelector('#route').textContent==='"+name+"' && !!document.querySelector('#editor-feedback')"))
     def select_item(value):
         js("var l=document.querySelector('.catalog-list');l.value='"+str(value)+"';l.dispatchEvent(new Event('change'))")
@@ -19,6 +19,7 @@ def verify(js, until, get, post):
             until(lambda: js("var f=document.querySelector('#editor-feedback');f && !!f.textContent && !f.textContent.includes('未保存') && !document.querySelector('#execute').disabled"))
     js("window.confirm=()=>true")
     verify_mail(js,until,get)
+    verify_code(js,until,get)
     open_form('events.set')
     select_item(4008);mode('on')
     select_item(3001);mode('on')
@@ -72,22 +73,43 @@ def verify_mail(js,until,get):
     def change(selector,value,event="input"):
         import json
         js(f"var f=document.querySelector({json.dumps(selector)});f.value={json.dumps(value)};f.dispatchEvent(new Event({json.dumps(event)}))")
-    # Send from the actual operator form. Retrying the same draft reuses its durable batch.
-    js("document.querySelector('#quick [data-route=\"mail.send\"]').click()")
+    # Send from the actual operator form. The submitted draft cannot be sent twice.
+    js("document.querySelector('nav [title=\"mail.send\"]').click()")
     change('[name=scope]','existing','change')
     change('[name=title]','隔离浏览器投递')
     change('[name=body]','管理台附件测试')
-    js("document.querySelector('#fields fieldset button').click()")
-    change('[data-item]','101');change('[data-count]','7')
+    change('.reward-filters input','金币')
+    until(lambda:js("!!document.querySelector('[data-item=\"101\"]')"))
+    js("document.querySelector('[data-item=\"101\"]').click()")
+    change('[data-count="101"]','7')
+    change('.reward-filters input','能量饮料')
+    until(lambda:js("document.querySelector('.reward-cards').textContent.includes('能量饮料')"))
+    assert js("JSON.parse(document.querySelector('[name=rewards]').value)[0].quantity===7")
     key=js("document.querySelector('[name=request_id]').value")
     js("document.querySelector('#operation').requestSubmit()")
     until(lambda:js("document.querySelector('#result').textContent.includes('已登记批次')"))
     js("document.querySelector('#operation').requestSubmit()")
-    until(lambda:js("!document.querySelector('#execute').disabled"))
+    assert js("document.querySelector('#execute').disabled")
     rows=[r for r in get('mail.list')['batches'] if r['request_id']==key]
-    assert len(rows)==1 and rows[0]['title']=='隔离浏览器投递'
+    assert len(rows)==1 and rows[0]['title']=='隔离浏览器投递' and rows[0]['rewards']==[{'item':101,'quantity':7}]
     js("document.querySelector('#result button').click()")
     assert js("document.querySelector('[name=request_id]').value")!=key
+    js("""document.querySelector('nav [title="mail.list"]').click();document.querySelector('#operation').requestSubmit()""")
+    until(lambda:js("document.querySelector('.reward-record')?.textContent.includes('金币 × 7')"))
+
+
+def verify_code(js,until,get):
+    js("""document.querySelector('nav [title="codes.issue"]').click();document.querySelector('[name=code]').value='BROWSER8'""")
+    js("document.querySelector('#operation').requestSubmit()")
+    assert js("document.querySelector('#status').textContent.includes('至少一种奖励')")
+    js("var q=document.querySelector('.reward-filters input');q.value='星石';q.dispatchEvent(new Event('input'))")
+    until(lambda:js("""!!document.querySelector('[data-item="102"]')"""))
+    js("""document.querySelector('[data-item="102"]').click();var n=document.querySelector('[data-count="102"]');n.value=9;n.dispatchEvent(new Event('input'));document.querySelector('#operation').requestSubmit()""")
+    until(lambda:js("document.querySelector('#result').textContent.includes('已创建兑换码 BROWSER8')"))
+    assert js("document.querySelector('#execute').disabled")
+    assert next(row for row in get('codes.list')['codes'] if row['code']=='BROWSER8')['rewards']=={'102':9}
+    js("""document.querySelector('nav [title="codes.list"]').click();document.querySelector('#operation').requestSubmit()""")
+    until(lambda:js("document.querySelector('.reward-record')?.textContent.includes('星石 × 9')"))
 
 
 def verify_password_reset(js,until,player):

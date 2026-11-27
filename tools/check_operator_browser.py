@@ -78,10 +78,12 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         verify_password_reset(js,until,lambda name,body:request(profile,"POST","/local/v1/accounts/"+name,data=body))
 
         command('Emulation.setDeviceMetricsOverride',dict(width=390,height=844,deviceScaleFactor=1,mobile=True))
+        js("""document.querySelector('nav [title="codes.issue"]').click()""")
+        until(lambda:js("!!document.querySelector('.reward-card')"))
         assert js("document.documentElement.scrollWidth<=document.documentElement.clientWidth")
         js("document.getElementById('logout').click()")
         assert js("document.getElementById('workspace').hidden && !document.getElementById('connect').hidden && document.getElementById('token').value===''")
-        print('PASS Edge login, multi-activity calendar, gifts, stale updates, plaza, blessing, UP banner and pity, rule staging, live capacity, notice, mobile layout and logout.')
+        print('PASS Edge owner console: Chinese reward selection, mail and code histories, account reset, calendars, gifts, concurrent edits, capacity, notice, mobile layout and logout.')
         command('Browser.close')
     finally:
         if edge is not None and edge.poll() is None:

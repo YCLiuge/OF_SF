@@ -559,6 +559,12 @@
       "bytes": 304,
       "source": "TapTap PC 1.1.12",
       "detail": "Monster.monster_character_data.pet_i_d joined to Pet.pet.decision_capture; monster template to capturable pet item"
+    },
+    "resources/operator/item-names.zh.json": {
+      "sha256": "2c7c56d1e8942d50482bd05fb6f7dc818a58b0939a623a4370611a68f3156502",
+      "bytes": 311438,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Item.text_i_d -> String_Simplified.string_item_text.text[0]; tools/export_reward_names.py"
     }
   }
 }

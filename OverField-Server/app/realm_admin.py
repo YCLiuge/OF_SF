@@ -52,6 +52,9 @@ EVENT = {"type": "object", "additionalProperties": False,
 CODE_REWARD = {"type":"object","properties":{"item":ID,"quantity":{"type":"integer","minimum":1,"maximum":1000000}},
                "required":["item","quantity"],"additionalProperties":False}
 OPERATIONS = {
+    "rewards.catalog": operation("any", "按名称、编号或类别查询可发放的奖励。",
+        {"channel":{"type":"string","enum":["mail","codes"]}, "group":STRING, "query":STRING,
+         "offset":{"type":"integer","minimum":0,"maximum":1000000}}, ("channel",), read_only=True),
     "mail.send": operation("any","发送原生游戏邮件；相同批次号可安全重试。全服范围可选择仅现有账号，或在有效期内包含新玩家。",
         {"request_id":STRING, "scope":{"type":"string","enum":["account","existing","ongoing"]},
          "username":STRING, "sender":STRING, "title":STRING, "body":STRING,
@@ -59,7 +62,7 @@ OPERATIONS = {
          "rewards":{"type":"array","maxItems":16,"items":CODE_REWARD}},
         ("request_id","scope","title","body")),
     "mail.list": operation("any","按时间倒序查看服主投递记录、范围及发送时的接收人数。",
-        {"before":ID,"limit":{"type":"integer","minimum":1,"maximum":100}},read_only=True),
+        {"before":ID,"limit":{"type":"integer","minimum":1,"maximum":100},"include_names":{"type":"boolean"}},read_only=True),
     "accounts.find": operation("any","精确查找本服登录账号、游戏名或公开 UID。",
         {"field":{"type":"string","enum":["username","nickname","uid"]},"value":STRING},("field","value"),read_only=True),
     "accounts.reset": operation("any","为选中的本服账号设置新密码。旧登录票和重连凭据立即失效。",
@@ -70,7 +73,7 @@ OPERATIONS = {
                               {"before":ID,"limit":{"type":"integer","minimum":1,"maximum":100},
                                "resolved":{"type":"boolean"}},read_only=True),
     "reports.resolve": operation("any","将一条举报标记为已处理。",{"id":ID},("id",)),
-    "codes.list": operation("any", "列出本服发行的兑换码、数量和有效期。", read_only=True),
+    "codes.list": operation("any", "列出本服发行的兑换码、数量和有效期。", {"include_names":{"type":"boolean"}}, read_only=True),
     "codes.issue": operation("any", "发行区服奖励码。kind 选 redemption（普通）或 inherit（继承奖励）。quota 为总名额，0 代表不限，每个角色可领一次。",
                              {"code":STRING,"kind":{"type":"string","enum":["redemption","inherit"]},"quota":{"type":"integer","minimum":0,"maximum":10000000},
                               "expires_at":EVENT_TIME,"rewards":{"type":"array","maxItems":16,"items":CODE_REWARD}},
@@ -247,9 +250,18 @@ def validate(value, schema, name="input"):
 
 
 def run(state, name, data, request_stop, expected=None, live_capacity=None):
+    if name == "rewards.catalog":
+        from realm_reward_catalog import search
+        return search(data)
     if name in ("mail.send","mail.list"):
         import realm_mail
-        return realm_mail.send(state,data) if name == "mail.send" else realm_mail.recent(state,data)
+        if name == "mail.send":
+            return realm_mail.send(state,data)
+        result = realm_mail.recent(state,data)
+        if data.get("include_names"):
+            from realm_reward_catalog import label_history
+            return label_history(result, (reward["item"] for batch in result["batches"] for reward in batch["rewards"]))
+        return result
     if name in ("accounts.find","accounts.reset"):
         import realm_account_admin
         if name=="accounts.find":return realm_account_admin.find(state,data["field"],data["value"])
@@ -266,7 +278,11 @@ def run(state, name, data, request_stop, expected=None, live_capacity=None):
             return manage(root,name,data)
     if name in ("codes.list", "codes.issue", "codes.withdraw"):
         from realm_codes import manage
-        return manage(state,name,data)
+        result = manage(state,name,data)
+        if name == "codes.list" and data.get("include_names"):
+            from realm_reward_catalog import label_history
+            return label_history(result, (key for code in result["codes"] for key in code["rewards"]))
+        return result
     if name in ("photos.list", "photos.withdraw"):
         from photo_media import moderate
         if not (state/"game.sqlite").is_file() and name=="photos.list":

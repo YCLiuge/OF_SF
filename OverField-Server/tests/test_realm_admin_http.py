@@ -81,6 +81,7 @@ def run(root):
             spec_path = api.PREFIX + "/openapi.json"
             for bad_token in (None, "wrong-token"):
                 assert request(owner, "GET", spec_path, bad_token)[0] == 401
+                assert request(owner, "GET", api.OPERATIONS + "rewards.catalog?channel=mail", bad_token)[0] == 401
                 assert request(owner, "POST", api.OPERATIONS + "mail.send", bad_token, {})[0] == 401
                 assert request(owner, "POST", api.OPERATIONS + "notice.publish", bad_token,
                                {"title": "Denied", "body": "test"})[0] == 401
@@ -95,6 +96,14 @@ def run(root):
             assert status == 200
             status, document = request(owner, "GET", spec_path, token)
             assert status == 200 and document["openapi"] == "3.1.0"
+            for channel in ("mail", "codes"):
+                catalog = "rewards.catalog?channel=" + channel
+                first = call("GET", catalog)[1]["result"]
+                second = call("GET", catalog + "&offset=24")[1]["result"]
+                assert len(first["items"]) == len(second["items"]) == 24
+                assert not {row["id"] for row in first["items"]}.intersection(row["id"] for row in second["items"])
+                coin = call("GET", catalog + "&query=101")[1]["result"]["items"]
+                assert len(coin) == 1 and coin[0]["name"] == "金币" and coin[0]["maximum"] == 1000000
             assert document["security"] == [{"ownerToken": []}]
             for name, spec in schema["result"]["operations"].items():
                 route = document["paths"][api.OPERATIONS + name]

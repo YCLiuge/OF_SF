@@ -1,6 +1,15 @@
 import {editorFor} from './editors.js';
 import {composeMail} from './mail_editor.js';
-let mailForm=null;
+import {rewardPicker} from './reward_picker.js';
+let mailForm=null, picker=null, draftDirty=false, delivered=false;
+const categories = {
+  '运行与维护':['realm','capacity','rules','state'],
+  '玩家与社区':['accounts','reports','photos'],
+  '邮件与奖励':['mail','codes','rewards'],
+  '活动与舞台':['events','plaza'],
+  '招募与祈愿':['gacha','blessings'],
+  '公告与版本':['maintenance','notice','release']
+};
 const el = id => document.getElementById(id);
 const groups = {
   mail:'游戏邮件',accounts:'玩家账号',capacity:'连接容量', realm:'区服', maintenance:'运营概览', notice:'公告', release:'版本', events:'活动', plaza:'海上舞台',
@@ -11,7 +20,7 @@ const actions = {list:'列表', get:'查看配置', set:'修改配置', catalog:
 const labels = {username:'登录账号',account_ref:'账号标识',password_version:'密码版本',new_password:'新密码',field:'查询条件',value:'查询内容',id:'编号',file:'服务器上的文件路径',archive:'服务器上的备份路径',title:'标题',body:'正文',images:'服务器上的图片路径',
   version:'版本号',notes:'更新说明',sha256:'SHA-256',limit:'每页条数',before:'上一页最后一项编号',enabled:'启用',
   code:'兑换码或分享码',quota:'总名额',kind:'类型',rewards:'奖励',expires_at:'到期时间',trees:'祈愿树排期',pools:'卡池配置',
-  resolved:'已处理',events:'活动配置',stages:'舞台配置'};
+  resolved:'已处理',events:'活动配置',stages:'舞台配置',channel:'发放方式',group:'物品分类',query:'名称或编号',offset:'跳过条数'};
 const lifecycle = {running:'运行中',stopping:'正在停服',stopped:'已停服',busy:'维护中',uninitialized:'尚未初始化',stale:'上次退出异常'};
 let token = '', operations = {}, selected = '', session = 0, busy = false;
 const forms = new Set(['events.set','plaza.set','blessings.set','gacha.set','rules.schedule']);
@@ -23,7 +32,7 @@ function node(tag, text) {
   return item;
 }
 function displayName(name) {
-  const names={'mail.send':'投递游戏邮件','mail.list':'查看投递记录','accounts.find':'查询玩家账号','accounts.reset':'重置玩家密码','events.set':'活动排期','plaza.set':'舞台与活动入口','blessings.set':'祈愿树排期','gacha.set':'招募池与概率','rules.schedule':'预设玩法参数','capacity.set':'调整连接上限'};
+  const names={'rewards.catalog':'查询奖励目录','codes.list':'查看兑换码','codes.issue':'创建兑换码','codes.withdraw':'停用兑换码','maintenance.list':'查看已发布内容','mail.send':'投递游戏邮件','mail.list':'查看投递记录','accounts.find':'查询玩家账号','accounts.reset':'重置玩家密码','events.set':'活动排期','plaza.set':'舞台与活动入口','blessings.set':'祈愿树排期','gacha.set':'招募池与概率','rules.schedule':'预设玩法参数','capacity.set':'调整连接上限'};
   if(names[name])return names[name];
   const [group, action] = name.split('.');
   return (groups[group] || group) + ' · ' + (actions[action] || action);
@@ -88,19 +97,20 @@ function navigation() {
   const term = el('filter').value.trim().toLowerCase(), nav = el('operations');
   const expanded = new Set(Array.from(nav.querySelectorAll('details[open]'), group => group.dataset.key));
   const sections = new Map();
+  const categoryOf = name=>Object.keys(categories).find(key=>categories[key].includes(name.split('.')[0])) || '其他操作';
   for (const name of Object.keys(operations).sort()) {
-    if (!(name + displayName(name) + operations[name].description).toLowerCase().includes(term)) continue;
-    const key = name.split('.')[0]; let group = sections.get(key);
+    if (!(name + displayName(name) + categoryOf(name) + operations[name].description).toLowerCase().includes(term)) continue;
+    const key = categoryOf(name); let group = sections.get(key);
     if (!group) {
       group = node('details'); group.dataset.key = key;
-      group.open = !!term || key === selected.split('.')[0] || expanded.has(key);
+      group.open = !!term || key === categoryOf(selected) || expanded.has(key);
       group.append(node('summary', groups[key] || key)); sections.set(key, group);
     }
     const btn = node('button',displayName(name)); btn.type = 'button'; btn.title = name;
     btn.setAttribute('aria-current',String(name === selected));
     btn.onclick = () => select(name); group.append(btn);
   }
-  nav.replaceChildren(...sections.values());
+  nav.replaceChildren(...[...Object.keys(categories),'其他操作'].filter(key=>sections.has(key)).map(key=>sections.get(key)));
   if (!sections.size) nav.append(node('p','未找到匹配操作'));
 }
 function field(key, spec, required) {
@@ -110,7 +120,7 @@ function field(key, spec, required) {
   let input;
   if (spec.enum || type === 'boolean') {
     input = node('select'); input.add(new Option('请选择',''));
-    for (const value of spec.enum || [true,false]) input.add(new Option(value === true ? '是' : value === false ? '否' : ({username:'登录账号',nickname:'游戏名',uid:'公开 UID'})[value] || String(value),String(value)));
+    for (const value of spec.enum || [true,false]) input.add(new Option(value === true ? '是' : value === false ? '否' : ({username:'登录账号',nickname:'游戏名',uid:'公开 UID'})[value] || ({mail:'游戏邮件',codes:'兑换码',redemption:'普通兑换码',inherit:'继承奖励码'})[value] || String(value),String(value)));
   } else if (lines || ['object','array'].includes(type) || ['body','notes'].includes(key)) {
     input = node('textarea'); input.rows = lines ? 3 : 5;
     if (lines) input.placeholder = '每行一个文件路径，最多 ' + spec.maxItems + ' 张';
@@ -129,15 +139,18 @@ function field(key, spec, required) {
   return wrap;
 }
 function select(name,force=false) {
-  if (!force && editor?.dirty && !window.confirm('离开将放弃未保存的修改。继续？')) return;
-  const version=++selectionVersion; editor=null;
-  selected = name;
+  if (!force && (editor?.dirty || draftDirty) && !window.confirm('离开将放弃未保存的修改。继续？')) return;
+  if (busy && !force) return;
+  const version=++selectionVersion; editor=null; draftDirty=false; delivered=false; picker=null;
+  document.querySelector('article').hidden=false;
+  el('shortcuts').hidden=true;
+  selected = name;el('fields').inert=false;
   for(const b of el('quick').children)b.setAttribute('aria-current',String(b.dataset.route===name));
   const op = operations[name], schema = op.inputSchema;
   el('title').textContent = displayName(name); el('route').textContent = name;
   el('description').textContent = op.availability === 'stopped' ? '请在正常停服后通过服主 CLI 执行此操作。' : (/[\u3400-\u9fff]/.test(op.description) ? op.description : '');
   el('mode').textContent = op.readOnly ? '只读' : op.availability === 'stopped' ? '停服操作' : '更改区服';
-  el('fields').replaceChildren(...Object.entries(schema.properties || {}).map(([key,spec]) => field(key,spec,schema.required?.includes(key) || false)));
+  el('fields').replaceChildren(...Object.entries(schema.properties || {}).filter(([key])=>key!=='include_names').map(([key,spec]) => field(key,spec,schema.required?.includes(key) || false)));
   el('schema').textContent = (op.readOnly ? 'GET ' : 'POST ') + '/admin/v1/operations/' + name + '\n\n' + JSON.stringify(schema,null,2);
   el('output').hidden = true; el('result').textContent = '';
   el('execute').textContent = op.readOnly ? '查询' : op.availability === 'stopped' ? '请通过 CLI 执行' : displayName(name);
@@ -148,7 +161,19 @@ function select(name,force=false) {
     el('execute').hidden=true;
   } else el('execute').hidden=false;
   if(name==='accounts.find')el('field-field').value='username';
-  mailForm=name==='mail.send'?composeMail(el('fields')):null;
+  mailForm=null;
+  if(name==='mail.send' || name==='codes.issue'){
+    picker=rewardPicker(name==='mail.send'?'mail':'codes', params=>request('/admin/v1/operations/rewards.catalog?'+params));
+    if(name==='mail.send') mailForm=composeMail(el('fields'),picker);
+    else {
+      el('field-rewards').parentElement.replaceWith(picker.host);
+      el('field-kind').value='redemption';
+      const quota=el('field-quota'); quota.type='number'; quota.min='0'; quota.max='10000000'; quota.value='0';
+      quota.labels[0].textContent='可领取人数（0 表示不限）';
+      const expires=el('field-expires_at'); expires.type='datetime-local';expires.step='1';
+      expires.labels[0].textContent='到期时间（北京时间，可留空）';
+    }
+  }
   if (forms.has(name)) openEditor(name,version);
   if (name==='capacity.set') {
     const limit=el('field-limit'); limit.type='number'; limit.min='1'; limit.max='512';limit.step='1';
@@ -203,8 +228,29 @@ function accountResults(result){
     select.onclick=()=>chooseAccount(row);host.append(select,document.createTextNode('\n'));
   }
 }
+function rewardHistory(name, result) {
+  const host=el('result'), mail=name==='mail.list';
+  const rows=mail ? result.batches : result.codes;
+  host.replaceChildren();
+  if (!rows.length) {host.textContent=mail?'还没有投递记录。':'还没有发行兑换码。';return;}
+  const scopes={existing:'发送时已有的玩家',ongoing:'含有效期内加入的新玩家'};
+  for (const row of rows) {
+    const entry=node('section');entry.className='reward-record';
+    entry.append(node('h3',mail?row.title:row.code));
+    const info=mail ? (scopes[row.scope]||row.username)+' · 发送时 '+row.recipients_at_issue+' 人 · 批次 '+row.id
+        : (row.enabled?'已启用':'已停用')+' · '+(row.quota?'限 '+row.quota+' 人':'不限名额')+(row.expires_at?' · 至 '+row.expires_at:'');
+    entry.append(node('small',info));
+    const rewards=mail ? row.rewards : Object.entries(row.rewards).map(([item,quantity])=>({item,quantity}));
+    entry.append(node('p',rewards.map(({item,quantity})=>(result.item_names[item]||('物品 '+item))+' × '+quantity).join('、') || '无附件'));
+    if (mail) {
+      const detail=node('details');detail.append(node('summary','查看正文'),node('p',row.body));entry.append(detail);
+    }
+    host.append(entry);
+  }
+}
 function collect() {
   const encoded = [], query = new URLSearchParams();
+  if (selected==='mail.list' || selected==='codes.list') query.set('include_names','true');
   for (const input of el('fields').querySelectorAll('[name]')) {
     const {name,value} = input, type = input.dataset.type;
     const clear = name === 'images' && el('clear-images')?.checked;
@@ -212,6 +258,7 @@ function collect() {
     let json;
     if (clear) json = '[]';
     else if (type === 'lines') json = JSON.stringify(value.split(/\r?\n/).map(v => v.trim()).filter(Boolean));
+    else if (name==='expires_at' && input.type==='datetime-local') json=JSON.stringify(value.replace('T',' ')+(value.length===16?':00':''));
     else if (type === 'string') json = JSON.stringify(value);
     else {
       try { JSON.parse(value); } catch { throw Error((labels[name] || name) + '的输入格式有误'); }
@@ -222,6 +269,16 @@ function collect() {
   }
   return {body:'{' + encoded.join(',') + '}',query:query.toString()};
 }
+el('fields').addEventListener('input', event=>{
+  if(picker && (event.target.name || event.target===picker.host))draftDirty=true;
+});
+function home(){
+  if(busy || ((editor?.dirty || draftDirty) && !window.confirm('离开将放弃未保存的修改。继续？'))) return;
+  selected='';editor=null;picker=null;mailForm=null;draftDirty=false;delivered=false;++selectionVersion;
+  document.querySelector('article').hidden=true;el('fields').replaceChildren();
+  el('shortcuts').hidden=false;navigation();message('');
+}
+el('home').onclick=home;
 el('login').onsubmit = async event => {
   event.preventDefault(); const epoch = ++session; token = el('token').value; message('');
   try {
@@ -230,16 +287,16 @@ el('login').onsubmit = async event => {
     operations = spec.operations; el('token').value = ''; el('connect').hidden = true;
     el('workspace').hidden = false; el('logout').hidden = false;
     const quick=el('quick');quick.replaceChildren();
-    for (const key of [...forms,'mail.send']) {
+    for (const key of ['mail.send','codes.issue','events.set','accounts.find','notice.publish','capacity.set']) {
       if (!operations[key])continue;
       const btn=node('button',displayName(key));btn.type='button';btn.dataset.route=key;
       btn.onclick=()=>select(key);quick.append(btn);
     }
-    select(operations['events.set']?'events.set':Object.keys(operations)[0]); overview.refresh();
+    home(); overview.refresh();
   } catch(error) { if (epoch === session) {token = ''; message(error.message);} }
 };
 el('logout').onclick = () => {
-  ++session; ++selectionVersion; editor=null; token = ''; operations = {}; selected = ''; busy = false;
+  ++session; ++selectionVersion; editor=null; picker=mailForm=null;draftDirty=delivered=false; token = ''; operations = {}; selected = ''; busy = false;
   el('filter').value = ''; el('token').value = '';
   for (const id of ['schema','result','fields','operations']) el(id).replaceChildren();
   overview.reset(); el('workspace').hidden = true; el('logout').hidden = true;
@@ -248,7 +305,7 @@ el('logout').onclick = () => {
 el('filter').oninput = navigation;
 el('operation').onsubmit = async event => {
   event.preventDefault(); const name = selected, epoch = session, op = operations[name];
-  if (busy || !op || op.availability === 'stopped') return;
+  if (delivered || busy || !op || op.availability === 'stopped') return;
   const version=selectionVersion;
   if(forms.has(name)) {
     const target=editor;
@@ -282,20 +339,26 @@ el('operation').onsubmit = async event => {
       if(value!==el('confirm-password').value)throw Error('两次输入的新密码不一致。');
     }
     const {body,query} = collect();
-    const prompt=name==='mail.send' ? '向'+(mailForm.scope.value==='account'?mailForm.user.value:mailForm.scope.selectedOptions[0].textContent)+'发送「'+mailForm.title.value+'」？' : '确认执行「'+displayName(name)+'」？';
-    if (!op.readOnly && !window.confirm(prompt)) return;
+    if(name==='codes.issue' && !JSON.parse(body).rewards?.length)throw Error('请选择至少一种奖励。');
+    let prompt='确认执行「'+displayName(name)+'」？';
+    if(name==='mail.send') prompt='向'+(mailForm.scope.value==='account'?mailForm.user.value:mailForm.scope.selectedOptions[0].textContent)+'发送「'+mailForm.title.value+'」？';
+    if(name==='codes.issue') prompt='创建兑换码 '+el('field-code').value+'，'+(Number(el('field-quota').value)?'限 '+el('field-quota').value+' 人':'不限名额')+'？';
+    const details=picker?.summary();
+    if (!op.readOnly && !window.confirm([prompt,details].filter(Boolean).join('\n'))) return;
     busy = true; el('execute').disabled = true; message('');
     const path = '/admin/v1/operations/' + name + (op.readOnly && query ? '?' + query : '');
     const result = await request(path, op.readOnly ? 'GET' : 'POST', op.readOnly ? undefined : body);
     if (name==='capacity.set' && epoch===session)await overview.refresh();
-    if (epoch === session && selected === name) {el('output').hidden = false; if(name==='accounts.find')accountResults(result);
-      else if(name==='mail.send'){
-        el('result').textContent='已登记批次 '+result.id+'，发送时范围内共有 '+result.recipients_at_issue+' 名玩家。';
-        const fresh=node('button','另写一封');fresh.type='button';fresh.className='quiet light';fresh.onclick=()=>select('mail.send',true);
+    if (epoch === session && version===selectionVersion) {el('output').hidden = false; if(name==='accounts.find')accountResults(result);
+      else if(name==='mail.send'||name==='codes.issue'){
+        delivered=true;draftDirty=false;el('fields').inert=true;
+        el('result').textContent=name==='codes.issue'?'已创建兑换码 '+result.code:'已登记批次 '+result.id+'，发送时范围内共有 '+result.recipients_at_issue+' 名玩家。';
+        const fresh=node('button',name==='mail.send'?'另写一封':'再创建一个');fresh.type='button';fresh.className='quiet light';fresh.onclick=()=>select(name,true);
         el('result').append(document.createTextNode('\n'),fresh);
       }
+      else if(name==='mail.list'||name==='codes.list') rewardHistory(name,result);
       else if(name==='accounts.reset'){select('accounts.find',true);message('密码已重置，玩家需使用新密码登录。');}
       else el('result').textContent = JSON.stringify(result,null,2);}
   } catch(error) { if (epoch === session) message(error.message); }
-  finally { if (epoch === session) {busy = false; el('execute').disabled = operations[selected].availability === 'stopped' || (forms.has(selected) && !editor?.dirty);} }
+  finally { if (epoch === session) {busy = false; el('execute').disabled = delivered || operations[selected]?.availability === 'stopped' || (forms.has(selected) && !editor?.dirty);} }
 };

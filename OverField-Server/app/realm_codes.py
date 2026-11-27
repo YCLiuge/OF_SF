@@ -37,6 +37,12 @@ def tags():
     return {r["i_d"]:r["new_bag_item_tag"] for r in json.loads(path.read_bytes())["item"]["datas"]}
 
 
+def reward_limit(tag):
+    if tag is None or tag in (1,17,41,47,48,49,50,56):
+        return 0
+    return 20 if tag in (2,3,5,7,53) else 1 if tag == 21 else 1000000
+
+
 def manage(state, name, params):
     if name=="codes.list" and not (state/"identity.sqlite3").is_file():
         return {"codes":[]}
@@ -57,9 +63,9 @@ def manage(state, name, params):
             for item in params["rewards"]:
                 key, num = item["item"],item["quantity"]
                 tag = tags().get(key)
-                if tag is None or tag in (1,17,41,47,48,49,50,56) or key in amounts:
+                if not reward_limit(tag) or key in amounts:
                     raise ValueError("Unknown, repeated or unsupported reward template")
-                if tag in (2,3,5,7,53) and num>20 or tag==21 and num!=1:
+                if not 1 <= num <= reward_limit(tag):
                     raise ValueError("At most 20 separate instances or one outfit per template")
                 amounts[key]=num
             if not amounts:

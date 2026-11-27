@@ -35,6 +35,12 @@ def warehouse_weapons():
                      if row.get("item_i_d") == row["i_d"])
 
 
+def reward_limit(item, tag):
+    if tag is None or tag in {0,7,17,41,47,48,49,50} or (tag == 2 and item not in warehouse_weapons()):
+        return 0
+    return 20 if tag in (2,3,5,53,56) else 1 if tag == 21 else 1000000
+
+
 def letter(data):
     try:
         request = str(UUID(data["request_id"]))
@@ -60,11 +66,9 @@ def letter(data):
     for entry in data.get("rewards", []):
         item, quantity = entry["item"], entry["quantity"]
         tag = tags().get(item)
-        if type(item) is not int or tag is None or tag in {0,7,17,41,47,48,49,50}:
+        limit = reward_limit(item, tag)
+        if type(item) is not int or not limit:
             raise ValueError(f"附件模板 {item} 未提供可领取的物品。")
-        if tag == 2 and item not in warehouse_weapons():
-            raise ValueError(f"模板 {item} 不是可入库的武器。")
-        limit = 20 if tag in (2,3,5,53,56) else 1 if tag == 21 else 1000000
         if type(quantity) is not int or not 1 <= quantity <= limit or item in items:
             raise ValueError(f"模板 {item} 须只填一行，数量范围为 1 至 {limit}。")
         items[item] = quantity

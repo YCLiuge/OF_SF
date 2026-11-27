@@ -93,6 +93,10 @@ def hydrate(repo, bases, client_kit):
         for name, record in records.items():
             if name == SERVER_TEMPLATE or name.startswith("resources/") or any(name.startswith(group + "/") for group in groups):
                 path = local_path(base, name)
+                if name == "resources/operator/item-names.zh.json" and not path.exists():
+                    path = local_path(repo / SERVER, name)
+                    if not path.exists():
+                        raise ValueError("Run tools/export_reward_names.py with String_Simplified.json before hydrating an older base")
                 verify(path, record)
                 inputs[SERVER + "/" + name] = (path, record)
     if client_kit is not None:
