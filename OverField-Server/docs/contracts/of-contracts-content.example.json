@@ -1,0 +1,23 @@
+{
+  "contract_version": "0.1.0",
+  "items": [
+    {
+      "id": "ofsf.fishing",
+      "kind": "guide",
+      "title": "钓鱼入门",
+      "text": "在生活菜单装备鱼竿，到水边选择鱼饵后开始钓鱼。\n可在生活界面查看钓鱼等级。"
+    },
+    {
+      "id": "jianx14.chess",
+      "kind": "minigame",
+      "title": "中国象棋",
+      "entry": "jianx14.chess"
+    },
+    {
+      "id": "jianx14.draw",
+      "kind": "minigame",
+      "title": "你画我猜",
+      "entry": "jianx14.draw"
+    }
+  ]
+}

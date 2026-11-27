@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OF_SF content catalog 0.1.0",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "items"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 128,
+      "description": "IDs must be unique across all entries. The complete encoded catalog is limited to 65,536 bytes.",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/minigame"
+          },
+          {
+            "$ref": "#/$defs/guide"
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+(?![\\s\\S])"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^(?!\\s)(?![\\s\\S]*\\s$)[^\\u0000-\\u001f\\u007f-\\u009f\\uD800-\\uDFFF]+$"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "allOf": [
+        {
+          "pattern": "\\S"
+        },
+        {
+          "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f\\uD800-\\uDFFF]*$"
+        }
+      ]
+    },
+    "minigame": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "entry"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "minigame"
+        },
+        "title": {
+          "$ref": "#/$defs/title"
+        },
+        "entry": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "guide": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "const": "guide"
+        },
+        "title": {
+          "$ref": "#/$defs/title"
+        },
+        "text": {
+          "$ref": "#/$defs/body"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

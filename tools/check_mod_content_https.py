@@ -4,6 +4,7 @@ Use --server for an unpacked OF_SF distribution and --probe for the built
 overfiled-mod tools/OfContractsVerification/Verify.dll. Requires dotnet and OpenSSL.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,9 +32,16 @@ def verify(server, probe, example):
         catalog = root / of_contracts.CONTENT_FILE
         staging = catalog.with_suffix(".new")
 
-        def publish(raw):
-            staging.write_bytes(raw)
-            staging.replace(catalog)
+        def operator(operation, source, succeeds=True):
+            result = subprocess.run(
+                [sys.executable, "-B", str(server / "of.py"), "--state", str(root),
+                 "content", operation, str(source)], capture_output=True, timeout=15)
+            if not succeeds:
+                assert result.returncode != 0, "Invalid catalog was accepted"
+                return
+            if result.returncode:
+                raise AssertionError(result.stderr.decode("utf-8", "replace"))
+            return json.loads(result.stdout)
 
         with serve(LocalIdentity(root / "identity.sqlite3")) as backend:
             with gateway(backend, 1, certs, [], root) as tls_port:
@@ -49,11 +57,17 @@ def verify(server, probe, example):
 
                 assert read() == []
                 read(False, trusted=False)
-                publish(example.read_bytes())
+                checked = operator("validate", example)
+                assert not catalog.exists()
+                assert operator("publish", example) == checked
+                assert checked["content_manifest"] == hashlib.sha256(catalog.read_bytes()).hexdigest()
                 assert read() == expected
-                publish(b"{}")
+                staging.write_bytes(b"{}")
+                operator("publish", staging, succeeds=False)
+                assert read() == expected
+                staging.replace(catalog)  # Exercise recovery from direct operator edits, too.
                 read(False)
-                publish(example.read_bytes())
+                operator("publish", example)
                 assert read() == expected
                 catalog.unlink()
                 assert read() == []

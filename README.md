@@ -47,6 +47,8 @@ OF_SF 是适配国服 TapTap PC 1.1.12 的区服服务端，支持 Windows x64 �
 
 ## 开发与许可
 
+OF_SF 提供原生玩法基线，overfiled-mod 可以按服主发布的目录展示指南、打开已安装的小游戏。格式校验和发布使用 `of.py content validate` 和 `of.py content publish`。原客户端维持原生消息和存档流程。[统一协议与接入方法](OverField-Server/docs/统一协议.md) · [原生档案](contracts/v1/native-profile.json)
+
 服务端使用 Python、原生 Protobuf 和 SQLite WAL，Windows 完整启动器使用 .NET 10。协议与部分玩法源自 byzp/of-ps，OF_SF 自行维护账号、事务、频道广播、存档迁移和运维入口。构建时从已有发行包导入对应版本的运行时及游戏资源。[本轮性能审查](OverField-Server/docs/性能审查.md) · [四份客户端与 Unity 编辑器工具](OverField-Server/docs/客户端构建对照.md) · [架构与性能实测](tools/BUILD.md#登录聊天与移动的实测) · [源码构建](tools/BUILD.md) · [上游起始提交](https://github.com/byzp/of-ps/tree/fa2142b8521e802beb23fc6ed538205b9f4f1513) · [运行时与来源](OverField-Server/docs/RUNTIME.txt)
 
 上游及其修改部分附 [AGPL-3.0](OverField-Server/LICENSE-of-ps.txt)，仓库原有 [GPL-3.0](LICENSE) 保留。

@@ -1,0 +1,98 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OF_SF 可选客户端扩展",
+    "version": "0.1.0",
+    "description": "玩家网关只读接口。content_manifest 对应 /content 完整 UTF-8 响应正文字节的 SHA-256。"
+  },
+  "paths": {
+    "/of-contracts/v1/realm": {
+      "get": {
+        "operationId": "DescribeRealm",
+        "summary": "读取基线身份、能力和目录摘要",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "读取成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "contract_id",
+                    "contract_version",
+                    "baseline",
+                    "client_profile",
+                    "content_manifest",
+                    "ruleset_revision",
+                    "capabilities"
+                  ],
+                  "properties": {
+                    "contract_id": {
+                      "const": "ofsf.extensions.v1"
+                    },
+                    "contract_version": {
+                      "type": "string",
+                      "const": "0.1.0"
+                    },
+                    "baseline": {
+                      "const": "ofsf.native"
+                    },
+                    "client_profile": {
+                      "const": "ofsf.pc.native.v1"
+                    },
+                    "content_manifest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "ruleset_revision": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "capabilities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "uniqueItems": true,
+                      "contains": {
+                        "const": "content.catalog.v1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "目录暂不可用，请保留原玩法入口。"
+          }
+        }
+      }
+    },
+    "/of-contracts/v1/content": {
+      "get": {
+        "operationId": "GetContentCatalog",
+        "summary": "读取服主发布的内容目录",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "读取成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./catalog.schema.json"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "目录暂不可用，请保留原玩法入口。"
+          }
+        }
+      }
+    }
+  }
+}

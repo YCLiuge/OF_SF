@@ -244,6 +244,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state",type=Path,default=Path(os.getenv("OF_STATE",ROOT/"state"/"realm")))
     commands=parser.add_subparsers(dest="command")
+    content = commands.add_parser("content", help="Validate or publish the optional Mod content catalog")
+    content.add_argument("operation", choices=("validate", "publish"))
+    content.add_argument("source", type=Path, help="Local UTF-8 catalog JSON")
     import realm_admin
     realm_admin.arguments(commands)
     from player_gateway import arguments as add_gateway
@@ -289,6 +292,10 @@ def main():
     rods.add_argument("--apply",action="store_true")
     args=parser.parse_args()
     state=args.state.resolve()
+    if args.command == "content":
+        from of_content_publish import run as publish_content
+        print(json.dumps(publish_content(args.operation, args.source, state), ensure_ascii=False))
+        return
     if args.command=="postgres-report":
         from postgres_report import project
         print(json.dumps(project(args.operation,args.archive,args.psql),ensure_ascii=False))
