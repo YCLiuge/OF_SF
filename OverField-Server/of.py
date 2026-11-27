@@ -234,7 +234,7 @@ def self_test():
                    "test_native_boss_rush.py", "test_native_restaurant.py", "test_native_world_levels.py",
                    "test_native_home_visibility.py", "test_native_bless_tree.py", "test_native_bless_ladder.py", "test_native_events.py",
                    "test_native_recruit_entry.py", "test_native_gacha_rewards.py", "test_native_badge_tree.py", "test_native_battle_pass.py", "test_native_newcomer.py",
-                   "test_profile_issuance.py","test_explore_dispatch.py"):
+                   "test_profile_issuance.py","test_explore_dispatch.py","test_federation_world.py"):
         extras = [] if script in ("test_federated_scene.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py","test_player_captcha.py","test_nickname_index.py") else ["--resources", str(ROOT/"resources")]
         subprocess.run([sys.executable, "-B", str(tests/script), *extras], env=env, check=True)
 
@@ -247,6 +247,9 @@ def main():
     content = commands.add_parser("content", help="Validate or publish the optional Mod content catalog")
     content.add_argument("operation", choices=("validate", "publish"))
     content.add_argument("source", type=Path, help="Local UTF-8 catalog JSON")
+    federation = commands.add_parser("federation-check", help="Check world ownership and mutual TLS peers")
+    federation.add_argument("--config", required=True, type=Path)
+    federation.add_argument("--peers", action="store_true", help="Connect to every configured remote peer")
     import realm_admin
     realm_admin.arguments(commands)
     from player_gateway import arguments as add_gateway
@@ -292,6 +295,20 @@ def main():
     rods.add_argument("--apply",action="store_true")
     args=parser.parse_args()
     state=args.state.resolve()
+    if args.command == "federation-check":
+        from federation_world import World, WorldError
+        world = World(state, args.config)
+        checks = {}
+        if args.peers:
+            for peer in sorted(set(world.uid_ranges) - {world.node_id}):
+                try:
+                    world.probe(peer)
+                    checks[peer] = "ok"
+                except WorldError as exc:
+                    checks[peer] = str(exc)
+        print(json.dumps({"world": world.topology.world, "node": world.node_id, "manifest": world.topology.digest,
+                          "owners": world.owners, "uids": world.uid_ranges, "checks": checks}, sort_keys=True))
+        return int(any(result != "ok" for result in checks.values()))
     if args.command == "content":
         from of_content_publish import run as publish_content
         print(json.dumps(publish_content(args.operation, args.source, state), ensure_ascii=False))
