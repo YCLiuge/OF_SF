@@ -62,7 +62,7 @@ def run(root,resources):
             fir=call(a,"SelfIntervalInit")
             assert fir.is_start and fir.interval_id==3 and fir.interval.player_id==pa
             intervals=call(b,"FriendIntervalInit")
-            assert [v.player_id for v in intervals.friend_infos]==[pa] and [v.player_id for v in intervals.join_infos]==[pa]
+            assert not intervals.friend_infos and [v.player_id for v in intervals.join_infos]==[pa]
             assert [(v.scene_id,v.process) for v in call(a,"SceneProcessList").scene_process_list]==[(9999,4)]
             assert not call(b,"SceneProcessList").scene_process_list
             badges=call(a,"AbilityBadgeList",scene_id=scene)

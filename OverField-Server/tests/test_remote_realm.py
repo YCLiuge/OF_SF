@@ -124,8 +124,8 @@ def run(resources,ssh_config=None,ssh_port=None,http_port=None,game_port=None):
                         # A chat message is the only explicitly authored text allowed on this path.
                         from test_native_chat import barrier
                         assert call(s,"ChangeChatChannel",channel_id=9999).channel_id==9999
-                        assert call(s,"SendChatMsg",type=pb.ChatChannel_ChatRoom,text="remote-chat-qa <b>原客户端</b>").text=="remote-chat-qa ＜b＞原客户端＜/b＞"
-                        for forbidden in (local_token,local_uid,slot,"login_token=must-stay-local",chr(1)+"invalid"):
+                        assert call(s,"SendChatMsg",type=pb.ChatChannel_ChatRoom,text="remote-chat-qa <b>原\u200b客户端</b>\ufeff").text=="remote-chat-qa ＜b＞原客户端＜/b＞"
+                        for forbidden in (local_token,local_uid,slot,slot[:3]+"\u200b"+slot[3:],"login_token=must-stay-local",chr(1)+"invalid"):
                             assert call(s,"SendChatMsg",type=pb.ChatChannel_ChatRoom,text=forbidden).status==pb.StatusCode_BAD_REQ
                         barrier(s)
                         req=pb.SetArchiveInfoReq(key="qa-local",value=private_note)
