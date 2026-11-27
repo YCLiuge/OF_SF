@@ -57,6 +57,8 @@ class Session:
         self.badge_id=0
         self.scene_player=pb.ScenePlayer()
         self.home_seat=None
+        self.fashion_seat=None
+        self.fashion_rider=None
         self.vehicle_seat=None
         self.vehicle_riders={}
         self.pos={}
@@ -463,6 +465,8 @@ class LocalGameService:
             self.next_pose_flush=time.monotonic()+self.pose_flush_interval
             self.data_dir.mkdir(parents=True,exist_ok=True)
             res_loader.init(self.resources)
+            from private_welcome_mail import notice_text
+            self.welcome_text = notice_text(self.data_dir)
             open_game_database(self.identity, self.data_dir)
             from private_moon_spots import setup as setup_moon_spots
             setup_moon_spots(db.conn)
@@ -611,6 +615,7 @@ class LocalGameService:
                 s.dye_texture_dir = self.resources / "swirlnoisetexture"
                 s.entitlements = self.entitlements
                 s.realm_rules = self.realm_rules
+                s.welcome_text = self.welcome_text
                 s.stages = self.stages
                 s.needs_name = bool(db.conn.execute("SELECT 1 FROM authority.realm_pending_names WHERE slot=?",(slot,)).fetchone())
                 from private_channels import restore

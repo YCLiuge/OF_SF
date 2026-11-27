@@ -28,10 +28,8 @@ from proto.net_pb2 import (
     Quest,
     Achieve,
     QuestStatus,
-    MailBriefData,
     LifeBaseInfo,
     Chapter,
-    MailContentType,
     PBCollectionRewardData,
 )
 from utils.pb_create import make_item
@@ -461,20 +459,6 @@ def init_player(player_id):
     #         collection_t["new_collection_type"],
     #         collection.SerializeToString(),
     #     )
-
-    # 一封欢迎邮件
-    mail = MailBriefData()
-    mail.mail_id = 1
-    mail.sender = "aac"
-    mail.content_type = MailContentType.MailContentType_TEXT
-    mail.send_time = int(time.time())
-    mail.title = "of-ps"
-    mail.content = '此项目以AGPL开源, 仓库地址<color=#66ccff><b><link="https://github.com/byzp/of-ps">https://github.com/byzp/of-ps</link></b></color>, 觉得有用点个star吧\n\n'
-    mail.overdue_day = 3650
-    tmp = mail.items.add()
-    tmp.item_id = 108
-    tmp.num = 1488891
-    set_mail(player_id, 1, mail.SerializeToString())
 
 
 def verify_sdk_user_info(user_id, login_token):

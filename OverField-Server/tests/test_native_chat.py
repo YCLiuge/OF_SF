@@ -56,6 +56,8 @@ def run(root,resources):
                 assert switch(a,0).status==pb.StatusCode_CHAT_CHANNEL_NOT_EXIST
                 assert switch(a,10000).status==pb.StatusCode_CHAT_CHANNEL_NOT_EXIST
                 assert switch(c,9999).channel_id==9999
+                assert send(a,NEAR,"你\u200b好\ufeff").text=="你好"
+                assert texts(barrier(b))==[(NEAR,pa,"你好")] and texts(barrier(c))==[(NEAR,pa,"你好")]
                 assert send(a,NEAR,"同场频道").status==pb.StatusCode_OK
                 assert texts(barrier(b))==[(NEAR,pa,"同场频道")] and texts(barrier(c))==[(NEAR,pa,"同场频道")]
                 assert not texts(barrier(a)) # sender's receipt already adds its message to the retail UI.

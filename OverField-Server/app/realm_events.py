@@ -12,6 +12,7 @@ from state_lock import exclusive_state
 DAILY = 4008
 WISH = 260326131
 NEWCOMER = 1001
+SAKURA = {4001: "樱花七日（首期）", 5082: "樱花七日（复刻）"}
 SCHEMA = "(id INTEGER PRIMARY KEY CHECK(id=1), settings TEXT NOT NULL)"
 DATA = Path(__file__).resolve().parents[1] / "resources" / "data"
 SIGN_TITLES = {
@@ -56,6 +57,8 @@ def _catalog():
                             "token": tier["condition_item_i_d"],
                             "items": [{"item_i_d": tier["reward_item_i_d"], "item_num": tier["reward_item_num"]}]}
                            for tier in tiers["activity_quest_reward_item"])
+        elif aid in SAKURA:
+            title, kind, rewards = SAKURA[aid], "sakura_fireworks", []
         elif aid == DAILY:
             rewards = [{"goal": item["achieve_i_d"], "items": item["activity_regular_pool_reward_item"]}
                        for item in daily_pool["activity_regular_pool_item"]]
@@ -136,9 +139,9 @@ def validate(settings):
         _timestamp(start)
         _timestamp(end)
         actual = _catalog()[aid]
-        if start and actual["opens_at"] and start < actual["opens_at"]:
+        if aid not in SAKURA and start and actual["opens_at"] and start < actual["opens_at"]:
             raise ValueError("Cannot open before the native calendar")
-        if end and actual["closes_at"] and end > actual["closes_at"]:
+        if aid not in SAKURA and end and actual["closes_at"] and end > actual["closes_at"]:
             raise ValueError("Cannot close after the native calendar")
         if (start or actual["opens_at"] or "") > (end or actual["closes_at"] or "9999"):
             raise ValueError("Activity window is empty")

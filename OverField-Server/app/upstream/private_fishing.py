@@ -36,13 +36,15 @@ def place(session):
     return (session.scene_id,session.channel_id,session.dungeon[0],getattr(session,"mp_room_team",0))
 
 
-def day_at(scene):
+def day_at(session):
+    scene=session.scene_id
     path=_table("Scene","scene")[scene].get("scene_name","").lower()
     if "白天" in path or "_day" in path and scene!=9999:
         return True
     if "夜晚" in path or "_night" in path:
         return False
-    return 6*3600<=notice_sync.tod_time<18*3600
+    from private_fireworks import scene_seconds
+    return 6*3600<=scene_seconds(session,notice_sync.tod_time)%86400<18*3600
 
 
 def seasonal_bait():
@@ -210,7 +212,7 @@ def request(session,req,rsp):
         stock=shop.balance(pid,item)
         if not stock or stock.main_item.base_item.num<qty:
             return status
-    day=day_at(session.scene_id)
+    day=day_at(session)
     preview=plan(life.level,bait,day,skill_values(session))
     preview.cost_endurance=min(tool[2],preview.cost_endurance)
     rsp.fishing_event_result.CopyFrom(preview)

@@ -24,7 +24,8 @@ def forecast(session, req, rsp):
         return pb.StatusCode_BAD_REQ
     count = next(int(row["values"][0]) for row in res["GlobalConfig"]["config"]["datas"]
                  if row["key"] == "WeatherForecastHour")
-    first = game_seconds() // 3600
+    from private_fireworks import scene_seconds
+    first = scene_seconds(session,game_seconds()) // 3600
     for hour in range(first, first + count):
         rsp.params.add(int_value=hour % 24, string_value=str(weather(hour)))
     return pb.StatusCode_OK

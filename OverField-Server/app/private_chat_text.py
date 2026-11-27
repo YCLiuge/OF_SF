@@ -18,6 +18,16 @@ def chat_text(value):
     return value.replace("<","＜").replace(">","＞")
 
 
+def message_text(value,guard=None):
+    """Remove the zero-width caret placeholders left by the Unity input field."""
+    if not isinstance(value,str) or len(value)>180 or SECRET.search(value):
+        return None
+    visible=value.replace("\u200b","").replace("\ufeff","")
+    if guard is not None and (not guard.allows(visible) or (value!=visible and not guard.allows(value))):
+        return None
+    return chat_text(visible)
+
+
 # The PC profile editor supports this TextMeshPro color form; chat keeps its existing rules.
 PROFILE_COLOR = re.compile(r"<(?:color=)?#[0-9a-f]{6}(?:[0-9a-f]{2})?>|</color>",re.I)
 

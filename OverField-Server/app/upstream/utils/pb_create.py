@@ -678,6 +678,8 @@ def make_SceneDataNotice(session):
         session.scene_player.team.char1.pos.ParseFromString(saved[0])
         session.scene_player.team.char1.rot.ParseFromString(saved[1])
     data.players.add().CopyFrom(session.scene_player)
+    from private_fireworks import update as fireworks
+    fireworks(session,data)
     from private_chairs import fill
     fill(session, data)
     from private_collection_rewards import fill_scene as fill_collections
@@ -716,7 +718,8 @@ def make_SceneDataNotice(session):
     data.channel_id = session.channel_id
     from private_plaza import game_seconds, weather
     from private_boxes import fill_scene
-    now = game_seconds()
+    from private_fireworks import scene_seconds
+    now = scene_seconds(session,game_seconds())
     data.tod_time = now % 86400
     data.weather_type = weather(now // 3600)
     fill_scene(session, data)

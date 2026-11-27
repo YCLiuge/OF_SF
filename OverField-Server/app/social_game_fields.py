@@ -35,13 +35,12 @@ class SocialGameFields:
                 return False
             return True
         if isinstance(msg,pb.SendChatMsgReq):
-            from private_chat_text import chat_text
-            text=chat_text(msg.text)
+            from private_chat_text import message_text
+            text=message_text(msg.text,guard)
+            if text is None:
+                return False
             clean(msg)
-            if text is not None:
-                msg.text=text
-            else:
-                msg.expression=0
+            msg.text=text
         elif isinstance(msg, pb.ChangeSignReq):
             from private_chat_text import profile_signature
             signature = profile_signature(msg.sign,guard=guard)

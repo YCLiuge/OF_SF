@@ -169,6 +169,9 @@ def modify_outfit(session,req,rsp):
             from utils.pb_create import active_outfit,make_SceneCharacterOutfitPreset
             outfit=make_SceneCharacterOutfitPreset(player,active_outfit(character))
             session.commit_callbacks.append((member.outfit_preset.CopyFrom,(outfit,)))
+            if slot=="char1" and session.fashion_rider:
+                from private_chairs import refresh_fashion
+                session.commit_callbacks.append((refresh_fashion,(session,)))
             broadcast(session,pb.SceneActionType_UPDATE_FASHION,(slot,outfit))
             break
     return pb.StatusCode_OK

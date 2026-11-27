@@ -213,6 +213,8 @@ class Handler(PacketHandler):
             restore_challenge(session)
             from private_mp_teams import on_login as mp_login
             mp_login(session)
+            from private_welcome_mail import deliver_once
+            deliver_once(session)
             from private_wishes import deliver
             deliver(session)
             from private_mail import deliver_published
@@ -232,5 +234,6 @@ class Handler(PacketHandler):
             rsp.status = StatusCode.StatusCode_OK
             tmp = rsp.data.add().server_data.add()
             tmp.action_type = SceneActionType.SceneActionType_TOD_UPDATE
-            tmp.tod_time = int(notice_sync.tod_time)
+            from private_fireworks import scene_seconds
+            tmp.tod_time = scene_seconds(session,int(notice_sync.tod_time)) % 86400
             session.send(MsgId.ServerSceneSyncDataNotice, rsp, 0)

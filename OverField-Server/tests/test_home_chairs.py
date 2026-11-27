@@ -46,6 +46,27 @@ def run(root,resources):
         with q:
             assert not empty
             assert sit(q,58,2,True)==pb.StatusCode_OK
+        from test_observed_initialization import call
+        c,uid,_=open_world(one)
+        peer,rider,_=open_world(two)
+        third=ids.create_profile("座位三")
+        chair=100_000_000_000+uid*1000+22
+        with c,peer:
+            assert sit(peer,chair,0,True)==pb.StatusCode_PlayerChairRemoved
+            for template in (4645001,4645004):
+                preset=pb.OutfitPreset(preset_index=0,pend_pelvis=template)
+                assert call(c,"OutfitPresetUpdate",char_id=101001,preset=preset).status==pb.StatusCode_OK
+                assert sit(peer,chair,1,True)==pb.StatusCode_BAD_REQ
+                assert sit(peer,chair,0,True)==pb.StatusCode_OK
+                other,_,seen=open_world(third)
+                with other:
+                    assert (chair,0,rider) in seen
+                    assert sit(other,chair,0,True)==pb.StatusCode_ChairSeatTaken
+                assert sit(peer,chair,0,False)==pb.StatusCode_OK
+                assert sit(peer,chair,0,True)==pb.StatusCode_OK
+                preset.ClearField("pend_pelvis")
+                assert call(c,"OutfitPresetUpdate",char_id=101001,preset=preset).status==pb.StatusCode_OK
+                assert sit(peer,chair,0,False)==pb.StatusCode_PlayerChairRemoved
     finally:
         game.stop()
     print("PASS scene 9999 native chair IDs/seat limits, state only for occupants, conflicts and reconnection.")

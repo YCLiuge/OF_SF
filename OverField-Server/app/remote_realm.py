@@ -252,11 +252,6 @@ class RemotePlayer:
                     result=self.realm.preference(self.slot,msg)
                     send_client(getattr(MsgId,result.DESCRIPTOR.name),result.SerializeToString(),head.packet_id)
                     continue
-                if isinstance(msg,pb.SendChatMsgReq):
-                    from private_chat_text import chat_text
-                    if chat_text(msg.text) is None or not self.chat_guard.allows(msg.text):
-                        send_client(MsgId.SendChatMsgRsp,pb.SendChatMsgRsp(status=pb.StatusCode_BAD_REQ).SerializeToString(),head.packet_id)
-                        continue
                 if social.outgoing(msg,clean_game_fields,self.chat_guard) is False:
                     name=cls.DESCRIPTOR.name.removesuffix("Req")+"Rsp"
                     rejected=getattr(pb,name)(status=pb.StatusCode_BAD_REQ)

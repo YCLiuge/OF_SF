@@ -116,9 +116,58 @@ def run(root, resources):
             assert amount(pid,101)==before+15
     finally:
         realm.stop()
+    welcome_delivery(root/"welcome-mail", resources)
     operator_delivery(root/"operator-mail", resources)
     pet_delivery(root/"pet-mail", resources)
     print("PASS five native mail operations, individual/bulk delivery, XP, rolled equipment, reliable retry, rollback, favourites limit, account isolation and restart.")
+
+
+def welcome_delivery(root,resources):
+    from utils.res_loader import res
+    from private_welcome_mail import NOTICE
+    root.mkdir()
+    custom = NOTICE.replace("本服由玩家维护","本服由测试玩家维护")
+    (root/"welcome-mail.txt").write_text(custom,encoding="utf8")
+    identity=LocalIdentity(root/"identity.sqlite3")
+    users=[identity.create_profile("公益"+str(i)) for i in range(3)]
+    realm=LocalGameService(identity,root,resources,port=0)
+    realm.start()
+    try:
+        with realm.lock,db.conn:
+            for pid,(slot,_) in enumerate(users[:2],1):
+                db.conn.execute("INSERT INTO private_slots(player_id,slot) VALUES(?,?)",(pid,slot))
+                db.init_player(pid)
+                old=pb.MailBriefData(mail_id=1,sender="aac",title="of-ps",content="地址 https://github.com/byzp/of-ps",
+                                     mail_state=pb.MailState_CLAIMED if pid==1 else pb.MailState_UNREAD)
+                db.set_mail(pid,1,old.SerializeToString())
+        realm.stop()
+        realm.start()
+        expected={k for k,row in res.index("Item","item").items() if row.get("new_u_i_tag")==1}
+        assert len(expected)>400 and 1101104 not in expected
+        for i,profile in enumerate(users):
+            sock,_,_=login(realm.port,identity.issue_ticket(*profile))
+            with sock:
+                join_after_intro(sock)
+                letters=call(sock,"GetMails",15).mails
+                assert len(letters)==1 and letters[0].content==custom and letters[0].title=="公益公告"
+                mail=letters[0]
+                assert mail.mail_id==(2 if i<2 else 1)
+                assert {(a.item_id,a.num) for a in mail.items}=={(k,1_000_000) for k in expected}
+                if i==0:
+                    result=call(sock,"OperateMails",16,operate_type=pb.MailOperateType_CLAIM,mail_id=mail.mail_id)
+                    assert result.status==pb.StatusCode_OK and len(result.claim_result)==len(expected)
+                    assert {(x.main_item.item_id,x.main_item.base_item.num) for x in result.claim_result}=={(k,1_000_000) for k in expected}
+                    assert call(sock,"OperateMails",17,operate_type=pb.MailOperateType_CLAIM,mail_id=mail.mail_id).status==pb.StatusCode_MAIL_NO_REWARD
+                    assert list(call(sock,"OperateMails",18,operate_type=pb.MailOperateType_DELETE_ALL_READED).deleted_mail_ids)==[mail.mail_id]
+        realm.stop()
+        realm.start()
+        sock,_,_=login(realm.port,identity.issue_ticket(*users[0]))
+        with sock:
+            join_after_intro(sock)
+            assert not call(sock,"GetMails",25).mails
+        print(f"PASS migrated claimed/unread legacy mail and fresh account; all {len(expected)} native consumables x 1,000,000; deletion/restart.")
+    finally:
+        realm.stop()
 
 
 def operator_delivery(root, resources):

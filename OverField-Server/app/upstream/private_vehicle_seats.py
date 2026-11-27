@@ -46,6 +46,8 @@ def release(rider, exclude=None):
 
 
 def depart(session):
+    from private_chairs import depart_fashion
+    depart_fashion(session)
     release(session)
     for rider in tuple(session.vehicle_riders.values()):
         release(rider)

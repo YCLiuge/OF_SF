@@ -7,7 +7,7 @@ from network.msg_id import MsgId
 from proto import net_pb2 as pb
 from utils.res_loader import res
 import private_shop as shop
-from realm_events import DAILY, NEWCOMER, WISH, SCHEMA
+from realm_events import DAILY, NEWCOMER, WISH, SAKURA, SCHEMA
 import realm_plaza
 from utils import db
 
@@ -130,7 +130,7 @@ def refresh(session, force=False):
         bounds.append(datetime.fromtimestamp(returning_until,shop.CN))
     for activity in res.index("Activity", "activity").values():
         aid = activity["i_d"]
-        if (aid in (DAILY, NEWCOMER, WISH) or activity.get("new_activity_type") in (1, 2, 3, 6, 12, 13)
+        if (aid in (DAILY, NEWCOMER, WISH) or aid in SAKURA or activity.get("new_activity_type") in (1, 2, 3, 6, 12, 13)
                 or activity.get("new_activity_type") in (8,9,10,11) or activity_dialogue(activity) or (aid in overrides and aid in realm_plaza.PAGES)):
             override = overrides.get(aid, {})
             if not override.get("enabled", True):

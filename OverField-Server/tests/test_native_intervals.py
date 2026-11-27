@@ -89,7 +89,8 @@ def run(root,resources):
                 assert call(b,"IntervalJoin",**fields)==joined
                 assert inventory(friend,10)==before-10
                 assert [m.player_id for m in call(a,"SelfIntervalInit").interval.member]==[owner,friend]
-                assert call(b,"FriendIntervalInit").join_infos[0].create_time==int(token)
+                joined=call(b,"FriendIntervalInit")
+                assert not joined.friend_infos and [i.create_time for i in joined.join_infos]==[int(token)]
                 # Full-price acceleration must fail while one minute can still be bought.
                 from utils import db
                 with game.lock,db.conn:

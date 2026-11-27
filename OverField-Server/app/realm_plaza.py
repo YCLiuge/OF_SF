@@ -4,12 +4,12 @@ from functools import lru_cache
 import json
 from pathlib import Path
 
-from realm_events import _timestamp
+from realm_events import SAKURA, _timestamp
 
 CN = timezone(timedelta(hours=8))
 PAGES = {5075: "幽冥庭院（首期）", 260815130: "幽冥庭院（复刻）", 260815020: "桂影同欢",
          4010: "万家灯火（活动页）", 260212104: "万家灯火（签到）", 260212103: "巧日得春（签到）",
-         5087: "限时活动·年夜饭"}
+         5087: "限时活动·年夜饭"} | SAKURA
 ARCADES = {12000: "罗塔咖啡厅", 12001: "罗塔火锅店", 12002: "罗塔圣诞屋", 12003: "罗塔年夜饭"}
 
 
@@ -58,7 +58,7 @@ def photo_deadline(aid, opens_at, closes_at):
 
 def controlled_activities(ids):
     selected = set(ids)
-    return (PAGES.keys() | selected
+    return ((PAGES.keys() - SAKURA.keys()) | selected
             | (set(photo_editions()) if selected.intersection(photo_editions()) else set())
             | (dated_passes() if selected.intersection(dated_passes()) else set()))
 

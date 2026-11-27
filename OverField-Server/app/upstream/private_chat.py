@@ -6,7 +6,7 @@ from proto import net_pb2 as pb
 from server.scene_data import channel_members, online_session
 from utils import db
 from utils.res_loader import res
-from private_chat_text import chat_text
+from private_chat_text import message_text
 from private_friends import peer_exists,state
 
 NEAR,WORLD,DM=pb.ChatChannel_Default,pb.ChatChannel_ChatRoom,pb.ChatChannel_Private
@@ -124,9 +124,8 @@ def send(session,req,rsp):
     kind=req.type
     if kind not in (NEAR,WORLD,DM):
         return pb.StatusCode_BAD_REQ
-    text=chat_text(req.text)
-    guard=getattr(session,"chat_guard",None)
-    if text is None or guard and not guard.allows(req.text) or not text and not req.expression:
+    text=message_text(req.text,getattr(session,"chat_guard",None))
+    if text is None or not text and not req.expression:
         return pb.StatusCode_BAD_REQ
     if req.expression and not expression_ok(player,req.expression):
         return pb.StatusCode_CFG_NOT_FOUND

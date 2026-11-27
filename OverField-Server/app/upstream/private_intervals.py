@@ -117,17 +117,19 @@ def self_info(session,req,rsp):
 
 def friend_info(session,req,rsp):
     player=session.player_id
-    for friend,status in db.get_friend_info(player,None,"friend_id,friend_status"):
-        if status==2:
-            migrate(friend)
-            row=active(friend)
-            if row and row[3]>now():
-                rsp.friend_infos.add().CopyFrom(view(row))
+    friends=[friend for friend,status in db.get_friend_info(player,None,"friend_id,friend_status") if status==2]
+    for friend in friends:
+        migrate(friend)
     joined=db.conn.execute("""SELECT r.owner,r.created,r.kind,r.finish,r.area,r.claimed FROM private_interval_members AS m
         JOIN private_interval_runs AS r ON r.owner=m.owner AND r.created=m.created
-        WHERE m.player=? AND m.claimed=0 ORDER BY r.created DESC""",(player,))
+        WHERE m.player=? AND m.claimed=0 ORDER BY r.created DESC""",(player,)).fetchall()
+    joined_keys={(row[0],row[1]) for row in joined}
     for row in joined:
         rsp.join_infos.add().CopyFrom(view(row))
+    for friend in friends:
+        row=active(friend)
+        if row and row[3]>now() and (row[0],row[1]) not in joined_keys:
+            rsp.friend_infos.add().CopyFrom(view(row))
     return pb.StatusCode_OK
 
 

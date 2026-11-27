@@ -40,6 +40,9 @@ class Handler(PacketHandler):
         db.set_players_info(pid, "character_id", req.char1)
         db.set_players_info(pid, "team_leader_badge", team.char1.character_appearance.badge)
         session.scene_player.team.CopyFrom(team)
+        if session.fashion_rider:
+            from private_chairs import refresh_fashion
+            session.commit_callbacks.append((refresh_fashion,(session,)))
         if session.vehicle_riders:
             from private_vehicle_seats import refresh_equipment
             session.commit_callbacks.append((refresh_equipment, (session,)))
