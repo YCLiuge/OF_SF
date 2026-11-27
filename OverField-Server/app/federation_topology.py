@@ -65,7 +65,7 @@ class Topology:
             host, port, uids = node["host"], node["port"], node["uids"]
             if not (isinstance(host, str) and 0 < len(host) <= 253 and bounded_integer(port, 1, 65535)
                     and isinstance(uids, list) and len(uids) == 2
-                    and all(bounded_integer(n, 1, 2**32 - 1) for n in uids) and uids[0] <= uids[1]):
+                    and all(bounded_integer(n, 1, 2**32 - 2) for n in uids) and uids[0] <= uids[1]):
                 raise ValueError("Invalid peer host, port or UID interval")
             for other in self.nodes.values():
                 if uids[0] <= other.uids[1] and other.uids[0] <= uids[1]:

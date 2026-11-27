@@ -5,6 +5,7 @@ import logging
 import os
 
 import realm_uids
+from local_game_wire import broadcast_frames
 from federated_scene import Actor, LEASE, SceneOwner, actors_from
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
@@ -42,7 +43,7 @@ def scene_actor(session):
                  coordinates(lead.pos), coordinates(lead.rot))
 
 
-def publish_changes(session, previous, visible):
+def transition_messages(previous, visible):
     changes = pb.ServerSceneSyncDataNotice(status=pb.StatusCode_OK)
     moves = pb.PlayerSceneSyncDataNotice(status=pb.StatusCode_OK)
     for uid in previous.keys() - visible.keys():
@@ -67,8 +68,14 @@ def publish_changes(session, previous, visible):
         lead.rot.CopyFrom(native_vector(actor.rotation))
     for kind, message in ((MsgId.ServerSceneSyncDataNotice, changes), (MsgId.PlayerSceneSyncDataNotice, moves)):
         if message.data:
-            # These are already native wire actor IDs belonging to disjoint remote nodes.
-            session.send(kind, message.SerializeToString(), 0, is_bin=True)
+            # These are already native wire IDs. Bound individual frames even for a crowded room.
+            for start in range(0, len(message.data), 128):
+                if len(message.data) <= 128:
+                    yield kind, message.SerializeToString()
+                else:
+                    frame = type(message)(status=pb.StatusCode_OK)
+                    frame.data.extend(message.data[start:start + 128])
+                    yield kind, frame.SerializeToString()
 
 
 class SceneBridge:
@@ -77,7 +84,7 @@ class SceneBridge:
         self.world = world
         rules = game.realm_rules
         self.channels = rules.public_min, rules.public_max
-        self.owner = SceneOwner(world, self.channels)
+        self.owner = None
         self.local_range = world.uid_ranges[world.node_id]
         if not self.local_range[0] <= rules.uid_start <= self.local_range[1]:
             raise ValueError("Set the realm uid_start inside its federation UID range")
@@ -102,6 +109,8 @@ class SceneBridge:
             conn.execute("INSERT INTO world_boot VALUES (?,?) ON CONFLICT(node) DO UPDATE SET epoch=max(epoch+1,excluded.epoch)",
                          (self.world.node_id, time_ns()))
             self.epoch = conn.execute("SELECT epoch FROM world_boot WHERE node=?", (self.world.node_id,)).fetchone()[0]
+        self.stop_event.clear()
+        self.owner = SceneOwner(self.world, self.channels)
         self.world.start(self.owner.exchange)
         try:
             for node in set(self.world.owners.values()):
@@ -132,28 +141,32 @@ class SceneBridge:
                             result.append(actor)
         return result
 
-    def deliver(self, scenes, views):
-        by_room = {}
-        for actors in views.values():
-            for actor in actors.values():
-                by_room.setdefault(actor.room, {})[actor.uid] = actor
+    def deliver(self, scenes, by_room):
         with self.game.lock:
             for room, members in self.game.scene_members.items():
                 if room[0] not in scenes or not self.channels[0] <= room[1] <= self.channels[1]:
                     continue
-                current = by_room.get(room, {})
+                current = by_room.get(room)
+                transitions = {}
                 for session in members:
-                    if session.running:
-                        previous = getattr(session, "world_view", None)
-                        if previous is not current and (previous or current):
-                            publish_changes(session, previous or {}, current)
-                        session.world_view = current
+                    if not session.running:
+                        continue
+                    previous = session.world_view
+                    if previous is not current and (previous or current):
+                        transitions.setdefault(id(previous), (previous, []))[1].append(session)
+                    session.world_view = current
+                for previous, recipients in transitions.values():
+                    for kind, body in transition_messages(previous or {}, current or {}):
+                        broadcast = broadcast_frames(kind, body) if len(recipients) >= 4 else None
+                        for session in recipients:
+                            session.send(kind, body, 0, is_bin=True, broadcast=broadcast)
             self.game._publish_pending()
 
     def loop(self, node):
         from federation_world import WorldError
         scenes = {scene for scene, owner in self.world.owners.items() if owner == node}
         previous_rooms, revisions, views = set(), {}, {}
+        by_room = {}
         boot = None
         sequence = 0
         published = None
@@ -192,6 +205,11 @@ class SceneBridge:
                             row = call({"op":"scene.read", "source":peer})
                             next_views[peer] = actors_from(row["actors"], self.world.uid_ranges[peer], scenes, self.channels)
                             next_revisions[peer] = row["revision"]
+                    if views.keys() != next_views.keys() or any(views[peer] is not group for peer, group in next_views.items()):
+                        by_room = {}
+                        for group in next_views.values():
+                            for actor in group.values():
+                                by_room.setdefault(actor.room, {})[actor.uid] = actor
                     boot, revisions, views, previous_rooms = version, next_revisions, next_views, rooms
                     published = outbound
                     had_players = bool(actors)
@@ -206,7 +224,7 @@ class SceneBridge:
                     published = None  # An owner restart or an expired lease requires the complete roster.
                     had_players = bool(actors) or monotonic() < last_ok + LEASE
                     if monotonic() >= last_ok + LEASE:
-                        boot, revisions, views = None, {}, {}
+                        boot, revisions, views, by_room = None, {}, {}, {}
                 if not self.stop_event.is_set():
-                    self.deliver(scenes, views)
+                    self.deliver(scenes, by_room)
             self.stop_event.wait(INTERVAL)

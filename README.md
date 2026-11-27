@@ -6,7 +6,7 @@ OF_SF 是适配国服 TapTap PC 1.1.12 的区服服务端，支持 Windows x64 �
 
 1. 下载并双击 Windows 登陆器，也可完整解压 ZIP 后启动。填写服主提供的 IP 或域名，可指定端口，默认 18443。自签证书首次连接时按服主提供的指纹或 CA 验证。
 2. 选择注册或登录。首次核对账号时按提示输入图形验证码。选择游戏安装目录或渠道启动器目录，登陆器会核验客户端版本。TapTap 国服 1.1.12 已验证进图。B站国服 1.1.12.0 已验证安装识别、资源热更和广场活动切换。Steam 国际版 Build 26178963 已验证基版和 11 月 25 日热更的原版资源，分别含 9,809 和 9,814 个资源文件。两个渠道的区服登录仍待验证。首次准备隔离客户端时建议预留至少 3 GiB 同卷空间。
-3. 已有备份请在首次进游戏前导入，预览并核对 UID、角色名、地图和主线。游戏内按住 **Alt** 唤出指针。要回官服，可从 TapTap 原入口启动。原客户端的发行方在线渠道验证仍有可能出现。
+3. 已有备份请在首次进游戏前导入，预览并核对 UID、角色名、地图和主线。游戏内按住 **Alt** 唤出指针。要回官服，可从 TapTap 原入口启动。游戏内的 NEKOTAN 窗口由发行方渠道客户端显示。区服密码只在 OF_SF 登陆器输入。
 
 [下载 Windows 登陆器](https://github.com/YCLiuge/OF_SF_Launcher/releases/latest/download/OF_SF-Launcher-Windows-x64.exe) · [登陆器源码与玩家说明](https://github.com/YCLiuge/OF_SF_Launcher) · [个人进度导入](OverField-Server/docs/个人进度导入.md)
 
@@ -46,6 +46,8 @@ OF_SF 是适配国服 TapTap PC 1.1.12 的区服服务端，支持 Windows x64 �
 已核对 303 种客户端请求与响应编号。294 种业务请求和 2 种握手已接入。剩余 2 种待核实，另有 5 种按区服策略关闭。带礼物标识的遭遇出现率和部分扫荡奖励采用社区规则，服主可调。[逐项验证结果](OverField-Server/docs/客户端请求对照.md) · [玩法缺口与上游对照](OverField-Server/docs/上游对照.md) · [原生请求边界](OverField-Server/docs/原生请求边界.md)
 
 ## 开发与许可
+
+可选的无中心世界节点可分担登录玩家、公共场景成员与位置。玩家留在原登录节点，同场景同频道的跨节点角色通过原版消息同步；战斗、存档和物品仍由各自节点处理。[世界场景配置与验收](OverField-Server/docs/世界场景节点.md)
 
 OF_SF 提供原生玩法基线，overfiled-mod 可以按服主发布的目录展示指南、打开已安装的小游戏。格式校验和发布使用 `of.py content validate` 和 `of.py content publish`。原客户端维持原生消息和存档流程。[统一协议与接入方法](OverField-Server/docs/统一协议.md) · [原生档案](contracts/v1/native-profile.json)
 

@@ -104,9 +104,10 @@ def test_world(root):
     topp = Topology(paths["a"])
     assert topp.uid_ranges["b"] == (200000000, 299999999)
     assert topp.owners == {101:"a", 102:"b", 103:"c"}
-    for field in ("uids","cert"):
+    for field, replacement in (("uids", list(topp.uid_ranges["a"])), ("cert", "a.pem"),
+                               ("uids", [0xfffffffe, 0xffffffff])):
         changed = json.loads(paths["a"].read_bytes())
-        changed["nodes"]["b"][field] = changed["nodes"]["a"][field]
+        changed["nodes"]["b"][field] = replacement
         bad = root / "invalid.json"
         bad.write_text(json.dumps(changed))
         try:

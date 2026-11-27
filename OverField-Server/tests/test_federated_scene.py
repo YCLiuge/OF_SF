@@ -60,5 +60,31 @@ class SceneTest(unittest.TestCase):
         self.assertEqual(self.read("b","a"), [a])
 
 
+    def test_restart_same_service_reopens_worker_with_fresh_scene(self):
+        from contextlib import closing
+        from threading import RLock
+        from unittest.mock import Mock
+        import sqlite3
+        from federated_game import SceneBridge
+
+        transport = Mock(node_id="a", owners={10:"a"}, uid_ranges={"a":(1000001,1999999)})
+        game = SimpleNamespace(realm_rules=SimpleNamespace(public_min=1, public_max=99, uid_start=1000001),
+                               scene_members={}, lock=RLock(), scene_ids={10})
+        bridge = SceneBridge(game, transport)
+        with closing(sqlite3.connect(":memory:")) as db:
+            db.executescript("CREATE TABLE private_slots (player_id INTEGER); CREATE TABLE players (player_id INTEGER);")
+            bridge.start(db)
+            boot, epoch = bridge.owner.boot, bridge.epoch
+            bridge.close()
+            bridge.start(db)
+            try:
+                self.assertFalse(bridge.stop_event.is_set())
+                self.assertTrue(all(t.is_alive() for t in bridge.threads))
+                self.assertNotEqual(boot, bridge.owner.boot)
+                self.assertGreater(bridge.epoch, epoch)
+            finally:
+                bridge.close()
+
+
 if __name__ == "__main__":
     unittest.main()
