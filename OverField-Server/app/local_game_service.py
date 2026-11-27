@@ -74,6 +74,7 @@ class Session:
         self.pending_publish=None
         self.social_invite = self.social_clap = self.social_roll = None
         self.scene_membership=None
+        self.world_view=None
         self.indexed_nearby = self.indexed_world = None
         self.sequence=1
         self.outbox=queue.Queue(128)
@@ -125,6 +126,8 @@ class Session:
         self.sock.close()
 
     def send(self,msg_id,message,packet_id,is_bin=False,*,inventory_snapshot=False,broadcast=None):
+        if msg_id == MsgId.SceneDataNotice:
+            self.world_view = None  # The client rebuilds its scene, including on same-room refresh.
         if not is_bin and not inventory_snapshot and msg_id == MsgId.PackNotice and self.logged_in:
             from private_arcade_wallet import inventory_notice
             inventory_notice(self,message)
@@ -449,6 +452,8 @@ class LocalGameService:
         self.thread=None
         self.handlers={}
         self.failure_replies=status_replies()
+        from federated_game import configured as configure_world
+        self.world = configure_world(self)
 
     def start(self):
         if self.listener is not None or not _runtime_owner.acquire(blocking=False):
@@ -516,9 +521,13 @@ class LocalGameService:
             self.listener=_TCP((self.bind,self.port),_Connection,self.realm_rules.game_connections)
             self.listener.owner=self
             self.port=self.listener.server_address[1]
+            if self.world is not None:
+                self.world.start(db.conn)
             self.thread=Thread(target=self.listener.serve_forever,daemon=True,name="private-game")
             self.thread.start()
         except BaseException:
+            if self.world is not None:
+                self.world.close()
             if self.listener is not None:
                 self.listener.server_close(); self.listener=None
             if db.conn is not None:
@@ -578,6 +587,8 @@ class LocalGameService:
                 self._reclaim_departed(row[0])
             with db.conn:
                 pid,proposed=self._prepare_role(slot,name,row)
+                if self.world is not None:
+                    self.world.check_uid(pid)
                 # Import prepares a role before its first native login. Only a normal new
                 # role (or a reverted import) receives the starter loadout.
                 imported = db.conn.execute("SELECT state FROM private_import_receipt WHERE slot=?", (slot,)).fetchone()
@@ -722,6 +733,7 @@ class LocalGameService:
         if key is not None:
             self.scene_members.setdefault(key,set()).add(s)
         s.scene_membership=key
+        s.world_view = None
 
     def _discard_pending(self):
         for peer in self.pending_publish:
@@ -864,6 +876,8 @@ class LocalGameService:
     def stop(self):
         if self.listener is None:return
         self.closing.set()
+        if self.world is not None:
+            self.world.close()
         self.listener.shutdown()
         with self.connections_lock:
             for sock in list(self.connections):

@@ -182,9 +182,9 @@ def self_test():
     paths = [APP, APP/"upstream", ROOT/"vendor"/platform_vendor, ROOT/"vendor"/"common", tests]
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(map(str,paths)), PYTHONDONTWRITEBYTECODE="1")
     for key in list(env):
-        if key.startswith(("OF_REMOTE_","OF_QUICKSDK_")):
+        if key == "OF_FEDERATION_CONFIG" or key.startswith(("OF_REMOTE_","OF_QUICKSDK_")):
             env.pop(key)
-    for script in ("test_achievement_schema.py", "test_realm_admin.py", "test_realm_admin_http.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py",
+    for script in ("test_federated_scene.py", "test_achievement_schema.py", "test_realm_admin.py", "test_realm_admin_http.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py",
                    "test_game_realm.py", "test_game_archive.py", "test_game_dungeon.py","test_dungeon_updates.py","test_native_appearance.py","test_native_activity_rewards.py",
                    "test_native_first_quest.py", "test_story_entry.py", "test_bottle_intro.py",
                    "test_native_mail.py", "test_native_manual.py", "test_native_recovery.py",
@@ -235,7 +235,7 @@ def self_test():
                    "test_native_home_visibility.py", "test_native_bless_tree.py", "test_native_bless_ladder.py", "test_native_events.py",
                    "test_native_recruit_entry.py", "test_native_gacha_rewards.py", "test_native_badge_tree.py", "test_native_battle_pass.py", "test_native_newcomer.py",
                    "test_profile_issuance.py","test_explore_dispatch.py"):
-        extras = [] if script in ("test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py","test_player_captcha.py","test_nickname_index.py") else ["--resources", str(ROOT/"resources")]
+        extras = [] if script in ("test_federated_scene.py", "test_private_profiles.py", "test_migrate.py", "test_game_dispatch.py","test_local_picker.py","test_player_captcha.py","test_nickname_index.py") else ["--resources", str(ROOT/"resources")]
         subprocess.run([sys.executable, "-B", str(tests/script), *extras], env=env, check=True)
 
 
