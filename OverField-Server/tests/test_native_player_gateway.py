@@ -126,6 +126,37 @@ def media_request(channels,port,method,path):
         return response.status,response.getheader("Content-Length"),response.read()
 
 
+def exercise_contracts(port, tls_context, state):
+    def fetch(method, path, headers=None):
+        connection = (http.client.HTTPSConnection("localhost", port, context=tls_context, timeout=5)
+                      if tls_context else http.client.HTTPConnection("127.0.0.1", port, timeout=5))
+        with closing(connection):
+            connection.request(method, path, headers=headers or {})
+            response = connection.getresponse()
+            return response.status, response.read()
+
+    realm = "/of-contracts/v1/realm"
+    content = "/of-contracts/v1/content"
+    for phase in ("empty", "published"):
+        items = []
+        if phase == "published":
+            items.append({"id": "jianx14.chess", "title": "中国象棋", "kind": "minigame", "entry": "jianx14.chess"})
+            (state / "of-contracts-content.json").write_text(
+                json.dumps({"contract_version":"0.1.0", "items":items}, ensure_ascii=False), encoding="utf-8")
+        status, meta = fetch("GET", realm)
+        assert status == 200
+        status, body = fetch("GET", content)
+        assert status == 200 and json.loads(body)["items"] == items
+        assert json.loads(meta) == {"contract_id":"ofsf.extensions.v1", "contract_version":"0.1.0",
+                                    "baseline":"ofsf.native", "client_profile":"ofsf.pc.native.v1",
+                                    "ruleset_revision":None, "capabilities":["content.catalog.v1"],
+                                    "content_manifest":hashlib.sha256(body).hexdigest()}
+    for path in ("/local/v1/region", "/admin/v1/openapi.json", content + "?preview=1"):
+        assert fetch("GET", path)[0] == 404
+    assert fetch("GET", content, {"Cookie":"a=b"})[0] == 400
+    assert fetch("POST", content)[0] == 404
+
+
 def source_limits(port, tls_context):
     # Two actual TCP peers behind one gateway plus independently authenticated source buckets.
     import player_gateway_peer as proof
@@ -201,6 +232,7 @@ def run(root,resources,certs):
                         pass
             else:
                 channels=ClearChannels(gateway_port,http_port,game_port)
+            exercise_contracts(gateway_port, channels.context if certs else None, remote)
             source_limits(gateway_port,channels.context if certs else None)
             from player_gateway_peer import HEADER
             with closing(http.client.HTTPConnection("127.0.0.1",http_port,timeout=5)) as local_admin:

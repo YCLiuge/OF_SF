@@ -50,6 +50,37 @@ class IdentityTest(unittest.TestCase):
         self.now=1000
         self.ids=LocalIdentity(self.path,clock=lambda:self.now)
 
+    def test_optional_content_catalog(self):
+        path = self.path.parent / "of-contracts-content.json"
+        chess = {"id": "jianx14.chess", "kind": "minigame", "title": "中国象棋", "entry": "jianx14.chess"}
+        guide = {"id": "ofsf.fishing", "kind": "guide", "title": "钓鱼", "text": "一、选竿\n二、选饵 🐟"}
+        catalog = {"contract_version": "0.1.0", "items": [chess, guide]}
+        route = "/of-contracts/v1/content"
+        def publish(data):
+            tmp = path.with_suffix(".new")
+            tmp.write_bytes(data)
+            tmp.replace(path)
+        with serve(self.ids) as port:
+            self.assertEqual(request(port, "GET", route), (200, dict(catalog, items=[])))
+            for data in (b"{}", b"x" * 65537, b"{", b'{"contract_version":"0.1.0","items":[],"items":[]}',
+                         br'{"contract_version":"0.1.0","items":[{"id":"def.x","title":"\ud800","kind":"guide","text":"Hi"}]}'):
+                publish(data)
+                self.assertEqual(request(port, "GET", route), (503, {"error": "content_catalog_unavailable"}))
+                self.assertEqual(request(port, "GET", route.replace("content", "realm"))[0], 503)
+            for items in ([chess, chess], [dict(chess, entry="http://example.invalid")], [dict(chess, entry="")],
+                          [dict(guide, entry="jianx14.chess")], [dict(guide, text="a\tb")], [dict(guide, text="鱼"*2049)],
+                          [dict(chess, id="bad")], [dict(chess, kind="unknown")], [dict(chess, title="x"*81)],
+                          [dict(chess, id="demo.x" + str(n)) for n in range(129)]):
+                publish(json.dumps(dict(catalog,items=items)).encode())
+                self.assertEqual(request(port, "GET", route)[0], 503)
+            self.assertEqual(request(port, "GET", "/local/v1/region")[0], 200)
+            publish(json.dumps(catalog, ensure_ascii=False).encode("utf-8-sig"))
+            self.assertEqual(request(port, "GET", route), (200, catalog))
+            self.assertEqual(request(port, "GET", route, extra={"Cookie":"a=b"})[0], 403)
+            self.assertEqual(request(port, "POST", route, {})[0], 404)
+            path.unlink()
+            self.assertEqual(request(port, "GET", route), (200, dict(catalog, items=[])))
+
     def test_sessions(self):
         a, key = self.ids.create_profile()
         b, other = self.ids.create_profile()

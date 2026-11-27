@@ -13,12 +13,13 @@ from google.protobuf.message import DecodeError
 from local_game_wire import encode
 from local_identity import TICKET
 from photo_media import PHOTO_PATH, PUBLIC as PHOTO_PREFIX
+import of_contracts
 import player_gateway_peer
 from network.msg_id import MsgId
 from proto import net_pb2 as pb
 
 
-GET = {"/local/v1/region", "/private/plaza", "/private/gifts", "/private/maintenance"}
+GET = {"/local/v1/region", "/private/plaza", "/private/gifts", "/private/maintenance"} | of_contracts.ROUTES
 IMPORT_PREVIEW = "/local/v1/accounts/import-preview"
 POST = {"/local/v1/accounts/"+action for action in ("challenge","lookup","register","login","change-password","bind","launch","claim-gift",
                                                    "import-preview", "import-apply", "import-undo")}
@@ -50,15 +51,18 @@ class Gate:
         times.append(now)
         return True
 
-    async def account(self, reader, writer, address):
+    async def account(self, reader, writer, address, first_line=None):
         # Rebuild exactly one allowlisted request. Nothing after its fixed-length body is relayed.
-        request = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
+        request = await asyncio.wait_for(read_request_head(reader, first_line), 10)
         if len(request) > 8192:
             raise ValueError()
         lines = request[:-4].decode("ascii").split("\r\n")
         method, path, version = lines.pop(0).split(" ")
         if version not in ("HTTP/1.0", "HTTP/1.1"):
             raise ValueError()
+        # Direct HTTPS serves only the read-only contract. Account operations retain their own preamble.
+        if first_line is not None and (method != "GET" or path not in of_contracts.ROUTES):
+            return await reject(writer, 404)
         asset = ATTACHMENT.fullmatch(path) or path.startswith(PHOTO_PREFIX) and PHOTO_PATH.fullmatch(path[len(PHOTO_PREFIX):])
         if not ((method == "GET" and path in GET) or (method in ("GET","HEAD") and asset)
                 or (method == "POST" and path in POST)):
@@ -71,6 +75,8 @@ class Gate:
             headers[key.lower()] = value.strip()
         if headers.keys() & {"transfer-encoding", "upgrade", "expect", "authorization", "proxy-authorization", "cookie"}:
             raise ValueError()
+        if first_line is not None and "origin" in headers:
+            return await reject(writer, 400)
         length = headers.get("content-length", "0")
         preview = method == "POST" and path == IMPORT_PREVIEW
         maximum = player_gateway_peer.account_body_limit(path)
@@ -144,9 +150,11 @@ class Gate:
         self.connected += 1
         try:
             route = await asyncio.wait_for(reader.readuntil(b"\n"), 7)
-            if route == b"OF-SF/1 ACCOUNT\n":
+            direct_http = route.endswith((b" HTTP/1.0\r\n", b" HTTP/1.1\r\n"))
+            if route == b"OF-SF/1 ACCOUNT\n" or direct_http:
                 try:
-                    await self.account(reader, writer, writer.get_extra_info("peername")[0])
+                    await self.account(reader, writer, writer.get_extra_info("peername")[0],
+                                       route if direct_http else None)
                 except (ValueError, UnicodeError, asyncio.LimitOverrunError):
                     await reject(writer, 400)
             elif route == b"OF-SF/1 GAME\n":
@@ -156,6 +164,20 @@ class Gate:
         finally:
             self.connected -= 1
             await close(writer)
+
+
+async def read_request_head(reader, first_line):
+    if first_line is None:
+        return await reader.readuntil(b"\r\n\r\n")
+    if not first_line.endswith(b"\r\n"):
+        raise ValueError("Expected HTTP request line")
+    head = bytearray(first_line)
+    while len(head) <= 8192:
+        line = await reader.readuntil(b"\r\n")
+        head.extend(line)
+        if line == b"\r\n":
+            return bytes(head)
+    raise ValueError("Request header too large")
 
 
 async def loopback(port):

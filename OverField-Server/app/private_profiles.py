@@ -11,6 +11,7 @@ import sqlite3
 import ssl
 from urllib.parse import urlsplit
 
+import of_contracts
 from player_gateway_peer import account_body_limit
 from game_dispatch import handle_game_dispatch
 from realm_maintenance import Maintenance, public_get
@@ -33,15 +34,6 @@ def _hostname(value):
         return value.lower()
 
 
-def _unique_keys(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("Duplicate key")
-        result[key] = value
-    return result
-
-
 class ProfileHandler(BaseHTTPRequestHandler):
     server_version = "OverFieldLocal"
     sys_version = ""
@@ -59,6 +51,9 @@ class ProfileHandler(BaseHTTPRequestHandler):
 
     def _reply(self, status, data):
         data = json.dumps(data, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+        self._reply_json_bytes(status, data)
+
+    def _reply_json_bytes(self, status, data):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -99,6 +94,17 @@ class ProfileHandler(BaseHTTPRequestHandler):
         if handle_game_dispatch(self):
             return
         if public_get(self):
+            return
+        if self.path in of_contracts.ROUTES:
+            if any(k in self.headers for k in ("Authorization", "Cookie", "Proxy-Authorization")):
+                self._reply(403, {"error": "public catalog does not take credentials"})
+                return
+            try:
+                body = self.server.content_catalog.read(self.path)
+            except (OSError, ValueError):
+                self._reply(503, {"error": "content_catalog_unavailable"})
+                return
+            self._reply_json_bytes(200, body)
             return
         if self.path == "/private/gifts":
             if any(k in self.headers for k in ("Authorization","Cookie","Proxy-Authorization")):
@@ -145,7 +151,7 @@ class ProfileHandler(BaseHTTPRequestHandler):
             raw = self.rfile.read(length)
             if len(raw) != length:
                 raise ValueError()
-            body = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_keys)
+            body = json.loads(raw.decode("utf-8"), object_pairs_hook=of_contracts.unique_keys)
             if not isinstance(body, dict):
                 raise ValueError()
             if self.path == "/local/v1/accounts/attach":
@@ -214,6 +220,7 @@ def create_profile_server(identity, *, bind_host="127.0.0.1", port=18881,
         address_family = socket.AF_INET6 if bind.version == 6 else socket.AF_INET
     service = Server((bind.compressed, port), ProfileHandler)
     service.identity = identity
+    service.content_catalog = of_contracts.ContentCatalog(identity.path.parent)
     service.maintenance = Maintenance(identity)
     service.stages = None
     service.registration = bind.is_loopback if allow_registration is None else bool(allow_registration)
