@@ -1,0 +1,284 @@
+{
+  "client_profile": "ofsf.pc.native.v1",
+  "reference_revision": "ee925ac9dd8d53a5ace5a67500a724c5fd27005f",
+  "scope": "Structural evidence for the native Windows protocol. An entry here does not certify a channel's login service, gameplay semantics or every client build.",
+  "registry": {
+    "source": "OverField-Server/app/upstream/network/msg_id.py",
+    "canonical_format": "UTF-8 name,id with LF (including final LF), ascending numeric ID, no header; exclude InValid=-1",
+    "sha256": "7bb225ad2589c8ccdedac82902038979118a3fe5aa2cca3ca88465790617f56a",
+    "counts": {
+      "Req": 303,
+      "Rsp": 303,
+      "Notice": 127
+    }
+  },
+  "protobuf": {
+    "source": "OverField-Server/app/upstream/proto/net.proto",
+    "schema_sha256_lf": "3a3de9073e15507035bbaf901bb3705d446d94662993af1dc8114e5c23992a3f",
+    "generated_source": "OverField-Server/app/upstream/proto/net_pb2.py",
+    "descriptor_sha256": "7cec8b275849c4ae19d6c9f4ae407d60fe46560996813bd721f279238334d788"
+  },
+  "wire": {
+    "source": "OverField-Server/app/local_game_wire.py",
+    "prefix": "uint16_be header size in bytes",
+    "header": "PacketHead",
+    "body": "protobuf",
+    "flag_0": "uncompressed",
+    "flag_1": "Snappy raw block",
+    "max_header_bytes": 128,
+    "max_body_bytes": 2097152,
+    "limits_owner": "ofsf"
+  },
+  "client_builds": {
+    "old": {
+      "build": {
+        "backend": "IL2CPP",
+        "unity": "2021.3.45f1c1",
+        "metadata_header_version": null,
+        "builtin": {
+          "version": "2025-03-21-17-15-05",
+          "sha256": "88eeac146ad9ce98e054a04fdf45469e9d38f75c8b8b7954dea5e57f4aece0df",
+          "bundles": 5218
+        },
+        "effective": {
+          "version": "2025-04-06-19-22-03",
+          "sha256": "f5e31f06864c63e348ed52c5a3b6fcdc1e56147bb046dd5a2da9e80c04005208",
+          "bundles": 5234
+        },
+        "effective_source": "installation"
+      },
+      "metadata_sha256": "91a2f9e3370e897de3260b67e9d99f1dd0eaf2137597de85db46667e0c4d8581",
+      "metadata_evidence": "fingerprint_only"
+    },
+    "taptap": {
+      "build": {
+        "backend": "IL2CPP",
+        "unity": "2021.3.45f2c1",
+        "metadata_header_version": 31,
+        "builtin": {
+          "version": "2026-10-21-14-05-50",
+          "sha256": "cb7dd3bb6e9ed0702ceb3c1ca96f43998d4af904327ba4c349224947d976f8be",
+          "bundles": 8917
+        },
+        "effective": {
+          "version": "2026-11-25-19-54-41",
+          "sha256": "c5c6219f13c7cbac864e4cb04929979997fbe22e0d137ce5023edc89f52668c5",
+          "bundles": 8936
+        },
+        "effective_source": "installation"
+      },
+      "metadata_sha256": "8b463bfeb8cf448f2db2b42b155139f3d5d15b6b2a3ae5c36497611fd70b0da2",
+      "metadata_evidence": "registry_and_req_rsp_tags"
+    },
+    "bili": {
+      "build": {
+        "backend": "IL2CPP",
+        "unity": "2021.3.45f2c1",
+        "metadata_header_version": 31,
+        "builtin": {
+          "version": "2026-10-21-14-06-13",
+          "sha256": "c2e09ac78f589ca1c84260c25d36cc5eb3534a9a7e1c2b155e5d195f5608c326",
+          "bundles": 8917
+        },
+        "effective": {
+          "version": "2026-11-25-19-54-31",
+          "sha256": "254efb92ca46620ff3ea3d000ea1494c772acaccdaad4f5b48ca0e674c7b464c",
+          "bundles": 8936
+        },
+        "effective_source": "installation"
+      },
+      "metadata_sha256": "90b146f4e425ee265953301b08cdceaf207eb57fa4af4a2ce6929aca42607fc4",
+      "metadata_evidence": "registry_and_req_rsp_tags"
+    },
+    "steam": {
+      "build": {
+        "backend": "IL2CPP",
+        "unity": "2021.3.45f2c1",
+        "metadata_header_version": 31,
+        "builtin": {
+          "version": "2026-10-24-12-00-58",
+          "sha256": "7292d79c83697dcacfe562e9f81fa91eb8c8e679ed74c6fd2b95f19e75a25b78",
+          "bundles": 9809
+        },
+        "effective": {
+          "version": "2026-11-25-17-28-12",
+          "sha256": "471fa0c2e6da3b620f2d509b901a375300f4fbd546d7c1e88a5031ac3951c452",
+          "bundles": 9814
+        },
+        "effective_source": "provided"
+      },
+      "metadata_sha256": "d02c5eb49b0fc9b7580fad82523d1d244b8b7e45355b779c1c921aae6be07166",
+      "metadata_evidence": "registry_and_req_rsp_tags"
+    }
+  },
+  "lolo": {
+    "mod_revision": "d97ad47648f4ac1d6cbd28b225ebdb30a8b3d089",
+    "pin_evidence": "https://github.com/jianx14/overfiled-mod/blob/d97ad47648f4ac1d6cbd28b225ebdb30a8b3d089/private-server/REFERENCES.md",
+    "repository": "https://github.com/BanterSR/Lolo",
+    "revision": "375423e8c0806bfe8804001ac46d8bc371843045",
+    "registry": "protocol/cmdid.csv",
+    "mp_room_enum": "protocol/proto/player.pb.go",
+    "evidence": "registry_and_mp_room_enum_only"
+  },
+  "mp_room_event_enum": {
+    "MPPlayRoomEvent_None": 0,
+    "MPPlayRoomEvent_GameReady": 1,
+    "MPPlayRoomEvent_GameStart": 2,
+    "MPPlayRoomEvent_GameFinish": 3,
+    "MPPlayRoomEvent_DestroyObject": 4,
+    "MPPlayRoomEvent_EnterPlatform": 5,
+    "MPPlayRoomEvent_LeavePlatform": 6,
+    "MPPlayRoomEvent_EnterMagicArea": 7,
+    "MPPlayRoomEvent_LeaveMagicArea": 8,
+    "MPPlayRoomEvent_ShowPlatform": 9,
+    "MPPlayRoomEvent_HidePlatform": 10,
+    "MPPlayRoomEvent_StartHidePlatform": 11,
+    "MPPlayRoomEvent_SinkObject": 12,
+    "MPPlayRoomEvent_SendProjectile": 13
+  },
+  "route_examples": [
+    {
+      "request": {
+        "name": "PlayerLoginReq",
+        "id": 1003
+      },
+      "reply": {
+        "name": "PlayerLoginRsp",
+        "id": 1004
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_game_realm.py"
+    },
+    {
+      "request": {
+        "name": "ChangeSceneChannelReq",
+        "id": 1201
+      },
+      "reply": {
+        "name": "ChangeSceneChannelRsp",
+        "id": 1202
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_private_channels.py"
+    },
+    {
+      "request": {
+        "name": "PlayerSceneRecordReq",
+        "id": 1203
+      },
+      "reply": null,
+      "conditional_notices": [
+        {
+          "name": "PlayerSceneSyncDataNotice",
+          "id": 1206
+        }
+      ],
+      "server_test": "OverField-Server/tests/test_native_movement_batch.py"
+    },
+    {
+      "request": {
+        "name": "GachaReq",
+        "id": 1445
+      },
+      "reply": {
+        "name": "GachaRsp",
+        "id": 1446
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_native_gacha_atomicity.py"
+    },
+    {
+      "request": {
+        "name": "FishingReq",
+        "id": 1397
+      },
+      "reply": {
+        "name": "FishingRsp",
+        "id": 1398
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_native_fishing.py"
+    },
+    {
+      "request": {
+        "name": "PickupReq",
+        "id": 1749
+      },
+      "reply": {
+        "name": "PickupRsp",
+        "id": 1750
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_native_ground_loot.py"
+    },
+    {
+      "request": {
+        "name": "ActionStudyReq",
+        "id": 2209
+      },
+      "reply": {
+        "name": "ActionStudyRsp",
+        "id": 2210
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_native_upstream_social.py"
+    },
+    {
+      "request": {
+        "name": "OperateMailsReq",
+        "id": 1125
+      },
+      "reply": {
+        "name": "OperateMailsRsp",
+        "id": 1126
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_native_mail.py"
+    },
+    {
+      "request": {
+        "name": "ChangeSignReq",
+        "id": 1513
+      },
+      "reply": {
+        "name": "ChangeSignRsp",
+        "id": 1514
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_native_social_profile.py"
+    },
+    {
+      "request": {
+        "name": "MPPlayRoomEventReq",
+        "id": 2501
+      },
+      "reply": {
+        "name": "MPPlayRoomEventRsp",
+        "id": 2502
+      },
+      "conditional_notices": [
+        {
+          "name": "MPPlayRoomEventNotice",
+          "id": 2504
+        }
+      ],
+      "server_test": "OverField-Server/tests/test_native_mp_rooms.py"
+    },
+    {
+      "request": {
+        "name": "GomokuOnlinePlayerStartPlayReq",
+        "id": 4617
+      },
+      "reply": {
+        "name": "GomokuOnlinePlayerStartPlayRsp",
+        "id": 4618
+      },
+      "conditional_notices": [],
+      "server_test": "OverField-Server/tests/test_native_gomoku.py"
+    }
+  ],
+  "evidence_docs": [
+    "OverField-Server/docs/客户端构建对照.md",
+    "OverField-Server/docs/客户端请求对照.md"
+  ]
+}

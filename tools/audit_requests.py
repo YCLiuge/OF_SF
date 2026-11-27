@@ -57,6 +57,15 @@ def native_catalog(client):
     data=path.read_bytes()
     if hashlib.sha256(data).hexdigest() != METADATA_SHA256:
         raise ValueError("This audit requires the supported CN PC 1.1.12 global-metadata.dat")
+    ids, classes = extract_catalog(data)
+    requests = {n for n in ids if n.endswith("Req")}
+    if len(requests) != 303 or requests != {n for n in classes if n.endswith("Req")}:
+        raise ValueError("Retail request enum and message classes disagree")
+    return ids, classes
+
+
+def extract_catalog(data):
+    """Read native message IDs and field numbers from a local metadata v31 sample."""
     if struct.unpack_from("<II",data)!=(0xfab11baf,31):
         raise ValueError("Unexpected metadata header")
     offsets=list(struct.iter_unpack("<II",data[8:256]))
@@ -81,9 +90,6 @@ def native_catalog(client):
             ids=dict(constants(t))
         if namespace=="Pb" and type_name.endswith(("Req","Rsp")):
             classes[type_name]={key[:-len("FieldNumber")]:value for key,value in constants(t) if key.endswith("FieldNumber")}
-    requests={n for n in ids if n.endswith("Req")}
-    if len(requests)!=303 or requests!={n for n in classes if n.endswith("Req")}:
-        raise ValueError("Retail request enum and message classes disagree")
     return ids,classes
 
 
