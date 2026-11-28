@@ -12,7 +12,7 @@ from private_request import cache_after_commit
 import private_tutorial_recruit as tutorial
 import private_gacha_rewards as rewards
 import private_gameplay_transaction as gameplay
-from realm_gacha import FASHION, defaults, upgrade
+from realm_gacha import FASHION, defaults, expanded_banner, upgrade
 import private_fashion_gacha as fashion
 
 
@@ -118,6 +118,8 @@ def choose(session, req, rsp):
 
 def list_pools(session, req, rsp):
     pools = active()
+    if not getattr(session, "expanded_recruit", True):
+        pools = {key: pool for key, pool in pools.items() if not expanded_banner(key)}
     if pools:
         banners = [key for key in CHOICE_BANNERS if choices(pools, key)]
         stats = pool_stats(session.player_id, (*pools, *banners))
@@ -278,22 +280,37 @@ def draw(session, req, rsp, packet_id):
     return status
 
 
+def banner_id(session, wire_id):
+    catalog = res.index("Gacha", "info")
+    if wire_id in catalog:
+        if expanded_banner(wire_id):
+            session.expanded_recruit = True
+        return wire_id
+    # The March Aurele rerun uses card/method 3020 and banner 203020. A card
+    # id is safe to resolve only when no native banner owns it and it denotes
+    # exactly one featured edition, even when some editions are disabled.
+    matches = [key for key, row in catalog.items() if row.get("new_u_i_gacha_type") == 3 and
+               row.get("text_i_d") == wire_id and row.get("method1_i_d") == wire_id]
+    return matches[0] if len(matches) == 1 else None
+
+
 def regular_draw(session, req, rsp, pending):
+    key_id = banner_id(session, req.gacha_id)
     pools = active()
-    pool_id = selected(session.player_id, pools, req.gacha_id) if req.gacha_id in CHOICE_BANNERS else req.gacha_id
+    pool_id = selected(session.player_id, pools, key_id) if key_id in CHOICE_BANNERS else key_id
     pool = pools.get(pool_id)
     if pool is None or session.dungeon[0]:
         return pb.StatusCode_BAD_REQ
     pid = session.player_id
     if pool_id==FASHION:
         return fashion.draw(session,req,rsp,pending,pool)
-    config = res.index("Gacha", "info")[req.gacha_id]
+    config = res.index("Gacha", "info")[key_id]
     key = "1" if req.is_single else "2"
     count = config.get("method" + key + "_count", 0)
     if count not in (1, 10):
         return pb.StatusCode_BAD_REQ
     ticket_id, price = config["consume_item" + key + "_i_d"], config["consume_item" + key + "_num"]
-    if config.get("max_times") and db.get_total_gacha_num(pid, req.gacha_id) + count > config["max_times"]:
+    if config.get("max_times") and db.get_total_gacha_num(pid, key_id) + count > config["max_times"]:
         return pb.StatusCode_BAD_REQ
     pending.balances.change(ticket_id, -price)
     misses = pity_misses(pid, pool)
@@ -309,21 +326,22 @@ def regular_draw(session, req, rsp, pending):
             since_sr = 0 if explorer_at_least(item, 3) else since_sr + 1
         delta = rsp.items.add()
         award(pid, item, delta, pending.pack, balances=pending.balances, recruit=True)
-        rewards.record(db, pid, req.gacha_id, delta)
+        rewards.record(db, pid, key_id, delta)
     db.set_gacha_guarantee(pid, pool_id, misses)
-    rsp.info.CopyFrom(choice_info(pid, pools, banner=req.gacha_id) if req.gacha_id in CHOICE_BANNERS else info(pid, pool))
+    rsp.info.CopyFrom(choice_info(pid, pools, banner=key_id) if key_id in CHOICE_BANNERS else info(pid, pool))
     return pb.StatusCode_OK
 
 
 def history(session, req, rsp):
-    if req.gacha_id not in res.index("Gacha", "info") or req.page < 1:
+    key_id = banner_id(session, req.gacha_id)
+    if key_id is None or req.page < 1:
         return pb.StatusCode_BAD_REQ
     rsp.gacha_id, rsp.page = req.gacha_id, req.page
     pid = session.player_id
-    rsp.total_page = (db.get_total_gacha_num(pid, req.gacha_id) + 4) // 5
+    rsp.total_page = (db.get_total_gacha_num(pid, key_id) + 4) // 5
     for item, when in db.conn.execute("""SELECT item_id,gacha_time FROM gacha_record
             WHERE player_id=? AND gacha_id=? ORDER BY id DESC LIMIT 5 OFFSET ?""",
-            (pid, req.gacha_id, (req.page - 1) * 5)):
+            (pid, key_id, (req.page - 1) * 5)):
         rsp.records.add(gacha_id=req.gacha_id, item_id=item, gacha_time=when)
     return pb.StatusCode_OK
 
@@ -356,7 +374,6 @@ def trace_draw(session, req, size, status):
     diagnostics = getattr(session, "stages", None)
     if diagnostics is None or not diagnostics.enabled:
         return
-    catalog = res.index("Gacha", "info")
     configured = active()
     is_tutorial = onboarding(session)
     if is_tutorial:
@@ -366,10 +383,13 @@ def trace_draw(session, req, size, status):
         mode = "normal"
     if session.dungeon[0]:
         mode = "in_dungeon"
-    pick = selected(session.player_id, configured) if req.gacha_id == CHOICE else 0
-    record = {"id": req.gacha_id if req.gacha_id == 0 or req.gacha_id in catalog else "unknown",
+    key = banner_id(session, req.gacha_id)
+    pick = selected(session.player_id, configured, key) if key in CHOICE_BANNERS else 0
+    record = {"id": req.gacha_id if req.gacha_id == 0 or key is not None else "unknown",
               "single": req.is_single, "size": size, "status": status, "mode": mode,
-              "enabled": req.gacha_id in configured, "choice": pick}
+              "enabled": key in configured or bool(pick), "choice": pick}
+    if key is not None and key != req.gacha_id:
+        record["banner_id"] = key
     # The cap, private file permissions and rotation use the same writer as other diagnostics.
     diagnostics._write("gacha", record, diagnostics.path.with_name("stage-gacha.jsonl"),
                        diagnostics.path.with_name("stage-gacha.previous.jsonl"))

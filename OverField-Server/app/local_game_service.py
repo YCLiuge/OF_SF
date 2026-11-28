@@ -333,7 +333,10 @@ class _Connection(socketserver.BaseRequestHandler):
             if head.msg_id != MsgId.PlayerLoginReq:
                 close_reason = 'protocol'
                 return
-            pb.PlayerLoginReq.FromString(body)
+            resource_build = pb.PlayerLoginReq.FromString(body).resource_version
+            # Release r9 omits this field. The retail model matches the server's
+            # list against local card IDs, so an unversioned client can receive all editions.
+            session.expanded_recruit = resource_build not in ("2026-10-21-14-05-50", "2026-11-07-22-39-35")
             info = db.get_players_info(session.player_id, "register_time,server_time_zone")
             login = pb.PlayerLoginRsp(status=pb.StatusCode_OK, server_time_ms=int(time.time()*1000),
                                       region_name="private", player_name="" if session.needs_name else session.player_name,

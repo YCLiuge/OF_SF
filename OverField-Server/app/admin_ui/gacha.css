@@ -1,0 +1,23 @@
+.gacha-page{--pool-border:#d7e4e3;--pool-selected:#00756f}
+.gacha-tools{display:grid;grid-template-columns:minmax(12em,2fr) repeat(2,minmax(6.5em,1fr));gap:.6rem}
+.gacha-tools input,.gacha-tools select{min-width:0;width:100%;margin:0}
+.gacha-layout{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(15em,1fr);gap:1rem;align-items:start}
+.gacha-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10rem),1fr));gap:.6rem}
+.gacha-count,.gacha-subtitle,.gacha-empty{color:#526968;font-size:.9rem}
+.gacha-gallery .gacha-card{display:flex;flex-direction:column;overflow:hidden;width:100%;min-height:9.5rem;height:auto;padding:0;text-align:left;align-items:stretch;justify-content:flex-end;border:1px solid var(--pool-border);border-radius:9px;background:#f4f8f5;color:#172e30;cursor:pointer}
+.gacha-gallery .gacha-card:hover,.gacha-card[aria-pressed=true]{border-color:var(--pool-selected);box-shadow:inset 0 0 0 1px var(--pool-selected)}
+.gacha-gallery .gacha-card:focus-visible{outline:2px solid var(--pool-selected);outline-offset:2px}
+.gacha-card img{width:100%;height:7rem;display:block;object-fit:contain;object-position:center;background:linear-gradient(120deg,#e8f2ed,#f5f0e7)}
+.gacha-card-body{display:flex;flex:1;flex-direction:column;gap:.2rem;padding:.7rem .75rem;background:#fff}
+.gacha-card-body strong{font-size:1rem;line-height:1.35}.gacha-card-body small{font-size:.77rem;font-weight:500;color:#526966}
+.gacha-actor{font-size:.88rem;font-weight:500}.gacha-card-body .gacha-state{margin-top:auto;padding-top:.3rem}
+.gacha-state.on{color:#007467}.gacha-state.off{color:#9c4a22}
+.gacha-detail{margin-top:2.7rem;padding:1rem;border:1px solid var(--pool-border);border-radius:9px;background:#f9fbfa;min-width:0}
+.gacha-detail h3{margin:0;font-size:1.22rem}.gacha-detail h4{margin:1rem 0 .5rem}
+.gacha-facts{margin:1rem 0;display:grid;gap:.5rem}.gacha-facts>div{display:flex;flex-wrap:wrap;gap:.25rem .7rem;justify-content:space-between}
+.gacha-facts dt{font-size:.84rem;color:#536663}.gacha-facts dd{margin:0;font-size:.88rem}
+.gacha-rates{display:grid;gap:.45rem}.gacha-rate,.gacha-rates label{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:0;font-size:.86rem}
+.gacha-rates input{max-width:5.7em;min-width:3em;width:100%;padding:.32rem}.gacha-total{text-align:right;font-weight:600}.gacha-total.invalid{color:#aa3e18}
+.gacha-pager{display:flex;align-items:center;justify-content:center;gap:.7rem;margin:.8rem 0}.gacha-pager span{font-variant-numeric:tabular-nums;font-size:.88rem}
+@media(max-width:1000px){.gacha-layout{grid-template-columns:1fr}.gacha-detail{margin:0}.gacha-gallery{grid-template-columns:repeat(auto-fill,minmax(min(100%,9rem),1fr))}}
+@media(max-width:550px){.gacha-tools{grid-template-columns:1fr 1fr}.gacha-tools input{grid-column:1/-1}.gacha-gallery{grid-template-columns:1fr 1fr}.gacha-card img{height:5.7rem}}

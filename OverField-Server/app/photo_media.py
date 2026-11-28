@@ -76,7 +76,7 @@ def moderate(root, operation, data):
             if present and listing:
                 rows = conn.execute("SELECT code,name,title,activity,posted FROM realm_photos WHERE code < ?"
                                     " ORDER BY code DESC LIMIT ?", (data.get("before",2**63-1),data.get("limit",30)))
-                return {"photos":[dict(code=c,author=n,title=t,activity=a,posted_ms=ts) for c,n,t,a,ts in rows]}
+                return {"photos":[dict(code=c,code_text=str(c),author=n,title=t,activity=a,posted_ms=ts) for c,n,t,a,ts in rows]}
             if present:
                 conn.execute("PRAGMA foreign_keys=ON")
                 if conn.execute("DELETE FROM realm_photos WHERE code=?", (data["code"],)).rowcount:

@@ -96,7 +96,7 @@ OPERATIONS = {
     "events.set": operation("any", "Replace the overrides for native activity pages.",
                             {"events": {"type": "array", "maxItems": 1000, "items": EVENT}}, ("events",)),
     "gacha.catalog": operation("any", "List native banners, their featured characters and reward groups.", read_only=True),
-    "gacha.enable": operation("any", "Enable one featured banner and preserve every other setting.",
+    "gacha.enable": operation("any", "开启所选招募卡池，保留其他卡池和已有概率。",
                               {"id": ID}, ("id",)),
     "gacha.get": operation("any", "Return the active configuration and basis-point probabilities.", read_only=True),
     "gacha.set": operation("any", "Replace this realm's banner configuration, effective on the next request.",
@@ -106,6 +106,7 @@ OPERATIONS = {
                               {"limit": {"type": "integer", "minimum": 1, "maximum": 512}}, ("limit",)),
     "realm.status": operation("any", "Read local lifecycle and persistent record counts.", read_only=True),
     "realm.stop": operation("running", "Request graceful shutdown of this server instance."),
+    "rules.catalog": operation("any", "查看副本星级奖励可用的原版奖励组合。", read_only=True),
     "rules.schedule": operation("any", "预设下次启动时生效的玩法参数。", NEXT_START_RULES, minimum=1),
     "rules.get": operation("any", "Read configured gameplay rules.", read_only=True),
     "rules.set": operation("stopped", "Update supplied rules atomically.", RULES, minimum=1),
@@ -114,7 +115,8 @@ OPERATIONS = {
                               "limit": {"type":"integer","minimum":1,"maximum":100}},read_only=True),
     "photos.withdraw": operation("any", "Withdraw one published player photo by its share code.",
                                  {"code":{"type":"integer","minimum":1,"maximum":2**63-1}}, ("code",)),
-    "maintenance.list": operation("any", "Read active announcements and the visible client release.", read_only=True),
+    "maintenance.list": operation("any", "按时间倒序查看已发布公告与当前登陆器版本。",
+        {"before":ID,"limit":{"type":"integer","minimum":1,"maximum":100}}, read_only=True),
     "notice.publish": operation("any", "Publish a new announcement with optional local image files.",
                                 {"title": STRING, "body": STRING, "images": IMAGES}, ("title", "body")),
     "notice.edit": operation("any", "Update an active announcement. An empty image list clears its images.",
@@ -291,15 +293,25 @@ def run(state, name, data, request_stop, expected=None, live_capacity=None):
             return moderate(root,name,data)
     if name in ("blessings.catalog","blessings.get","blessings.set"):
         import realm_blessings
-        return realm_blessings.manage(state,name,data, expected=expected)
+        result = realm_blessings.manage(state,name,data, expected=expected)
+        if name == "blessings.catalog":
+            from realm_operator_forms import reward_names
+            result["item_names"] = reward_names(result["trees"])
+        return result
     if name == "plaza.catalog":
-        return realm_plaza.catalog()
+        from realm_operator_forms import titled_plaza
+        return titled_plaza(realm_plaza.catalog(), realm_events.available())
     if name == "plaza.get":
         return realm_events.configure(state, plaza=True) if (state / "identity.sqlite3").is_file() else {}
     if name == "plaza.set":
         return realm_events.configure(state, data, plaza=True, expected=expected)
+    if name == "rules.catalog":
+        from realm_operator_forms import star_templates
+        return {"templates": star_templates()}
     if name == "events.catalog":
-        return {"events": realm_events.available()}
+        from realm_operator_forms import titled_events, reward_names
+        entries = titled_events(realm_events.available())
+        return {"events": entries, "item_names": reward_names(entries)}
     if name == "events.get":
         if not (state / "identity.sqlite3").is_file():
             return {"events": []}
@@ -312,7 +324,8 @@ def run(state, name, data, request_stop, expected=None, live_capacity=None):
         for row in banners:
             if row["featured"] and row["id"] not in presets:
                 presets[row["id"]] = realm_gacha.featured_pool(row["id"])
-        return {"banners": banners, "presets": presets}
+        from realm_gacha_catalog import decorate
+        return {"banners": decorate(banners), "presets": presets}
     if name == "gacha.get":
         if not (state / "identity.sqlite3").is_file():
             return realm_gacha.defaults()
@@ -339,7 +352,7 @@ def run(state, name, data, request_stop, expected=None, live_capacity=None):
     if name == "state.restore":
         return {"state": str(migrate.restore(data["archive"], state))}
     if name == "maintenance.list":
-        return admin_feed(state)
+        return admin_feed(state, **data)
     with exclusive_state(state, purpose="profiles"):
         state.mkdir(parents=True, exist_ok=True)
         owner = Maintenance(LocalIdentity(state / "identity.sqlite3"))
@@ -407,7 +420,7 @@ def command(state, args, request_stop):
         if args.admin_command == "status":
             return status(state)
         spec = operation_spec(args.operation)
-        implicit_empty = spec["readOnly"] and not spec["inputSchema"]["properties"]
+        implicit_empty = spec["readOnly"] and not spec["inputSchema"].get("required")
         return execute(state, args.operation, read_request(args.input, implicit_empty), request_stop)
 
     response = response_for(action)
