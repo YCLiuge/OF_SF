@@ -407,7 +407,7 @@ def edition_compatibility(root, resources):
             join(legacy)
             listed = call(legacy, "GachaList", 800)
             assert {p.gacha_id for p in listed.gachas} == {p["id"] for p in old} | {9000, 9001}
-        sock, _, _ = login(host.port, identity.issue_ticket(*profile))
+        sock, _, pid = login(host.port, identity.issue_ticket(*profile))
         with sock:
             join(sock)
             def ids(packet):
@@ -420,13 +420,27 @@ def edition_compatibility(root, resources):
                 assert records.status==pb.StatusCode_OK and records.total_page==2 and len(records.records)==5
             assert call(sock,"GachaRecord",811,gacha_id=903000,page=1).status==pb.StatusCode_OK
             assert len(ids(812)) == 115
-            for offset,(pool,featured) in enumerate(((903000,401004),(903004,301004),(903006,302003),(905000,10040))):
-                # Exercise the real guarantee, charge, grant, result and history in one transaction.
+            # Start without Molly: the original must grant her character and the rerun must convert the duplicate.
+            with host.lock, db.conn:
+                db.conn.execute("DELETE FROM characters WHERE player_id=? AND character_id=202002", (pid,))
+            featured_editions = ((903000, 401004), (903004, 301004), (903006, 302003),
+                                 (3023, 202002), (903023, 202002), (905000, 10040))
+            for offset, (pool, featured) in enumerate(featured_editions):
                 settings = defaults()
                 next(p for p in settings["pools"] if p["id"]==pool)["pity"]=1
                 configure(root,settings)
                 result=call(sock,"Gacha",820+offset,gacha_id=pool,is_single=True)
-                assert result.status==pb.StatusCode_OK and result.items[0].main_item.item_id==featured
+                assert result.status == pb.StatusCode_OK and result.info.gacha_id == pool
+                award = result.items[0]
+                assert award.main_item.item_id == featured
+                history = call(sock, "GachaRecord", 850 + offset, gacha_id=pool, page=1)
+                assert history.status == pb.StatusCode_OK and history.records[0].item_id == featured
+                if featured == 202002:
+                    assert award.main_item.character.character_id == 202002
+                    assert award.main_item.is_new == (pool == 3023)
+                    assert bool(award.transformed_item) == (pool == 903023)
+                    with host.lock:
+                        assert len(db.get_characters(pid, 202002)) == 1
             configure(root,{"pools":[]})
             assert call(sock,"Gacha",840,gacha_id=3020,is_single=True).status==pb.StatusCode_BAD_REQ
             assert call(sock,"Gacha",841,gacha_id=903000,is_single=True).status==pb.StatusCode_BAD_REQ
@@ -435,7 +449,8 @@ def edition_compatibility(root, resources):
             assert ids(842)=={1000,2000,4000,5000}
     finally:
         host.stop()
-    print("PASS 51-card legacy catalog, hotfix discovery, March rerun card alias, Aurele/Hikari/Lily/poster rewards, migration and disabled pools.")
+    print("PASS 51-card legacy catalog, March rerun alias, featured rewards for 爱/辉/米莉亚, "
+          "莫莉 first grant (3023) and duplicate conversion (903023), poster grants, histories and migration.")
 
 
 if __name__ == "__main__":
