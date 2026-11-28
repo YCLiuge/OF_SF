@@ -15,8 +15,37 @@ from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 KNOWN_SOURCE = "3583d81eedcc588f46efbf46ff22f48de9c80dd665c6ec028c0ee2d3b8f10a70"
+TEMPLATE_FILE = HERE / "native_endpoint_template.json.bz2"
+TEMPLATES_FILE = HERE / "native_endpoint_templates.json.bz2"
 BLOCK = struct.Struct(">IIH")
 ROW = struct.Struct("<qqIi")
+
+
+def templates():
+    path = TEMPLATES_FILE if TEMPLATES_FILE.is_file() else TEMPLATE_FILE
+    value = json.loads(bz2.decompress(path.read_bytes()))
+    if isinstance(value, dict) and isinstance(value.get("templates"), list):
+        value = value["templates"]
+    elif isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list) or not value:
+        raise ValueError("客户端配置模板无效。")
+    return value
+
+
+def template_for(source):
+    digest = hashlib.file_digest(Path(source).open("rb"), "sha256").hexdigest()
+    for template in templates():
+        if template.get("source_sha256") == digest:
+            return template
+    return None
+
+
+def is_known_source(source):
+    try:
+        return template_for(source) is not None
+    except OSError:
+        return False
 
 
 def validate_endpoint(value):
@@ -134,8 +163,11 @@ def _emit_blocks(template, url):
             raise ValueError("客户端配置模板缺少元数据。")
         return bytes(pieces)
 
-    if region(template["company_at"],6,b"OFPriv") != b"Inutan":
-        raise ValueError("独立副本的 Unity 公司名称与原始模板不一致。")
+    company_at = template.get("company_at",-1)
+    if company_at is not None and company_at >= 0:
+        expected_company = template.get("company","Inutan").encode("ascii")
+        if region(company_at,6,b"OFPriv") != expected_company:
+            raise ValueError("独立副本的 Unity 公司名称与原始模板不一致。")
     record = base64.b64decode(template["object_bytes"])
     old_url = template["original"].encode("ascii")
     new_url = url.encode("ascii")
@@ -143,33 +175,50 @@ def _emit_blocks(template, url):
     old_size, new_size = _align(len(old_url),4), _align(len(new_url),4)
     if record[field:field+4+len(old_url)] != struct.pack("<I",len(old_url)) + old_url:
         raise ValueError("配置模板中的正式区服字段无效。")
-    updated = (record[:field] + struct.pack("<I",len(new_url)) + new_url.ljust(new_size,b"\0")
+    updated = (record[:field] + struct.pack("<I",len(new_url))
+               + new_url.ljust(old_size if new_size <= old_size else new_size, b"\0")
                + record[field+4+old_size:])
     # Preserve Unity's uniform 128 KiB decompressed offsets. Short addresses retain padding.
     delta = _align(max(0,len(updated)-len(record)),131072)
     resource = template["file_base"]
     obj = template["config_file_offset"]
     relative = obj - template["serialized_data_offset"]
-    region(resource+24,8,struct.pack(">Q",template["file_len"]+delta))
-    for i in range(template["records"]):
-        at = template["table_at"] + i*ROW.size
-        pid, pos, length, kind = ROW.unpack(region(at,ROW.size))
-        if pid == 2813:
-            if pos != relative or length != len(record):
-                raise ValueError("配置对象与模板不一致。")
-            region(at,ROW.size,ROW.pack(pid,pos,len(updated),kind))
-        elif delta and pos > relative:
-            region(at,ROW.size,ROW.pack(pid,pos+delta,length,kind))
+    if not template.get("skip_table"):
+        region(resource+24,8,struct.pack(">Q",template["file_len"]+delta))
+        for i in range(template["records"]):
+            at = template["table_at"] + i*ROW.size
+            pid, pos, length, kind = ROW.unpack(region(at,ROW.size))
+            if pid == 2813:
+                if pos != relative or length != len(record):
+                    raise ValueError("配置对象与模板不一致。")
+                region(at,ROW.size,ROW.pack(pid,pos,len(updated),kind))
+            elif delta and pos > relative:
+                region(at,ROW.size,ROW.pack(pid,pos+delta,length,kind))
     absolute = resource + obj
     i = next(i for i in raw if starts[i] <= absolute < starts[i]+len(raw[i]))
     offset = absolute - starts[i]
     if raw[i][offset:offset+len(record)] != record:
         raise ValueError("配置对象数据与模板不一致。")
     raw[i][offset:offset+len(record)] = updated.ljust(len(record)+delta,b"\0")
-    struct.pack_into(">Q",meta,template["file_record"]+8,template["file_len"]+delta)
-    for offset in template["other_nodes"]:
-        start, = struct.unpack_from(">Q",meta,offset)
-        struct.pack_into(">Q",meta,offset,start+delta)
+    cdn_at = template.get("cdn_at",-1)
+    if cdn_at is not None and cdn_at >= 0:
+        cdn_old = template["cdn_original"].encode("ascii")
+        cdn_new = (url.rstrip("/") + "/Resources").encode("ascii")
+        if len(cdn_new) > len(cdn_old):
+            raise ValueError("区服地址过长，无法写入客户端 CDN 字段。")
+        absolute = cdn_at
+        ci = next(i for i in raw if starts[i] <= absolute < starts[i]+len(raw[i]))
+        co = absolute - starts[i]
+        if (raw[ci][co-4:co] != struct.pack("<I",len(cdn_old))
+                or raw[ci][co:co+len(cdn_old)] != cdn_old):
+            raise ValueError("配置模板中的 CDN 字段无效。")
+        raw[ci][co-4:co] = struct.pack("<I",len(cdn_new))
+        raw[ci][co:co+len(cdn_old)] = cdn_new.ljust(len(cdn_old),b"\0")
+    if not template.get("skip_table"):
+        struct.pack_into(">Q",meta,template["file_record"]+8,template["file_len"]+delta)
+        for offset in template["other_nodes"]:
+            start, = struct.unpack_from(">Q",meta,offset)
+            struct.pack_into(">Q",meta,offset,start+delta)
 
     rows = []
     payload = {}
@@ -220,7 +269,9 @@ def export_config(source, destination, endpoint, *, previous_sha256=None):
     destination = destination.resolve()
     if destination == source or destination.is_relative_to(original_root):
         raise ValueError("请使用官服目录之外的独立客户端副本。")
-    template = json.loads(bz2.decompress((HERE/"native_endpoint_template.json.bz2").read_bytes()))
+    template = template_for(source)
+    if template is None:
+        raise ValueError("原版文件与支持的国服 PC 1.1.12 版本不一致。")
     if source.stat().st_size != template["source_bytes"]:
         raise ValueError("原版文件与支持的国服 PC 1.1.12 版本不一致。")
     destination.parent.mkdir(parents=True,exist_ok=True)
@@ -254,7 +305,7 @@ def export_config(source, destination, endpoint, *, previous_sha256=None):
                     original = src.read(p)
                     incoming.update(original)
                     write(replacement.get(i,original))
-                if incoming.hexdigest()!=KNOWN_SOURCE or src.read(1):
+                if incoming.hexdigest()!=template["source_sha256"] or src.read(1):
                     raise ValueError("源配置的 SHA-256 与国服 1.1.12 不一致。")
                 if dst.tell()!=length:
                     raise ValueError("新配置校验失败。")

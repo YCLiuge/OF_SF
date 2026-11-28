@@ -130,7 +130,7 @@ class ProfileHandler(BaseHTTPRequestHandler):
             return
         if handle_game_dispatch(self):
             return
-        if self.path != "/local/v1/accounts/attach" and self.path not in ACCOUNT_ROUTES and self.path not in ("/local/v1/profiles", "/local/v1/sessions"):
+        if self.path != "/local/v1/accounts/attach" and self.path != "/local/v1/accounts/prepare" and self.path not in ACCOUNT_ROUTES and self.path not in ("/local/v1/profiles", "/local/v1/sessions"):
             self._reply(404, {"error": "route not found"})
             return
         if self.path.endswith("/profiles") and not self.server.registration:
@@ -154,6 +154,18 @@ class ProfileHandler(BaseHTTPRequestHandler):
             body = json.loads(raw.decode("utf-8"), object_pairs_hook=of_contracts.unique_keys)
             if not isinstance(body, dict):
                 raise ValueError()
+            if self.path == "/local/v1/accounts/prepare":
+                remote=getattr(self.server,"remote_password",None)
+                if remote is None:
+                    raise AccountError(403,"remote_account_mode_disabled")
+                if set(body)!={"slot","ticket"}:
+                    raise ValueError()
+                prepared=remote.prepare(body["slot"],body["ticket"])
+                if prepared.pending is None:
+                    raise AccountError(503,"remote_prepare_unavailable")
+                self._reply(200,{"ok":True,"slot":prepared.slot,"pending":prepared.pending,
+                                 "expires_in":prepared.expires_in})
+                return
             if self.path == "/local/v1/accounts/attach":
                 seats=getattr(self.server,"native_accounts",None)
                 if not seats:

@@ -10,6 +10,7 @@ import socket
 import struct
 import time
 from urllib.parse import urlsplit
+from channel_policy import for_build
 from local_picker import LABEL as PICKER_LABEL, LocalPicker
 
 
@@ -286,9 +287,17 @@ class GameDispatch:
             except (KeyError,TypeError,ValueError,OSError,sqlite3.Error,http.client.HTTPException):
                 rows=[]
             return 200, {"data": rows, "serverTime": time.time_ns() // 1_000_000}
-        if route == "/dispatch/get_login_url_list":
-            return 200, {"LoginUrlList": [{"loginUrl": self.origin, "name": self.region_name}]}
         build = getattr(self.assets, "build", BUILD)
+        channel = for_build(build)
+        if route == "/dispatch/get_login_url_list":
+            # TapTap uses the dispatch URL list; Bilibili follows its own channel
+            # launch path with an empty list. Steam expects an empty response body.
+            mode = channel.login_url_mode if channel else ("tap" if build == BUILD else "empty_list")
+            if mode == "empty":
+                return 200, None
+            if mode == "empty_list":
+                return 200, {"LoginUrlList": []}
+            return 200, {"LoginUrlList": [{"loginUrl": self.origin, "name": self.region_name}]}
         version = build+"_"+getattr(self.assets,"plaza_version",PATCH)
         if route in ("/dispatch/region_info", "/dispatch/client_hot_update") and self.assets and self.maintenance:
             if hasattr(self.maintenance, "plaza") and hasattr(self.assets, "select_plaza"):
@@ -305,12 +314,28 @@ class GameDispatch:
         if route == "/dispatch/client_hot_update":
             if self.assets is None:
                 return 503, {"status": False, "message": "1.1.12 client assets are not mounted on this server"}
+            steam = bool(channel and channel.steam)
             return 200, {"status": True, "message": "success", "hotOssUrl": self.origin + "/Resources",
                          "currentVersion": version, "server": "private", "server_id": "10001",
-                         "ssAppId": "", "ssServerUrl": "", "open_gm": False, "open_error_log": False,
+                         "ssAppId": "00000000000000000000000000000000" if steam else "",
+                         "ssServerUrl": self.origin if steam else "",
+                         "open_gm": False, "open_error_log": False,
                          "open_netConnecting_log": False, "ipAddress": "", "payUrl": "",
-                         "isTestServer": False, "error_log_level": 2, "open_cs": False}
+                         "isTestServer": False, "error_log_level": 2, "open_cs": False,
+                         "serverTime": time.time_ns() // 1_000_000}
         raise KeyError(route)
+
+
+def _send(handler, status, response):
+    """Reply to discovery routes; None means the stock Steam empty body."""
+    if response is not None:
+        handler._reply(status, response)
+        return
+    handler.send_response(status)
+    handler.send_header("Content-Length", "0")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.close_connection = True
 
 
 def _resource(handler, dispatch, route):
@@ -390,7 +415,7 @@ def handle_game_dispatch(handler):
                 except OSError:
                     pass
             status, response = dispatch.response(suffix)
-            handler._reply(status,response)
+            _send(handler,status,response)
         return True
     if route not in ROUTES and not route.startswith("/Resources/"):
         return False
@@ -406,9 +431,9 @@ def handle_game_dispatch(handler):
                 # The PC launcher already selected and configured FinalLoginServer. An empty list
                 # continues on that origin. Every nonempty list opens Unity's name + URL debug menu.
                 response = {"LoginUrlList": []}
-            else:
+            elif response is not None:
                 response["LoginUrlList"].append({"loginUrl":dispatch.origin + picker.prefix,"name":PICKER_LABEL})
-        handler._reply(status,response)
+        _send(handler,status,response)
     elif handler.command in ("GET","HEAD") and route.startswith("/Resources/"):
         _resource(handler,dispatch,route)
     else:

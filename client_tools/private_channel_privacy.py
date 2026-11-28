@@ -58,8 +58,9 @@ def protect_private_channel_log(home):
     if not all(path.is_file() for path in (marker, config, product)):
         raise ValueError("请选择已安装的私服根目录。")
     owner = json.loads(marker.read_bytes()).get("instance")
+    product_lines = product.read_text("utf-8").splitlines()
     if (not isinstance(owner, str) or not owner or json.loads(config.read_bytes()).get("instance") != owner
-            or product.read_text("utf-8").splitlines() != ["OFPriv", "开放空间"]):
+            or len(product_lines) != 2 or product_lines[0] != "OFPriv" or not product_lines[1].strip()):
         raise ValueError("私服副本标识不匹配，已停止处理渠道日志。")
     sdk.mkdir(exist_ok=True)
     try:

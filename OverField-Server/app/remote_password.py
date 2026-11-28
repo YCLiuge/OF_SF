@@ -88,6 +88,12 @@ class RemotePassword:
     def activate(self,prepared):
         return prepared.legacy if prepared.legacy is not None else self._exchange(prepared.slot,{"pending":prepared.pending})
 
+    def connect_ticket(self,slot,ticket):
+        """Activate a pending remote launch ticket supplied directly by the game client."""
+        if not isinstance(slot,str) or not SLOT.fullmatch(slot) or not isinstance(ticket,str) or not PENDING.fullmatch(ticket):
+            raise ValueError("Invalid private launch ticket")
+        return self.connect(self.activate(PreparedLogin(slot,0,pending=ticket)))
+
     def resume(self,login):
         for delay in (0,.2,.5):
             if delay:

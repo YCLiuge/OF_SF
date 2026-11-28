@@ -17,11 +17,18 @@ import time
 from urllib.parse import urlsplit
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from prepare_client import ASSEMBLY, BUILD, plain_path, prepare, save, sha, short_text
+from prepare_client import ASSEMBLY, BUILD, LAUNCHER, channel_records, plain_path, prepare, save, sha, short_text
+from channel_policy import for_build
 from native_endpoint import validate_endpoint
 from realm_addresses import recent, ssh_address
 
 VERIFY_URL="https://sdkapi-of.inutan.com/webapi/checkUserInfo"
+
+
+def channel_name(source):
+    """Return the channel short name used by the client login patch."""
+    channel=for_build(short_text(source/"version"))
+    return channel.name if channel else "taptap"
 
 @contextlib.contextmanager
 def changing(home):
@@ -36,7 +43,7 @@ def changing(home):
 def json_call(url,path,method,body=None):
     u=urlsplit(url);cls=http.client.HTTPSConnection if u.scheme=='https' else http.client.HTTPConnection
     extra={'context':ssl.create_default_context()} if u.scheme=='https' else {}
-    c=cls(u.hostname,u.port,timeout=(20 if path=="/local/v1/accounts/attach" else 4),**extra)
+    c=cls(u.hostname,u.port,timeout=(20 if path in ("/local/v1/accounts/attach","/local/v1/accounts/prepare") else 4),**extra)
     try:
         c.request(method,path,body=(json.dumps(body).encode("utf8") if body is not None else b"{}") if method=='POST' else None,
                   headers={'Content-Type':'application/json','Connection':'close'})
@@ -45,6 +52,15 @@ def json_call(url,path,method,body=None):
         if len(raw)>65536 or response.status!=200:raise ValueError("服务器未提供所需区服接口（HTTP %d）。"%response.status)
         return json.loads(raw)
     finally:c.close()
+
+def remote_pending_ticket(url,account):
+    """Reserve a remote launch ticket through the local gateway, without an official token."""
+    receipt=json_call(url,"/local/v1/accounts/prepare","POST",
+                      {"slot":account["slot"],"ticket":account["ticket"]})
+    pending=receipt.get("pending")
+    if receipt.get("ok") is not True or not isinstance(pending,str) or not pending.startswith(("oft_","ofh_")):
+        raise ValueError("本机区服未返回可用的私服启动票据。")
+    return pending
 
 def loopback(host):
     if host=="localhost":return True
@@ -200,15 +216,27 @@ def stop_owned(server,state_dir,marker,old):
     raise ValueError("上一个区服仍在保存，请稍后再试。")
 
 
-def local_start(home,tools,src,url,remote,account_native=False):
+def local_start(home,tools,src,url,remote,account_native=False,private_channel=False):
     # This adapter has been verified only for the national TapTap issuer.
     # Resource-only recognition of another channel cannot select an identity provider.
+    version=short_text(src/"version")
+    record=next((row for row in channel_records() if row["build"]==version),None)
     assembly = plain_path(src/"GameAssembly.dll")
-    if short_text(src/"version") != BUILD or not assembly.is_file() or sha(assembly) != ASSEMBLY:
+    launcher = plain_path(src/"launcher.exe")
+    if record is not None:
+        expected_assembly=record["files"]["GameAssembly.dll"]
+        expected_launcher=record["files"]["launcher.exe"]
+    elif version==BUILD:
+        expected_assembly=ASSEMBLY
+        expected_launcher=LAUNCHER
+    else:
+        expected_assembly=expected_launcher=None
+    if (expected_assembly is None or not assembly.is_file() or not launcher.is_file()
+            or sha(assembly)!=expected_assembly or sha(launcher)!=expected_launcher):
         raise ValueError("此渠道尚未验证游戏账号服务，请从原渠道启动器进入。")
 
     u=urlsplit(url)
-    if u.hostname not in ("127.0.0.1","localhost") or u.scheme!="http":
+    if not loopback(u.hostname or "") or u.scheme!="http":
         raise ValueError("自动运行的本机登录服务请使用 http://127.0.0.1:端口。")
     state=realm_state(home,remote)
     state.parent.mkdir(exist_ok=True)
@@ -223,17 +251,22 @@ def local_start(home,tools,src,url,remote,account_native=False):
             return
         raise ValueError("已有区服占用派发端口，请选择已有网关或先正常停服。")
     env={k:v for k,v in os.environ.items() if not k.startswith("OF_")}
-    env.update(OF_BIND="127.0.0.1",OF_GAME_HOST="127.0.0.1",OF_CLIENT_ROOT=str(src),
-               OF_HTTP_PORT=str(u.port or 80),OF_HTTP_HOSTS="localhost,127.0.0.1",OF_DISPATCH_URL=url,
+    bind_host=urlsplit(url).hostname
+    if bind_host is None or not loopback(bind_host):
+        bind_host="127.0.0.1"
+    env.update(OF_BIND=bind_host,OF_GAME_HOST="127.0.0.1",OF_CLIENT_ROOT=str(src),
+               OF_HTTP_PORT=str(u.port or 80),OF_HTTP_HOSTS="localhost,127.0.0.1,"+bind_host,OF_DISPATCH_URL=url,
                OF_GAME_PORT=str(managed_game_port()),OF_STAGE_DIAGNOSTICS="1",OF_QUICKSDK_VERIFY_URL=VERIFY_URL,
                OF_QUICKSDK_CREATE_PLAYERS="1",OF_NATIVE_SESSION=desired,OF_NATIVE_PICKER="launcher",
                OF_ACCOUNT_REGISTRATION="open",OF_PRIVATE_CLIENT_EXE=str((src/"launcher.exe").resolve()))
-    if account_native:
+    if account_native and not private_channel:
         env["OF_ACCOUNT_NATIVE"]="1"
     if remote.get("publicTls"):
-        if not account_native:
+        if not (account_native or private_channel):
             raise ValueError("公开区服须使用本服的私服账号。")
-        env.update(OF_PLAYER_REALM_TLS=remote["publicTls"], OF_REMOTE_ACCOUNT_NATIVE="1")
+        env["OF_PLAYER_REALM_TLS"]=remote["publicTls"]
+        if account_native and not private_channel:
+            env["OF_REMOTE_ACCOUNT_NATIVE"]="1"
         if remote.get("caFile"):
             env["OF_PLAYER_REALM_CA"]=remote["caFile"]
     elif remote:
@@ -299,6 +332,7 @@ def main():
     parser.add_argument('--endpoint',required=True)
     parser.add_argument('--local-server',action='store_true')
     parser.add_argument('--account-stdin',action='store_true')
+    parser.add_argument('--private-channel-login',action='store_true')
     parser.add_argument('--public-tls')
     parser.add_argument('--ca-file',type=Path)
     parser.add_argument('--compact-only', action='store_true')
@@ -309,7 +343,7 @@ def main():
     parser.add_argument('--remote-pair-first',action='store_true')
     args=parser.parse_args()
     remote=remote_settings(args)
-    home=args.home.resolve();url=validate_endpoint(args.endpoint);src=args.source.absolute()
+    home=args.home.absolute();url=validate_endpoint(args.endpoint);src=args.source.absolute()
     if args.local_server and not loopback(urlsplit(url).hostname):raise ValueError('远程区服请取消“在本机运行区服”。')
     if not loopback(urlsplit(url).hostname):
         raise ValueError('异地的玩法服务需通过已配置的本机身份网关接入；请填写其回环派发地址。')
@@ -339,22 +373,43 @@ def main():
             meta.pop(key,None)
         meta.update({k:v for k,v in remote.items() if k!='slot' and v is not None})
         meta['localServer']=bool(args.local_server and not remote)
+        private_channel = bool(account is not None and args.private_channel_login)
         if args.action in ("launch","relaunch"):
             meta["privateAccountLogin"]=account is not None
+            meta["privateChannelLogin"]=private_channel
         save(home/'client-config.json',meta)
         recent(home,url,args.local_server,remote)
         if args.action=='prepare':
             print('区服地址已保存。'+url);return
         if args.local_server or remote:
             print('正在启动本机登录服务。' if remote else '正在启动本机区服。',flush=True)
-            local_start(home,home/'OverField-Server',home/'Client',url,remote,account is not None)
+            local_start(home,home/'OverField-Server',home/'Client',url,remote,
+                        account is not None, private_channel=private_channel)
         preflight(url)
+        if private_channel and remote:
+            account["ticket"]=remote_pending_ticket(url,account)
         print('区服已就绪，正在打开原版 Unity 客户端。',flush=True)
         game=home/'Client/launcher.exe'
-        # Channel sign-in remains inside the original player and its own SDK.
+        child_env=dict(os.environ)
+        if private_channel:
+            if not re.fullmatch(r"(?:oft|ofh)_[A-Za-z0-9_-]{43}",account["ticket"]):
+                raise ValueError("私服登录票据格式无效，请重新登录私服账号。")
+            channel=channel_name(src)
+            child_env.update(OF_SF_SLOT=account["slot"], OF_SF_TICKET=account["ticket"],
+                             OF_SF_NICKNAME=str(account.get("nickname","")),
+                             OF_SF_CHANNEL=channel,
+                             NO_PROXY="127.0.0.1,localhost,::1",
+                             no_proxy="127.0.0.1,localhost,::1")
+            if channel=="steam":
+                # Steam keeps the official data.unity3d; redirect its in-memory
+                # login config instead of rebuilding the signed Unity bundle.
+                child_env["OF_SF_LOGIN"]=url
+                child_env["OF_SF_CDN"]=url.rstrip("/")+"/Resources"
+                child_env["OF_SF_YOO_MODE"]="2"
+            print("正在使用私服票据直接进入区服，不打开官方渠道登录。",flush=True)
         proc=subprocess.Popen([str(game),*display_arguments(args.display)],cwd=game.parent,close_fds=True,
-                              stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        if account is not None:
+                              env=child_env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        if account is not None and not private_channel:
             try:
                 payload={"ticket":account["ticket"],"pid":proc.pid}
                 if remote:payload["slot"]=account["slot"]
@@ -365,6 +420,8 @@ def main():
                 raise ValueError("本机区服未确认此私服账号与游戏进程的绑定。请正常退出游戏，重新登录私服账号再试。") from None
             finally:account.clear()
             print("该私服账号已绑定到本次原版游戏进程。",flush=True)
+        elif account is not None:
+            account.clear()
         (home/'.launcher.pid').write_text(str(proc.pid),encoding='ascii')
         time.sleep(.45)
         if proc.poll() is not None:raise ValueError('原版客户端已退出。请检查是否另有游戏实例在运行。')

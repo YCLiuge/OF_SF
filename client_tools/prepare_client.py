@@ -11,8 +11,9 @@ import tempfile
 from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"OverField-Server/app"))
-from client_build_catalog import BUILD, PATCH, NOVEMBER_PATCH as NOVEMBER_UPDATE, TAPTAP_RESOURCES, channel_records
+from client_build_catalog import BUILD, PATCH, NOVEMBER_PATCH as NOVEMBER_UPDATE, TAPTAP_RESOURCES, RESOURCE_SERIES, channel_records
 
+from channel_policy import for_build
 from native_endpoint import KNOWN_SOURCE, export_config, validate_endpoint
 from private_channel_privacy import protect_private_channel_log
 
@@ -25,6 +26,22 @@ RELEASE_FILES = {"boot.config","ScriptingAssemblies.json","RuntimeInitializeOnLo
 def sha(path):
     with path.open("rb") as f:
         return hashlib.file_digest(f,"sha256").hexdigest()
+
+
+def app_product(source):
+    """Keep the retail product name (open-space vs OverField) used by YooAsset/saves."""
+    try:
+        lines=(Path(source)/"launcher_Data/app.info").read_text(encoding="utf-8-sig").splitlines()
+        value=lines[1].strip() if len(lines)>1 else ""
+        if value and len(value)<=64 and all(c.isprintable() for c in value):
+            return value
+    except (OSError,IndexError):
+        pass
+    return "开放空间"
+
+
+def private_app_info(source):
+    return ("OFPriv\n"+app_product(source)).encode("utf8")
 
 MANIFESTS = {version: data.digest for version, data in TAPTAP_RESOURCES.patches.items()}
 NOVEMBER_MANIFEST_SHA256 = MANIFESTS[NOVEMBER_UPDATE]
@@ -54,14 +71,48 @@ def short_text(file, limit=128):
     return file.read_bytes().decode("utf-8-sig",errors="replace").strip()
 
 
+def record_for_build(build):
+    return next((record for record in channel_records() if record["build"] == build), None)
+
+
+def record_for_source(source, *, settings=True):
+    version = short_text(source/"version")
+    record = record_for_build(version)
+    if record is None:
+        return None
+    fingerprints = {**record["files"], **record.get("verified_sdk", {})}
+    if not settings:
+        fingerprints.pop("launcher_Data/data.unity3d", None)
+    for name, expected in fingerprints.items():
+        file = plain_path(source / name)
+        if not file.is_file() or sha(file) != expected:
+            return None
+    return record
+
+
 def supported_manifest(source):
     folder = source / MANIFEST_DIR
     version = short_text(folder / "PackageManifest_DefaultPackage.version")
     expected = MANIFESTS.get(version)
-    if expected is None:
+    if expected is not None:
+        manifest = plain_path(folder / ("PackageManifest_DefaultPackage_" + version + ".bytes"))
+        return manifest.is_file() and sha(manifest) == expected
+    record = record_for_build(short_text(source/"version"))
+    if record is None:
         return False
     manifest = plain_path(folder / ("PackageManifest_DefaultPackage_" + version + ".bytes"))
-    return manifest.is_file() and sha(manifest) == expected
+    if not manifest.is_file():
+        return False
+    series = RESOURCE_SERIES.get(record["build"])
+    patch = series.patches.get(version) if series else None
+    if patch is not None:
+        return sha(manifest) == patch.digest
+    expected = record.get("bundled_manifest_sha256")
+    if expected:
+        return sha(manifest) == expected
+    if series is not None:
+        return sha(manifest) == series.base_digest
+    return True
 
 
 class RecognizedChannelError(ValueError):
@@ -69,20 +120,12 @@ class RecognizedChannelError(ValueError):
 
 
 def verify_retail(source, *, settings=True):
+    record = record_for_source(source, settings=settings)
+    if record is not None:
+        if not supported_manifest(source):
+            raise ValueError("客户端的活动资源清单未通过验证。请在原渠道完成国服 1.1.12 更新。")
+        return record
     version=short_text(source/"version")
-    known = [record for record in channel_records() if record["build"] == version]
-    evidence = {}
-    for record in known:
-        fingerprints = {**record["files"], **record.get("verified_sdk", {})}
-        for name, expected in fingerprints.items():
-            if name not in evidence:
-                file = plain_path(source / name)
-                evidence[name] = sha(file) if file.is_file() else None
-            if evidence[name] != expected:
-                break
-        else:
-            label = record.get("publisher_version") or version
-            raise RecognizedChannelError(f"已识别{record['channel']} {label}（构建 {version}）。此渠道的区服登录尚未验证，可从原渠道游玩。")
     if version!=BUILD:
         value=version if re.fullmatch(r"[0-9.-]{1,40}",version) else "未知"
         raise ValueError(f"此客户端的构建 {value} 尚未验证。请使用兼容的国服 PC 1.1.12。")
@@ -95,6 +138,7 @@ def verify_retail(source, *, settings=True):
         file=plain_path(source/name)
         if not file.is_file() or sha(file)!=expected:
             raise ValueError(f"{name} 的国服 PC 1.1.12 指纹不匹配，当前渠道版本尚未验证。")
+    return None
 
 
 def library_candidates(root, errors):
@@ -257,18 +301,24 @@ def _from_installed(source, home, endpoint, progress, *, compact_only=False):
     old=json.loads(meta_path.read_bytes()) if meta_path.is_file() else {}
     baseline=home/"ClientSettings"/"data.unity3d"
     original=src/"launcher_Data/data.unity3d"
+    record=record_for_build(short_text(src/"version"))
+    channel=for_build(record["build"]) if record else None
+    steam=bool(channel and channel.keep_official_data)
+    source_launcher=record["files"]["launcher.exe"] if record else LAUNCHER
+    source_assembly=record["files"]["GameAssembly.dll"] if record else ASSEMBLY
+    source_config=record["files"]["launcher_Data/data.unity3d"] if record else KNOWN_SOURCE
     def settings_source():
         if baseline.exists():
-            if sha(baseline)!=KNOWN_SOURCE:raise ValueError("独立原始配置文件校验失败。")
+            if sha(baseline)!=source_config:raise ValueError("独立原始配置文件校验失败。")
             return baseline
-        if not original.is_file() or sha(original)!=KNOWN_SOURCE:
+        if not original.is_file() or sha(original)!=source_config:
             raise ValueError("更改区服需要此版本原始 data.unity3d，请选择原版安装目录。")
         baseline.parent.mkdir(exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=baseline.parent,delete=False) as pending:
             temp=Path(pending.name)
         try:
             shutil.copyfile(original,temp)
-            if sha(temp)!=KNOWN_SOURCE:raise ValueError("复制中的原始配置发生变化。")
+            if sha(temp)!=source_config:raise ValueError("复制中的原始配置发生变化。")
             os.replace(temp,baseline)
         finally:
             temp.unlink(missing_ok=True)
@@ -277,13 +327,13 @@ def _from_installed(source, home, endpoint, progress, *, compact_only=False):
         if (not old or not (dest/".of-private-client.json").is_file()
             or json.loads((dest/".of-private-client.json").read_bytes()).get("instance")!=old.get("instance")):
             raise ValueError("现有 Client 目录不属于这份配置，请为此客户端选择独立位置。")
-        if sha(dest/"launcher.exe")!=LAUNCHER or sha(dest/"GameAssembly.dll")!=ASSEMBLY:
+        if sha(dest/"launcher.exe")!=source_launcher or sha(dest/"GameAssembly.dll")!=source_assembly:
             raise ValueError("私服副本的原版程序已经变更。")
         app_info=dest/"launcher_Data/app.info"
         app_bytes=app_info.read_bytes()
-        expected_info="OFPriv\n开放空间".encode("utf8")
+        expected_info=private_app_info(src)
         if app_bytes!=expected_info:
-            if app_bytes!="OFPriv\r\n开放空间\r\n".encode("utf8"):
+            if app_bytes!=expected_info.replace(b"\n",b"\r\n"):
                 raise ValueError("私服副本的 app.info 已由其他程序修改。")
             replacement=app_info.with_name(".app.info.new")
             replacement.write_bytes(expected_info)
@@ -302,6 +352,18 @@ def _from_installed(source, home, endpoint, progress, *, compact_only=False):
             elif checksum!=old["sha256"]:
                 raise ValueError("区服配置在写入过程中被其他程序更改。")
             pending.unlink()
+        if steam:
+            # Steam keeps its signed/official data.unity3d; the channel mod
+            # redirects the login endpoint in memory to preserve the Logo scene.
+            if checksum != source_config:
+                raise ValueError("Steam 副本的 data.unity3d 必须是官方原版，请重新准备。")
+            if endpoint != old.get("url") or old.get("layout") != 2 or old.get("sha256") != checksum:
+                updated = dict(old, url=endpoint, layout=2, sha256=checksum)
+                save(meta_path, updated)
+                old = updated
+            if not baseline.is_file() and original.is_file():
+                settings_source()
+            return old
         if checksum!=old.get("sha256"):
             raise ValueError("私服副本的配置已由其他程序修改。")
         if endpoint!=old.get("url") or old.get("layout")!=2:
@@ -385,10 +447,13 @@ def _from_installed(source, home, endpoint, progress, *, compact_only=False):
     verify_retail(partial,settings=False)
     dd=partial/"launcher_Data"
     # app.info and the Unity PlayerSettings use the same private company for local saves.
-    (dd/"app.info").write_bytes("OFPriv\n开放空间".encode("utf8"))
+    (dd/"app.info").write_bytes(private_app_info(src))
     (dd/"Quicksdk").mkdir(exist_ok=True)
     cfg=dd/"data.unity3d"
-    if cfg.exists():
+    if steam:
+        shutil.copyfile(original,cfg)
+        result={"url":endpoint,"sha256":sha(cfg),"bytes":cfg.stat().st_size}
+    elif cfg.exists():
         if meta.get('sha256')!=sha(cfg):raise ValueError("暂存的原版派发配置发生变化。")
         result=export_config(original,cfg,endpoint,previous_sha256=meta['sha256'])
     else:
@@ -473,7 +538,7 @@ def _install_media(media,home,endpoint,progress):
     if sha(partial/"launcher.exe")!=LAUNCHER or sha(partial/"GameAssembly.dll")!=ASSEMBLY:
         raise ValueError("安装媒体中的 Unity 程序校验失败。")
     dd=partial/"launcher_Data"
-    (dd/"app.info").write_bytes("OFPriv\n开放空间".encode("utf8"))
+    (dd/"app.info").write_bytes(private_app_info(media))
     (dd/"Quicksdk").mkdir(exist_ok=True)
     cfg=dd/"data.unity3d"
     if cfg.exists() and meta.get("sha256")!=sha(cfg):

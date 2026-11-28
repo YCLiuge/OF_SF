@@ -25,6 +25,7 @@ import realm_rules
 import realm_uids
 from online_identity import OnlineIdentity
 from remote_realm import RemoteRealm
+from local_identity import SLOT
 from contextlib import ExitStack
 
 _log = logging.getLogger("overfield.local.game")
@@ -261,15 +262,22 @@ class _Connection(socketserver.BaseRequestHandler):
             req = pb.VerifyLoginTokenReq.FromString(body)
             try:
                 remote_grant=None
-                if req.login_token.startswith("oft_") or host.online_identity is None:
+                if req.login_token.startswith(("oft_","ofh_")) or host.online_identity is None:
                     if host.remote_password:
-                        raise ValueError("Use the private launcher to select the remote account")
-                    slot = host.identity.resolve_ticket(req.login_token)
-                    from local_identity import _digest
-                    private_game_digest=_digest(req.login_token)
-                    if req.sdk_uid and req.sdk_uid != slot:
-                        raise ValueError("wrong private profile")
-                    reply_uid, reply_account, reply_os = slot, 0, 0
+                        slot = req.sdk_uid
+                        if not isinstance(slot,str) or not SLOT.fullmatch(slot):
+                            raise ValueError("wrong private profile")
+                        with host.stages.login_step("realm_connect"):
+                            remote_player=remote_resources.enter_context(
+                                host.remote_password.connect_ticket(slot,req.login_token))
+                        reply_uid, reply_account, reply_os = slot, 0, 0
+                    else:
+                        slot = host.identity.resolve_ticket(req.login_token)
+                        from local_identity import _digest
+                        private_game_digest=_digest(req.login_token)
+                        if req.sdk_uid and req.sdk_uid != slot:
+                            raise ValueError("wrong private profile")
+                        reply_uid, reply_account, reply_os = slot, 0, 0
                 else:
                     if host.native_accounts:
                         with host.stages.login_step("channel"):
@@ -284,7 +292,9 @@ class _Connection(socketserver.BaseRequestHandler):
                     else:
                         slot = host.online_identity.authenticate(req.sdk_uid, req.login_token, self.client_address[0])
                     reply_uid, reply_account, reply_os = req.sdk_uid, req.account_type, req.os
-                if remote_grant:
+                if remote_player is not None:
+                    pass
+                elif remote_grant:
                     with host.stages.login_step("realm_connect"):
                         remote_player=remote_resources.enter_context(host.remote_password.connect(remote_grant))
                 elif host.remote_realm:

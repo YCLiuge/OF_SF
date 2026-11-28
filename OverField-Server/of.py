@@ -100,6 +100,7 @@ def serve(state):
             http.accounts.gifts.game = game
             http.accounts.imports.game = game
             http.native_accounts = game.native_accounts
+            http.remote_password = game.remote_password
             http.game_dispatch = GameDispatch(os.getenv("OF_DISPATCH_URL") or default_origin,
                                                cfg["game_host"], cfg["game_port"],
                                                client_root=os.getenv("OF_CLIENT_ROOT") or None)
