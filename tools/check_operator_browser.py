@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         js("document.getElementById('filter').value='公告';document.getElementById('filter').dispatchEvent(new Event('input'));document.querySelector('nav [title=\"notice.publish\"]').click()")
         assert js("document.getElementById('field-body').tagName==='TEXTAREA' && !document.getElementById('execute').disabled")
         js("document.getElementById('field-title').value='区服维护';document.getElementById('field-body').value='测试活动已开放。';window.confirm=()=>true;document.getElementById('operation').requestSubmit()")
-        until(lambda:js("!document.getElementById('output').hidden && JSON.parse(document.getElementById('result').textContent).id>0"))
+        until(lambda:js("!document.getElementById('output').hidden && document.getElementById('result').textContent.includes('公告已发布')"))
         assert request(owner,'GET','/admin/v1/operations/maintenance.list',token)[1]['result']['notices'][0]['title']=='区服维护'
         js("document.getElementById('filter').value='';document.getElementById('filter').dispatchEvent(new Event('input'));document.querySelector('nav [title=\"notice.edit\"]').click()")
         assert js("document.querySelector('#clear-images').click();document.getElementById('field-images').disabled")
@@ -77,6 +77,9 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         from admin_console_browser_checks import verify_password_reset
         verify_password_reset(js,until,lambda name,body:request(profile,"POST","/local/v1/accounts/"+name,data=body))
 
+        from admin_console_browser_checks import verify_directory, verify_record_workflows
+        verify_directory(js,until)
+        verify_record_workflows(js,until,get,post,base/'realm')
         command('Emulation.setDeviceMetricsOverride',dict(width=390,height=844,deviceScaleFactor=1,mobile=True))
         js("""document.querySelector('nav [title="codes.issue"]').click()""")
         until(lambda:js("!!document.querySelector('.reward-card')"))

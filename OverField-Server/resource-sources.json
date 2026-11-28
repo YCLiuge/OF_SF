@@ -237,9 +237,9 @@
       "detail": "Furniture.json"
     },
     "resources/data/Gacha.json": {
-      "sha256": "d072dafec2234b023c7e928832e1a6d4b19f093be43b538f6183c35f76ac416b",
-      "bytes": 40834,
-      "source": "TapTap PC 1.1.12",
+      "sha256": "7637dff38d6c1b13a51145f9574469744f7149f1b935e7eb4ccb0b2c4f2f35d6",
+      "bytes": 63053,
+      "source": "TapTap PC 1.1.12 / 2026-11-25-19-54-41",
       "detail": "Gacha.json"
     },
     "resources/data/GardenCharacterSeats.json": {
@@ -565,6 +565,18 @@
       "bytes": 311438,
       "source": "TapTap PC 1.1.12",
       "detail": "Item.text_i_d -> String_Simplified.string_item_text.text[0]; tools/export_reward_names.py"
+    },
+    "resources/operator/activity-names.zh.json": {
+      "sha256": "cd4486cd22361e213a3ec86d14410a3eda87b25a2576c70c0362a561e0122168",
+      "bytes": 8589,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Activity and ActivityTurntable display names from String_Simplified; tools/export_activity_names.py"
+    },
+    "resources/operator/gacha-cards.zip": {
+      "sha256": "d5c1fc402894bce049a9325fd0a250b89c2343ddda2b6eb2372aced1717a6296",
+      "bytes": 967733,
+      "source": "TapTap PC 1.1.12",
+      "detail": "Recruit names, editions and reduced character/poster previews; tools/export_gacha_cards.py"
     }
   }
 }

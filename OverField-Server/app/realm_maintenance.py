@@ -140,7 +140,7 @@ def _database_stamp(path):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def admin_feed(state):
+def admin_feed(state, *, before=2**63-1, limit=30):
     from local_identity import LocalIdentity
     database = state/"identity.sqlite3"
     if not database.is_file():
@@ -153,7 +153,7 @@ def admin_feed(state):
             owner = Maintenance(LocalIdentity(database))
             verifier.database_stamp = _database_stamp(database)  # initialization may migrate an old store
             verifier.admin_owner = owner
-        return verifier.admin_owner.feed()
+        return verifier.admin_owner.feed(before=before, limit=limit)
 
 
 
@@ -199,11 +199,13 @@ class Maintenance:
             from realm_blessings import client_plan
             return client_plan(json.loads(row[0])) if row else {}
 
-    def stored_feed(self):
+    def stored_feed(self, *, before=2**63-1, limit=12):
         with closing(sqlite3.connect(self.dbfile)) as db, db:
             db.row_factory=sqlite3.Row
             db.execute("BEGIN")
-            notices=[dict(v) for v in db.execute("SELECT id,title,content,published FROM realm_notices WHERE active=1 ORDER BY id DESC LIMIT 12")]
+            notices=[dict(v) for v in db.execute(
+                "SELECT id,title,content,published FROM realm_notices WHERE active=1 AND id<? ORDER BY id DESC LIMIT ?",
+                (before,limit))]
             for n in notices:
                 rows=db.execute("SELECT a.digest,a.mime,a.width,a.height,length(a.data) FROM realm_notice_images i "
                                 "JOIN realm_notice_assets a ON a.digest=i.digest WHERE i.notice_id=? ORDER BY i.position",(n["id"],))
@@ -216,8 +218,8 @@ class Maintenance:
         if r:r["url"]=PATH+r["sha256"]
         return {"notices":notices,"release":r}
 
-    def feed(self):
-        data=self.stored_feed()
+    def feed(self, *, before=2**63-1, limit=12):
+        data=self.stored_feed(before=before, limit=limit)
         if data["release"]:
             try:
                 self.verified_stream(data["release"]).close()

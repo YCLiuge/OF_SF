@@ -343,7 +343,10 @@ class _Connection(socketserver.BaseRequestHandler):
             if head.msg_id != MsgId.PlayerLoginReq:
                 close_reason = 'protocol'
                 return
-            pb.PlayerLoginReq.FromString(body)
+            resource_build = pb.PlayerLoginReq.FromString(body).resource_version
+            # Release r9 omits this field. The retail model matches the server's
+            # list against local card IDs, so an unversioned client can receive all editions.
+            session.expanded_recruit = resource_build not in ("2026-10-21-14-05-50", "2026-11-07-22-39-35")
             info = db.get_players_info(session.player_id, "register_time,server_time_zone")
             login = pb.PlayerLoginRsp(status=pb.StatusCode_OK, server_time_ms=int(time.time()*1000),
                                       region_name="private", player_name="" if session.needs_name else session.player_name,
@@ -763,16 +766,30 @@ class LocalGameService:
                 peer.publish()
 
     def _movement(self,s,rec):
-        moved, turned = rec.HasField("pos"), rec.HasField("rot")
-        if not (moved or turned):
+        pos = rec.pos if rec.HasField("pos") else None
+        rot = rec.rot if rec.HasField("rot") else None
+        # The retail recorder omits the outer pose when the batch ends with a
+        # stationary sample. Only type 1 carries movement; actions and idle
+        # placeholders can contain unrelated vectors, including zero.
+        if pos is None or rot is None:
+            for sample in reversed(rec.data_lst):
+                if sample.sync_type != 1 or sample.is_static:
+                    continue
+                if pos is None and sample.HasField("pos"):
+                    pos = sample.pos
+                if rot is None and sample.HasField("rot"):
+                    rot = sample.rot
+                if pos is not None and rot is not None:
+                    break
+        if pos is None and rot is None:
             return
         dungeon = s.dungeon[0]
         lead = s.dungeon_lead if dungeon else s.scene_player.team.char1
         position, rotation = lead.pos, lead.rot
-        if moved:
-            position.CopyFrom(rec.pos)
-        if turned:
-            rotation.CopyFrom(rec.rot)
+        if pos is not None:
+            position.CopyFrom(pos)
+        if rot is not None:
+            rotation.CopyFrom(rot)
         if dungeon:
             pending, scene, visit = self.pending_dungeon_poses, dungeon, s.dungeon_visit
         else:

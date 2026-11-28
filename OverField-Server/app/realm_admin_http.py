@@ -135,9 +135,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.fail(405, "invalid_method", "Use GET.", [("Allow","GET")])
                 kind, raw = asset
                 self.send_response(200)
-                self.send_header("Content-Type", kind + "; charset=utf-8")
+                self.send_header("Content-Type", kind + "; charset=utf-8" if kind.startswith("text/") else kind)
                 self.send_header("Content-Length", str(len(raw)))
-                self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'")
+                self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'")
                 self.send_header("Cache-Control","no-store")
                 self.send_header("X-Content-Type-Options","nosniff")
                 self.send_header("Referrer-Policy","no-referrer")

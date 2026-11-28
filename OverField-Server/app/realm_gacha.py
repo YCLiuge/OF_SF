@@ -11,6 +11,11 @@ from state_lock import exclusive_state
 FASHION = 4000
 
 
+def expanded_banner(banner):
+    """Additional card faces in the November 25 national content tables."""
+    return 5000 <= banner <= 5023 or 903000 <= banner <= 903023 or 905000 <= banner <= 905023
+
+
 def fashion_pool():
     # National StringGacha 4000, in basis points: dye, furniture, purple weapon, gold weapon, outfit.
     return {"id":FASHION,"enabled":True,"pity":10,
@@ -27,7 +32,7 @@ def _catalog():
                        "pity_group": r["big_guarantee_pool_i_d"], "featured": r.get("character_i_d1", 0),
                        "opening": r.get("opening_time"), "closing": r.get("closing_time"),
                        "ticket": r.get("consume_item1_i_d") or r["consume_item2_i_d"]}
-            for r in gacha["info"]["datas"] if r["i_d"] in (1000, 2000, 2001, 2002) or r.get("new_u_i_gacha_type") == 3
+            for r in gacha["info"]["datas"] if r["i_d"] in (1000, 2000, 2001, 2002) or r.get("new_u_i_gacha_type") in (3, 4)
             if r.get("method1_i_d") in groups and r.get("big_guarantee_pool_i_d") in groups[r["method1_i_d"]]}
 
 
@@ -45,7 +50,10 @@ def featured_pool(pool_id):
     banner = _catalog().get(pool_id)
     if pool_id==FASHION or not banner or banner["pity_group"] in (100, 200, 300, 400):
         raise ValueError("Expected a native featured banner ID")
-    weights = {"100": 7900, "200": 1200, "300": 700, "400": 100,
+    # Character and poster editions reuse this realm's established UP preset.
+    # The authored poster method draws its normal SSR posters from 210.
+    poster_group = 210 if 210 in banner["groups"] else 200
+    weights = {"100": 7900, str(poster_group): 1200, "300": 700, "400": 100,
                str(banner["pity_group"]): 100}
     pool = {"id": pool_id, "enabled": True, "pity": 70, "weights": weights}
     validate({"pools": [pool]})
@@ -128,6 +136,36 @@ def upgrade(conn, prefix=""):
                          (json.dumps(defaults(), separators=(",", ":")),))
 
 
+    if conn.execute("INSERT OR IGNORE INTO "+prefix+"gacha_config_revisions VALUES(3)").rowcount:
+        row = conn.execute("SELECT settings FROM "+prefix+"private_gacha_config WHERE id=1").fetchone()
+        if row:
+            current = json.loads(row[0])
+            additions = expansion_pools(current["pools"])
+            if additions:
+                current["pools"].extend(additions)
+                conn.execute("UPDATE "+prefix+"private_gacha_config SET settings=? WHERE id=1",
+                             (json.dumps(current,separators=(",",":")),))
+
+
+def expansion_pools(previous):
+    """Extend the stock list; customized rosters only inherit editions of their configured UP pools."""
+    all_pools = defaults()["pools"]
+    prior_defaults = {p["id"]:p for p in all_pools if not expanded_banner(p["id"])}
+    configured = {p["id"]:p for p in previous}
+    stock = configured == prior_defaults
+    additions = []
+    for pool in all_pools:
+        key = pool["id"]
+        if not expanded_banner(key) or key in configured:
+            continue
+        if stock:
+            additions.append(pool)
+        elif key >= 900000 and key % 100000 in configured:
+            original = configured[key % 100000]
+            additions.append(dict(original, id=key))
+    return additions
+
+
 def configure(state, settings=None, *, enable_featured=None, expected=None):
     if settings is not None:
         validate(settings)
@@ -139,7 +177,9 @@ def configure(state, settings=None, *, enable_featured=None, expected=None):
             current = json.loads(stored[0]) if stored else defaults()
             check(current, expected)
             if enable_featured is not None:
-                template = featured_pool(enable_featured)
+                template = next((p for p in defaults()["pools"] if p["id"] == enable_featured), None)
+                if template is None:
+                    raise ValueError("Unknown native recruit pool")
                 match = next((p for p in current["pools"] if p["id"] == enable_featured), None)
                 if match is None:
                     current["pools"].append(template)

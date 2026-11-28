@@ -1,0 +1,13 @@
+/* Lists and record readers share the form's reading width on desktop and mobile. */
+#result{max-height:none;overflow:visible;padding:0;background:transparent;white-space:normal;font:inherit}
+#output:not([hidden]){margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
+#output>h2{font-size:17px;margin-bottom:12px}
+.record-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}
+.record-card{min-width:0;border:1px solid var(--line);border-radius:8px;padding:14px 16px;background:#fbfdfc}
+.record-card h3,.record-card p{margin:0 0 8px}.record-card small,.list-tools span{color:var(--muted)}
+.record-card p,.result-facts dd{white-space:pre-wrap;overflow-wrap:anywhere}.record-card summary{color:var(--brand);cursor:pointer}
+.result-facts{display:grid;grid-template-columns:minmax(5em,auto) minmax(0,1fr);gap:8px 14px;margin:12px 0}
+.result-facts dt{color:var(--muted)}.result-facts dd{margin:0}.list-tools{display:flex;align-items:center;gap:12px;margin:12px 0}.list-tools input{max-width:24rem}.list-tools span{white-space:nowrap}
+#result .quiet{margin-top:10px}#fields input[type=search],#fields select,#fields textarea{max-width:100%}
+realm-overview[hidden]{display:none}
+@media(min-width:741px){.desk:has(article:not([hidden])){padding-top:24px}article h1{margin:0}}

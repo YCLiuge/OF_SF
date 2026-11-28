@@ -13,7 +13,7 @@ import struct
 from local_identity import LocalIdentity
 
 
-def login(port,ticket):
+def login(port,ticket,*,resource_version=""):
     c=socket.create_connection(("127.0.0.1",port),timeout=10)
     c.settimeout(15)
     req=pb.VerifyLoginTokenReq(login_token=ticket)
@@ -23,7 +23,7 @@ def login(port,ticket):
     auth=pb.VerifyLoginTokenRsp.FromString(b)
     if auth.status!=pb.StatusCode_OK:
         c.close();return None
-    c.sendall(encode(MsgId.PlayerLoginReq,pb.PlayerLoginReq().SerializeToString(),2))
+    c.sendall(encode(MsgId.PlayerLoginReq,pb.PlayerLoginReq(resource_version=resource_version).SerializeToString(),2))
     h,b=receive(c);assert h.msg_id==MsgId.PlayerLoginRsp and h.packet_id==2
     info=pb.PlayerLoginRsp.FromString(b)
     assert info.status==pb.StatusCode_OK and info.player_name.strip() and info.region_name=="private"

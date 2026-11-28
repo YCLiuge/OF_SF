@@ -46,7 +46,7 @@ def run(root, resources):
             item, _ = outcome(settings["pools"][0], 0, 400, lambda size: next(values))
             results[item] += 1
         assert sorted(results.values()) == [80, 100, 600, 9220]
-        sock, _, pid = login(service.port, identity.issue_ticket(*profile))
+        sock, _, pid = login(service.port, identity.issue_ticket(*profile), resource_version="2026-11-25-19-54-41")
         with sock:
             join(sock)
             assert [r.gacha_id for r in call(sock, "GachaList", 4).gachas] == [p["id"] for p in settings["pools"]] + [9000,9001]
@@ -102,7 +102,7 @@ def run(root, resources):
                     pass
         service.stop()
         service.start()
-        sock, _, _ = login(service.port, identity.issue_ticket(*profile))
+        sock, _, _ = login(service.port, identity.issue_ticket(*profile), resource_version="2026-11-25-19-54-41")
         with sock:
             join(sock)
             assert balance(104) == 3 and balance(110) == 19 and db.get_total_gacha_num(pid, 2000) == 1
@@ -335,7 +335,7 @@ def all_banners(root, resources):
     service = LocalGameService(identity, root, resources, port=0)
     service.start()
     try:
-        sock, _, pid = login(service.port, identity.issue_ticket(*profile))
+        sock, _, pid = login(service.port, identity.issue_ticket(*profile), resource_version="2026-11-25-19-54-41")
         with sock:
             join(sock)
             defined = res.index("Gacha", "info")
@@ -370,6 +370,74 @@ def all_banners(root, resources):
         service.stop()
 
 
+def edition_compatibility(root, resources):
+    import json
+    import sqlite3
+    from realm_gacha import expanded_banner, upgrade
+    stock = defaults()["pools"]
+    old = [p for p in stock if not expanded_banner(p["id"])]
+    assert len(old) == 49 and len(stock) == 113
+    custom = [dict(p, enabled=False, pity=12) for p in old if p["id"] == 3000]
+    for previous in (old,custom,[]):
+        conn = sqlite3.connect(":memory:")
+        try:
+            upgrade(conn)
+            conn.execute("DELETE FROM gacha_config_revisions WHERE version=3")
+            conn.execute("INSERT INTO private_gacha_config VALUES(1,?)", (json.dumps({"pools":previous}),))
+            upgrade(conn)
+            upgrade(conn)
+            migrated = json.loads(conn.execute("SELECT settings FROM private_gacha_config WHERE id=1").fetchone()[0])["pools"]
+            assert [p for p in migrated if not expanded_banner(p["id"])] == previous
+            if previous == old:
+                assert {p["id"] for p in migrated} == {p["id"] for p in stock}
+            elif previous:
+                assert migrated == previous + [dict(custom[0],id=903000)]
+            else:
+                assert not migrated
+        finally:
+            conn.close()
+
+    identity = LocalIdentity(root/"identity.sqlite3")
+    profile = identity.create_profile("复刻卡面验收")
+    host = LocalGameService(identity, root, resources, port=0)
+    host.start()
+    try:
+        legacy, _, _ = login(host.port, identity.issue_ticket(*profile), resource_version="2026-11-07-22-39-35")
+        with legacy:
+            join(legacy)
+            listed = call(legacy, "GachaList", 800)
+            assert {p.gacha_id for p in listed.gachas} == {p["id"] for p in old} | {9000, 9001}
+        sock, _, _ = login(host.port, identity.issue_ticket(*profile))
+        with sock:
+            join(sock)
+            def ids(packet):
+                return {p.gacha_id for p in call(sock,"GachaList",packet).gachas}
+            assert len(ids(800)) == 115
+            result = call(sock,"Gacha",801,gacha_id=3020,is_single=False)
+            assert result.status==pb.StatusCode_OK and result.info.gacha_id==203020 and len(result.items)==10
+            for alias in (3020,203020):
+                records=call(sock,"GachaRecord",802+alias,gacha_id=alias,page=1)
+                assert records.status==pb.StatusCode_OK and records.total_page==2 and len(records.records)==5
+            assert call(sock,"GachaRecord",811,gacha_id=903000,page=1).status==pb.StatusCode_OK
+            assert len(ids(812)) == 115
+            for offset,(pool,featured) in enumerate(((903000,401004),(903004,301004),(903006,302003),(905000,10040))):
+                # Exercise the real guarantee, charge, grant, result and history in one transaction.
+                settings = defaults()
+                next(p for p in settings["pools"] if p["id"]==pool)["pity"]=1
+                configure(root,settings)
+                result=call(sock,"Gacha",820+offset,gacha_id=pool,is_single=True)
+                assert result.status==pb.StatusCode_OK and result.items[0].main_item.item_id==featured
+            configure(root,{"pools":[]})
+            assert call(sock,"Gacha",840,gacha_id=3020,is_single=True).status==pb.StatusCode_BAD_REQ
+            assert call(sock,"Gacha",841,gacha_id=903000,is_single=True).status==pb.StatusCode_BAD_REQ
+            for key in (1000,2000,4000,5000):
+                configure(root,enable_featured=key)
+            assert ids(842)=={1000,2000,4000,5000}
+    finally:
+        host.stop()
+    print("PASS 51-card legacy catalog, hotfix discovery, March rerun card alias, Aurele/Hikari/Lily/poster rewards, migration and disabled pools.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--resources", required=True, type=Path)
@@ -385,3 +453,6 @@ if __name__ == "__main__":
 
     with TemporaryDirectory() as temp:
         all_banners(Path(temp), args.resources)
+
+    with TemporaryDirectory() as temp:
+        edition_compatibility(Path(temp), args.resources)

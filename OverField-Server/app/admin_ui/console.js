@@ -1,3 +1,6 @@
+import {gachaPage} from './gacha.js';
+import {resultsFor} from './results.js';
+import {enhanceFields} from './form_fields.js';
 import {editorFor} from './editors.js';
 import {composeMail} from './mail_editor.js';
 import {rewardPicker} from './reward_picker.js';
@@ -38,14 +41,23 @@ function displayName(name) {
   return (groups[group] || group) + ' · ' + (actions[action] || action);
 }
 async function request(path, method = 'GET', payload, options = {}) {
+  const epoch = session;
   const headers = {Authorization: 'Bearer ' + token};
   if (options.tag) headers['If-Match'] = options.tag;
   if (payload !== undefined) headers['Content-Type'] = 'application/json';
-  const response = await fetch(path, {method, headers, body: payload, credentials:'omit', cache:'no-store'});
-  const body = await response.json();
+  const init = {method, headers, body: payload, credentials:'omit', cache:'no-store'};
+  let response, body;
+  for (const delay of [0,150,400,750]) {
+    if (delay) await new Promise(resolve=>setTimeout(resolve,delay));
+    if(epoch!==session) throw Error('管理会话已结束。');
+    response = await fetch(path,init);
+    body = await response.json();
+    if(method!=='GET' || body.error?.code!=='state_busy') break;
+  }
   if (!response.ok || !body.ok) {
     const raw=body.error?.message;
     const friendly={
+      'Server state is in use. Stop the server and retry.':'区服正在处理另一项操作，请稍后重试。',
       'Cannot open before the native calendar':'活动开始时间不能早于原排期。',
       'Cannot close after the native calendar':'活动结束时间不能晚于原排期。',
       'Activity window is empty':'请检查活动的起止时间。',
@@ -99,6 +111,7 @@ function navigation() {
   const sections = new Map();
   const categoryOf = name=>Object.keys(categories).find(key=>categories[key].includes(name.split('.')[0])) || '其他操作';
   for (const name of Object.keys(operations).sort()) {
+    if (name==='rules.catalog') continue;
     if (!(name + displayName(name) + categoryOf(name) + operations[name].description).toLowerCase().includes(term)) continue;
     const key = categoryOf(name); let group = sections.get(key);
     if (!group) {
@@ -143,7 +156,7 @@ function select(name,force=false) {
   if (busy && !force) return;
   const version=++selectionVersion; editor=null; draftDirty=false; delivered=false; picker=null;
   document.querySelector('article').hidden=false;
-  el('shortcuts').hidden=true;
+  el('shortcuts').hidden=true;overview.hidden=true;
   selected = name;el('fields').inert=false;
   for(const b of el('quick').children)b.setAttribute('aria-current',String(b.dataset.route===name));
   const op = operations[name], schema = op.inputSchema;
@@ -151,7 +164,7 @@ function select(name,force=false) {
   el('description').textContent = op.availability === 'stopped' ? '请在正常停服后通过服主 CLI 执行此操作。' : (/[\u3400-\u9fff]/.test(op.description) ? op.description : '');
   el('mode').textContent = op.readOnly ? '只读' : op.availability === 'stopped' ? '停服操作' : '更改区服';
   el('fields').replaceChildren(...Object.entries(schema.properties || {}).filter(([key])=>key!=='include_names').map(([key,spec]) => field(key,spec,schema.required?.includes(key) || false)));
-  el('schema').textContent = (op.readOnly ? 'GET ' : 'POST ') + '/admin/v1/operations/' + name + '\n\n' + JSON.stringify(schema,null,2);
+
   el('output').hidden = true; el('result').textContent = '';
   el('execute').textContent = op.readOnly ? '查询' : op.availability === 'stopped' ? '请通过 CLI 执行' : displayName(name);
   el('execute').disabled = busy || op.availability === 'stopped'; message(''); navigation();
@@ -174,10 +187,46 @@ function select(name,force=false) {
       expires.labels[0].textContent='到期时间（北京时间，可留空）';
     }
   }
+  if (name.startsWith('gacha.')) {openGacha(name,version);return;}
   if (forms.has(name)) openEditor(name,version);
+  else if(op.availability==='stopped'){
+    el('fields').replaceChildren(node('p', name==='state.restore'?'停止区服后，可在服务器的存档工具中选择备份并还原。':name==='state.backup'?'停止区服后，可在服务器的存档工具中创建备份。':'此配置需要离线修改。可在「预设玩法参数」提前安排支持的项目。'));
+    el('execute').hidden=true;
+  }else{
+    if(name==='rewards.catalog')el('field-channel').value='mail';
+    Promise.resolve(enhanceFields(name,el('fields'),request,mailForm)).catch(error=>{if(version===selectionVersion)message(error.message);});
+    if(op.readOnly && (!schema.required?.length || name==='rewards.catalog')) queueMicrotask(()=>{
+      if(version===selectionVersion)el('operation').requestSubmit();
+    });
+  }
   if (name==='capacity.set') {
     const limit=el('field-limit'); limit.type='number'; limit.min='1'; limit.max='512';limit.step='1';
     limit.labels[0].textContent='最大同时连接数（1–512）'; if(overview.currentLimit)limit.value=overview.currentLimit;
+  }
+}
+async function openGacha(name,version,feedback='') {
+  const mode=name.split('.')[1],save=el('execute'),fields=el('fields');
+  fields.replaceChildren(node('p','正在读取卡池…'));
+  save.hidden=mode==='catalog'||mode==='get';save.disabled=true;
+  save.textContent=mode==='enable'?'开启选中的卡池':'保存配置';
+  try {
+    const [catalog,snapshot]=await Promise.all([request('/admin/v1/operations/gacha.catalog'),
+      request('/admin/v1/operations/gacha.get','GET',undefined,{snapshot:true})]);
+    if(version!==selectionVersion)return;
+    const entry=gachaPage(mode,catalog,snapshot.data,(allowed=true)=>{if(editor){
+        editor.dirty=allowed;
+        const feedback=el('editor-feedback');
+        if(feedback)feedback.textContent=allowed?'有未保存的修改':'';
+      }
+      save.disabled=!allowed;});
+    const hint=node('p',feedback);hint.id='editor-feedback';hint.setAttribute('role','status');
+    editor={...entry,tag:snapshot.tag,dirty:false};
+    const reload=node('button','重新读取卡池');reload.type='button';reload.className='quiet light';reload.onclick=()=>select(name);
+    fields.replaceChildren(entry.host,reload,hint);
+  } catch(error) {
+    if(version!==selectionVersion)return;
+    const retry=node('button','重试');retry.type='button';retry.onclick=()=>select(name,true);
+    fields.replaceChildren(node('p',error.message),retry);
   }
 }
 async function openEditor(name,version) {
@@ -186,7 +235,7 @@ async function openEditor(name,version) {
   try {
     const route='/admin/v1/operations/'+group+'.';
     const [snapshot,catalog]=await Promise.all([request(route+'get','GET',undefined,{snapshot:true}),
-      group==='rules'?null:request(route+'catalog')]);
+      request(route+'catalog')]);
     if (selectionVersion!==version) return;
     if (!snapshot.tag) throw Error('当前服务端未提供配置版本，请更新管理台服务。');
     const entry=editorFor(group,operations[name].inputSchema,catalog,snapshot.data,()=>{
@@ -270,13 +319,15 @@ function collect() {
   return {body:'{' + encoded.join(',') + '}',query:query.toString()};
 }
 el('fields').addEventListener('input', event=>{
+  if (operations[selected]?.readOnly && event.target.name && !['before','offset'].includes(event.target.name))
+    for(const key of ['before','offset']) {const field=el('field-'+key);if(field)field.value='';}
   if(picker && (event.target.name || event.target===picker.host))draftDirty=true;
 });
 function home(){
   if(busy || ((editor?.dirty || draftDirty) && !window.confirm('离开将放弃未保存的修改。继续？'))) return;
   selected='';editor=null;picker=null;mailForm=null;draftDirty=false;delivered=false;++selectionVersion;
   document.querySelector('article').hidden=true;el('fields').replaceChildren();
-  el('shortcuts').hidden=false;navigation();message('');
+  el('shortcuts').hidden=false;overview.hidden=false;navigation();message('');
 }
 el('home').onclick=home;
 el('login').onsubmit = async event => {
@@ -287,7 +338,7 @@ el('login').onsubmit = async event => {
     operations = spec.operations; el('token').value = ''; el('connect').hidden = true;
     el('workspace').hidden = false; el('logout').hidden = false;
     const quick=el('quick');quick.replaceChildren();
-    for (const key of ['mail.send','codes.issue','events.set','accounts.find','notice.publish','capacity.set']) {
+    for (const key of ['mail.send','codes.issue','gacha.enable','events.set','accounts.find','notice.publish','capacity.set']) {
       if (!operations[key])continue;
       const btn=node('button',displayName(key));btn.type='button';btn.dataset.route=key;
       btn.onclick=()=>select(key);quick.append(btn);
@@ -298,7 +349,7 @@ el('login').onsubmit = async event => {
 el('logout').onclick = () => {
   ++session; ++selectionVersion; editor=null; picker=mailForm=null;draftDirty=delivered=false; token = ''; operations = {}; selected = ''; busy = false;
   el('filter').value = ''; el('token').value = '';
-  for (const id of ['schema','result','fields','operations']) el(id).replaceChildren();
+  for (const id of ['route','result','fields','operations']) el(id).replaceChildren();
   overview.reset(); el('workspace').hidden = true; el('logout').hidden = true;
   el('connect').hidden = false; el('token').focus(); message('');
 };
@@ -307,7 +358,7 @@ el('operation').onsubmit = async event => {
   event.preventDefault(); const name = selected, epoch = session, op = operations[name];
   if (delivered || busy || !op || op.availability === 'stopped') return;
   const version=selectionVersion;
-  if(forms.has(name)) {
+  if(forms.has(name) || name==='gacha.enable') {
     const target=editor;
     if(!target?.dirty)return;
     try {
@@ -315,12 +366,14 @@ el('operation').onsubmit = async event => {
       if (name==='rules.schedule' && Object.keys(body).length===0) {
         target.dirty=false;el('execute').disabled=true;el('editor-feedback').textContent='没有待保存的修改';return;
       }
+      if(name==='gacha.enable' && !window.confirm('确认开启选中的卡池？'))return;
+      el('editor-feedback').textContent='正在保存…';
       busy=true;el('execute').disabled=true;el('fields').inert=true;
       const route='/admin/v1/operations/'+name;
-      await request(route,'POST',JSON.stringify(body),{tag:target.tag});
+      await request(route,'POST',JSON.stringify(body), name==='gacha.enable'?{}:{tag:target.tag});
       target.dirty=false;
       if(version!==selectionVersion)return;
-      await openEditor(name,version);
+      if(name.startsWith('gacha.'))await openGacha(name,version);else await openEditor(name,version);
       if(version===selectionVersion && el('editor-feedback'))el('editor-feedback').textContent='已保存，并已从区服重新读取。';
     } catch(error) {
       if(version===selectionVersion) el('editor-feedback').textContent=error.message;
@@ -348,6 +401,8 @@ el('operation').onsubmit = async event => {
     busy = true; el('execute').disabled = true; message('');
     const path = '/admin/v1/operations/' + name + (op.readOnly && query ? '?' + query : '');
     const result = await request(path, op.readOnly ? 'GET' : 'POST', op.readOnly ? undefined : body);
+    let catalog=null;
+    if(['events.get','blessings.get','plaza.get'].includes(name) || (name==='rules.get' && result.dungeon_star_reward_id)) catalog=await request('/admin/v1/operations/'+name.replace('.get','.catalog'));
     if (name==='capacity.set' && epoch===session)await overview.refresh();
     if (epoch === session && version===selectionVersion) {el('output').hidden = false; if(name==='accounts.find')accountResults(result);
       else if(name==='mail.send'||name==='codes.issue'){
@@ -358,7 +413,28 @@ el('operation').onsubmit = async event => {
       }
       else if(name==='mail.list'||name==='codes.list') rewardHistory(name,result);
       else if(name==='accounts.reset'){select('accounts.find',true);message('密码已重置，玩家需使用新密码登录。');}
-      else el('result').textContent = JSON.stringify(result,null,2);}
-  } catch(error) { if (epoch === session) message(error.message); }
+      else el('result').replaceChildren(resultsFor(name,result,catalog,(route,row,key)=>{
+        select(route);
+        if(selected===route)el('field-'+key)?.formChoose?.(row);
+      }));
+      const resultRows=({'mail.list':'batches','reports.list':'reports','photos.list':'photos','maintenance.list':'notices'})[name];
+      function pageButton(title, field, value) {
+        const button=node('button',title); button.type='button';button.className='quiet light';
+        button.onclick=()=>{field.value=value;el('operation').requestSubmit();};
+        el('result').append(button);
+      }
+      if(resultRows){
+        const rows=result[resultRows], last=rows.at(-1), before=el('field-before');
+        if(before?.value)pageButton('返回最新记录',before,'');
+        const limit=Number(el('field-limit')?.value || (name==='mail.list'?50:30));
+        if(before && rows.length===limit)pageButton('查看更早记录',before,String(last.code_text || last.id || last.code));
+      }
+      if(name==='rewards.catalog'){
+        const offset=el('field-offset'), start=Number(offset.value), limit=result.page_size;
+        if(start>0)pageButton('上一页',offset,Math.max(0,start-limit));
+        if(start+limit<result.total)pageButton('下一页',offset,start+limit);
+      }
+    }
+  } catch(error) { if (epoch === session && version===selectionVersion) message(error.message); }
   finally { if (epoch === session) {busy = false; el('execute').disabled = delivered || operations[selected]?.availability === 'stopped' || (forms.has(selected) && !editor?.dirty);} }
 };

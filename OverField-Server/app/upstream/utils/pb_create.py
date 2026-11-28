@@ -47,7 +47,6 @@ def make_ScenePlayer(session):
     player.phone_case=phone_case(session.player_id)
     from private_pets import update_scene
     update_scene(session)
-    player.ClearField("team")
     player.ClearField("food_buff_ids")
     player.ClearField("global_buff_ids")
 
@@ -57,7 +56,16 @@ def make_ScenePlayer(session):
     char_ids, = db.get_players_info(session.player_id, "team")
     update_birthday(session)
 
-    make_SceneTeam(session.player_id, char_ids, player.team)
+    # Appearance changes and photo uploads also refresh this live actor. Keep
+    # each party member at the position other clients last saw in this scene.
+    team = make_SceneTeam(session.player_id, char_ids)
+    old_members = {member.char_id: member for _, member in player.team.ListFields() if member.char_id}
+    for _, member in team.ListFields():
+        previous = old_members.get(member.char_id)
+        if previous is not None:
+            member.pos.CopyFrom(previous.pos)
+            member.rot.CopyFrom(previous.rot)
+    player.team.CopyFrom(team)
 
 
 def fill_scene_equipment(player_id, character, scene_character):

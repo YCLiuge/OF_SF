@@ -105,20 +105,26 @@ def rebuild(repo, base, output):
                 if not name.startswith("runtime-") and link is None:
                     checksums[name] = hashlib.sha256(data).hexdigest()
 
+            archived = set()
             seen = set()
             for name, link, read in archive_inputs(base, linux):
                 if name not in expected:
                     continue
-                if name in seen:
+                if name in archived:
                     raise ValueError(f"Duplicate portable input {name}")
-                seen.add(name)
+                archived.add(name)
                 record = expected[name]
                 if link != record.get("link"):
                     raise ValueError(f"Unexpected symbolic link {name}")
                 data = None if link is not None else read()
                 if link is None and (data is None or hashlib.sha256(data).hexdigest() != record["sha256"]):
+                    if name.startswith("resources/") and link is None:
+                        # Older base archives can predate a tracked resource revision.
+                        # Revisit through the hash-checked local input pass below.
+                        continue
                     raise ValueError(f"File is missing or has changed: {name}")
                 add(name, data, record["mode"], link)
+                seen.add(name)
             # An older platform base can lack a newly supported game table. Include
             # only local resource files identified by the checked-in digest manifest.
             for name in sorted(expected.keys() - seen):
