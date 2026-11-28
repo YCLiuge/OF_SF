@@ -296,9 +296,113 @@ def run(root, resources):
           "transaction rollback, reset/reconnect and graceful stop.")
 
 
+def late_join(root, resources):
+    identity = LocalIdentity(root / "identity.sqlite3")
+    profiles = [identity.create_profile(name) for name in ("先到队长", "后到队长")]
+    host = LocalGameService(identity, root, resources, port=0)
+    pos = pb.Vector3(x=16055, y=3702, z=-4223, decimal_places=3)
+    rot = pb.Vector3(x=-1, y=80, z=22, decimal_places=2)
+
+    def connect(index):
+        sock, _, uid = login(host.port, identity.issue_ticket(*profiles[index]))
+        _, scene = join_after_intro(sock)
+        return sock, uid, scene.data
+
+    def travel(sock, scene, channel):
+        assert call(sock, "ChangeSceneChannel", scene_id=scene, channel_label=channel).status == pb.StatusCode_OK
+        return next_msg(sock, MsgId.SceneDataNotice, pb.SceneDataNotice).data
+
+    def actor(scene, uid):
+        matches = [p for p in scene.players if p.player_id == uid]
+        assert len(matches) == 1, (uid, [p.player_id for p in scene.players])
+        return matches[0]
+
+    def has_pose(peer):
+        assert peer.team.char1.pos == pos and peer.team.char1.rot == rot, (peer.team.char1.pos, peer.team.char1.rot)
+        assert peer.team.char1.char_id == 101001 and peer.phone_case == 7000
+
+    def event(sock, uid, kind):
+        for _ in range(32):
+            notice = next_msg(sock, MsgId.ServerSceneSyncDataNotice, pb.ServerSceneSyncDataNotice)
+            for participant in notice.data:
+                for action in participant.server_data:
+                    if (participant.player_id, action.action_type) == (uid, kind):
+                        return action
+        raise AssertionError((uid, kind))
+
+    host.start()
+    try:
+        with ExitStack() as stack:
+            a, aid, _ = connect(0)
+            stack.enter_context(a)
+            sample = pb.PlayerSceneRecordReq()
+            lead = sample.data.char_recorder_data_lst.add(char_id=101001)
+            lead.data_lst.add(sync_type=1).pos.x = 3
+            lead.data_lst.add(sync_type=1).pos.CopyFrom(pos)
+            lead.data_lst.add(sync_type=1).rot.CopyFrom(rot)
+            lead.data_lst.add(sync_type=2).pos.x = 7
+            lead.data_lst.add(sync_type=1, is_static=True).pos.CopyFrom(pb.Vector3())
+            a.sendall(encode(MsgId.PlayerSceneRecordReq, sample.SerializeToString(), 40))
+            assert call(a, "ChangePhoneCase", phone_case=7000).status == pb.StatusCode_OK
+
+            b, bid, arrival = connect(1)
+            stack.enter_context(b)
+            assert {p.player_id for p in arrival.players} == {aid, bid}
+            has_pose(actor(arrival, aid))
+            assert event(a, bid, pb.SceneActionType_ENTER).player.player_id == bid
+            assert call(a, "UpdatePlayerAppearance", appearance={}).status == pb.StatusCode_OK
+            has_pose(event(b, aid, pb.SceneActionType_UPDATE_APPEARANCE).player)
+            movement(b, pos=361)
+            fence(b)
+            assert (bid, 361) in [(p, rec.char_recorder_data_lst[0].pos.x) for p, rec in fence(a)[0]]
+            # The outer position wins over inner motion; rotation falls back
+            # independently. Live peers must still receive the original samples.
+            lead.pos.CopyFrom(pos)
+            lead.data_lst[1].pos.x = 123
+            a.sendall(encode(MsgId.PlayerSceneRecordReq, sample.SerializeToString(), 41))
+            fence(a)
+            assert (aid, sample.data) in fence(b)[0]
+            idle = pb.PlayerSceneRecordReq()
+            rec = idle.data.char_recorder_data_lst.add(char_id=101001)
+            rec.data_lst.add(sync_type=1, is_static=True).rot.CopyFrom(pb.Vector3())
+            rec.data_lst.add(sync_type=2).pos.x = 765
+            a.sendall(encode(MsgId.PlayerSceneRecordReq, idle.SerializeToString(), 42))
+            fence(a)
+            for scene, channel in ((9999, 2), (1, 1)):
+                assert [p.player_id for p in travel(b, scene, channel).players] == [bid]
+                fence(a)
+                movement(b, pos=501)
+                fence(b)
+                assert not fence(a)[0]
+            back = travel(b, 9999, 1)
+            assert {p.player_id for p in back.players} == {aid, bid}
+            has_pose(actor(back, aid))
+            assert event(a, bid, pb.SceneActionType_ENTER).player.player_id == bid
+            b.close()
+            event(a, bid, pb.SceneActionType_LEAVE)
+            b, same, restored = connect(1)
+            stack.enter_context(b)
+            assert bid == same and {p.player_id for p in restored.players} == {aid, bid}
+            has_pose(actor(restored, aid))
+            assert event(a, bid, pb.SceneActionType_ENTER).player.player_id == bid
+            a.close()
+            event(b, aid, pb.SceneActionType_LEAVE)
+            a, same, restored = connect(0)
+            stack.enter_context(a)
+            assert same == aid
+            has_pose(actor(restored, aid))
+            has_pose(event(b, aid, pb.SceneActionType_ENTER).player)
+    finally:
+        host.stop()
+    print("PASS two-way native presence after appearance refresh, full position and orientation, "
+          "movement, channel/scene isolation and reconnect.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--resources", required=True, type=Path)
     args = parser.parse_args()
     with TemporaryDirectory() as temp:
         run(Path(temp), args.resources)
+    with TemporaryDirectory() as temp:
+        late_join(Path(temp), args.resources)
